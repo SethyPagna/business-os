@@ -33,8 +33,8 @@ import { dismissPortalAnnouncement, readDismissedPortalAnnouncement, resolvePort
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
-import { buildPortalContactFloat, buildPortalSocialFromConfig, flattenPortalSocialGroups, normalizePortalExternalUrl as normalizeExternalUrl, portalFloatClearanceRem } from './portalSocialLinks.ts'
-import { PORTAL_SOCIAL_ICONS, PortalContactFloat, PortalSocialText } from './PortalSocialRow.tsx'
+import { buildPortalContactEntries, buildPortalSocialFromConfig, normalizePortalExternalUrl as normalizeExternalUrl, portalContactFooterLinks } from './portalSocialLinks.ts'
+import PortalContactMenu, { type PortalContactAnchor } from './PortalContactMenu.tsx'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
@@ -543,18 +543,10 @@ export default function PublicCatalogPage() {
   // never the staff app, so arriving there opens this drawer.
   const [accountOpen, setAccountOpen] = useState(() => typeof window !== 'undefined' && isStorefrontSignInPath(window.location?.pathname))
   const [wishlistOpen, setWishlistOpen] = useState(false)
-  // Two independent toggles, not one shared boolean: the drawer's inline
-  // "contact us" shortcut and the standalone contact FAB used to both read
-  // and write the same `contactOpen` state. That meant tapping the
-  // in-drawer shortcut also flipped on the standalone popover -- driven by
-  // the same boolean, it rendered right along with (in front of, at a
-  // higher z-index) the bucket drawer, so both appeared to be "open" at
-  // once. Keeping the drawer's shortcut on its own state removes that
-  // cross-talk entirely.
-  const [contactOpen, setContactOpen] = useState(false)
-  // 2 Nov (owner): the Contact us floating buttons are brand-colour chat links shown from the first paint (PortalContactFloat).
-  // They replace the 25 Sep minimized-by-default icon: a stub that has to be expanded first is not one tap to the chat.
-  const [bucketContactOpen, setBucketContactOpen] = useState(false)
+  // The Contact menu opened from a button that belongs to another part of the page (the FAQ and About "Contact" buttons call openContactSheet with
+  // no trigger of their own): it opens beside whatever was pressed last, and focus goes back there when it closes.
+  const [contactAnchor, setContactAnchor] = useState<PortalContactAnchor | null>(null)
+  const lastPressRef = useRef<HTMLElement | null>(null)
   const [bucketCopyState, setBucketCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [scrollButtonsVisible, setScrollButtonsVisible] = useState(false)
   // Bumped by the pull-to-refresh gesture and by Retry to run the load effect
@@ -609,7 +601,7 @@ export default function PublicCatalogPage() {
   // editable preview, CatalogPage.tsx, which tracks its own scroll
   // position). Same 220px threshold as that preview.
   //
-  // NOTE on the `!bucketOpen && !contactOpen` guard at the call site below:
+  // NOTE on the `!bucketOpen && !contactAnchor` guard at the call site below:
   // these buttons render at z-[70] (bottom-left), which is intentionally
   // *above* the bucket drawer (z-[60]) and contact popover (z-[65]) so they
   // don't get trapped underneath either overlay. But that same ordering
@@ -898,20 +890,26 @@ export default function PublicCatalogPage() {
   const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
   const mapEmbedUrl = displayConfig.showGoogleMap && activeTab === 'about' ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '') : ''
-  // One builder for the header row, the contact sheets, About and the footer: the
-  // visible text is the owner's label, else the real account handle (never the
-  // platform name). Contact channels are direct-message links, separate from the
-  // page links, with the same fallbacks the shop has always applied.
-  const socialBuilt = buildPortalSocialFromConfig(displayConfig, pageLanguage)
-  const socialGroups = socialBuilt.social
-  const socialLinks = flattenPortalSocialGroups(socialGroups)
-  const contactChannels = flattenPortalSocialGroups(socialBuilt.contact)
   const businessFacts = [
     { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: displayConfig.businessPhone ? `tel:${displayConfig.businessPhone}` : '', icon: Phone },
     { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: displayConfig.businessEmail ? `mailto:${displayConfig.businessEmail}` : '', icon: Mail },
     { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink), icon: MapPin },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address') || null
+  // One builder for the header's Contact menu, About and the footer: the visible text is the owner's label, else the real account name (never the
+  // platform word when a name is known, never a leading "@"). Chat channels and page links are one list, with the same names everywhere.
+  const socialBuilt = buildPortalSocialFromConfig(displayConfig, pageLanguage)
+  const contactEntries = buildPortalContactEntries({
+    social: socialBuilt.social,
+    contact: socialBuilt.contact,
+    phone: businessFacts.find((item) => item.key === 'phone')?.value,
+    email: businessFacts.find((item) => item.key === 'email')?.value,
+    mapHref: addressFact?.href,
+    address: addressFact?.value,
+    shopName: displayConfig.businessName || displayConfig.title,
+    language: pageLanguage,
+  })
+  const socialLinks = portalContactFooterLinks(contactEntries)
   const assistantCategoryOptions = useMemo(() => Array.from(new Set(products.map((item) => String(item.category || '').trim()).filter(Boolean))).slice(0, 40), [products])
 
   const toggleFilterValue = (values: string[], setter: Dispatch<SetStateAction<string[]>>, value: string) => {
@@ -1093,8 +1091,15 @@ export default function PublicCatalogPage() {
       })
   }
 
-  // The FAQ's Contact us button opens the list of every channel (names included) beside the floating buttons.
-  const openContactSheet = () => setContactOpen(true)
+  // The FAQ and About Contact buttons open the same menu as the header's, beside the button that was pressed.
+  const openContactSheet = () => {
+    const opener = lastPressRef.current
+    const rect = opener?.isConnected ? opener.getBoundingClientRect() : null
+    setContactAnchor(rect
+      ? { top: rect.top, left: rect.left, width: rect.width, height: rect.height, opener }
+      : { top: Math.max(0, window.innerHeight - 96), left: Math.round(window.innerWidth / 2), width: 1, height: 1, opener: null })
+  }
+  const closeContactSheet = useCallback(() => setContactAnchor(null), [])
 
   const storefrontSkeleton = <PublicStorefrontSkeleton label={copy('loadingPortal', 'Loading website...')} />
   const loadFailedText = copy('portalLoadFailed', "We couldn't open the shop. Check your connection and try again.", 'យើងមិនអាចបើកហាងបានទេ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត ហើយព្យាយាមម្ដងទៀត។')
@@ -1203,7 +1208,7 @@ export default function PublicCatalogPage() {
         publicFaqItems={publicFaqItems}
         expandedFaqId={expandedFaqId}
         setExpandedFaqId={setExpandedFaqId}
-        onOpenContact={contactChannels.length > 0 ? openContactSheet : undefined}
+        onOpenContact={contactEntries.length > 0 ? openContactSheet : undefined}
         faqLoading={!realConfigInHand}
         openProductById={openProductById}
         brands={brands}
@@ -1257,7 +1262,6 @@ export default function PublicCatalogPage() {
 
   const closeBucketDrawer = () => {
     setBucketOpen(false)
-    setBucketContactOpen(false)
   }
 
   const bucketDrawer = bucketOpen ? (
@@ -1275,18 +1279,21 @@ export default function PublicCatalogPage() {
             <div className="text-xs text-slate-500 dark:text-neutral-400">{copy('bucketHint', 'No payment here -- just a shortlist to show our team.')}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {contactChannels.length > 0 ? (
-              <button
-                type="button"
-                className={`rounded-full p-1.5 transition ${bucketContactOpen ? 'bg-slate-100 text-slate-700 dark:bg-neutral-800 dark:text-neutral-100' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'}`}
-                onClick={() => setBucketContactOpen((current) => !current)}
-                aria-label={copy('contactUs', 'Contact us')}
-                title={copy('contactUs', 'Contact us')}
-                aria-expanded={bucketContactOpen}
-              >
-                <Headset className="h-5 w-5" />
-              </button>
-            ) : null}
+            <PortalContactMenu
+              entries={contactEntries}
+              copy={copy}
+              align="right"
+              trigger={(
+                <button
+                  type="button"
+                  className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+                  aria-label={copy('contactUs', 'Contact us')}
+                  title={copy('contactUs', 'Contact us')}
+                >
+                  <Headset className="h-5 w-5" />
+                </button>
+              )}
+            />
             <button
               type="button"
               className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
@@ -1297,45 +1304,6 @@ export default function PublicCatalogPage() {
             </button>
           </div>
         </div>
-
-        {/*
-          "Contact us" also has its own standalone floating icon (see
-          contactFab below, stacked above the bucket FAB) for a one-tap
-          path that doesn't require opening the list first. This header
-          shortcut is kept too, purely as a convenience for shoppers who
-          are already in the drawer. It used to toggle the very same state
-          as that standalone icon's popover, so opening it here silently
-          popped open the outside popover too (both being "open" at once,
-          stacked on top of the drawer). It now owns its own state
-          (bucketContactOpen) so the two are fully independent.
-        */}
-        {bucketContactOpen && contactChannels.length > 0 ? (
-          <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-3 dark:border-neutral-800 dark:bg-neutral-800/30">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
-              {copy('contactUs', 'Contact us')}
-            </div>
-            <div className="space-y-1">
-              {contactChannels.map((item) => {
-                const Icon = PORTAL_SOCIAL_ICONS[item.platform]
-                return (
-                  <a
-                    key={item.key}
-                    aria-label={item.accessibleName}
-                    href={item.value}
-                    target={item.value.startsWith('tel:') ? undefined : '_blank'}
-                    rel={item.value.startsWith('tel:') ? undefined : 'noreferrer'}
-                    className="group flex items-center gap-3 rounded-xl px-2 py-2 text-sm font-medium text-slate-700 transition hover:bg-white dark:text-neutral-200 dark:hover:bg-neutral-800/80"
-                  >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-slate-600 shadow-sm transition group-hover:text-amber-600 dark:bg-neutral-800 dark:text-neutral-300 dark:group-hover:text-amber-300">
-                      <Icon className="h-4 w-4 shrink-0" />
-                    </span>
-                    <PortalSocialText text={item.label} latin={item.latin} />
-                  </a>
-                )
-              })}
-            </div>
-          </div>
-        ) : null}
 
         <div className="px-5 pt-3">
           <PortalNoPaymentNotice copy={copy} />
@@ -1587,7 +1555,7 @@ export default function PublicCatalogPage() {
   // gallery/lightbox or either drawer/popover is open, so a pull-down
   // gesture inside one of those (which have their own pinch/pan/scroll
   // handling) is never mistaken for a page-level refresh pull.
-  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !bucketOpen && !contactOpen && !filePicker.open && !accountOpen && !wishlistOpen
+  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !bucketOpen && !contactAnchor && !filePicker.open && !accountOpen && !wishlistOpen
   const { pullDistance: publicPullDistance, refreshing: publicPullRefreshing } = usePullToRefresh(
     publicPageRootRef,
     () => {
@@ -1632,51 +1600,6 @@ export default function PublicCatalogPage() {
     </button>
   )
 
-  const contactFab = <PortalContactFloat channels={contactChannels} copy={copy} />
-
-  const contactPopover = contactOpen && contactChannels.length > 0 ? (
-    <div className="fixed inset-0 z-[65]" onClick={() => setContactOpen(false)}>
-      <div
-        className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(4.5rem+env(safe-area-inset-right))] w-64 max-w-[calc(100vw-6rem)] overflow-hidden rounded-2xl border border-slate-100 bg-white p-3 shadow-2xl dark:border-neutral-800 dark:bg-neutral-900"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
-            {copy('contactUs', 'Contact us')}
-          </div>
-          <button
-            type="button"
-            className="rounded-full p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-            onClick={() => setContactOpen(false)}
-            aria-label={copy('close', 'Close')}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="space-y-1">
-          {contactChannels.map((item) => {
-            const Icon = PORTAL_SOCIAL_ICONS[item.platform]
-            return (
-              <a
-                key={item.key}
-                aria-label={item.accessibleName}
-                href={item.value}
-                target={item.value.startsWith('tel:') ? undefined : '_blank'}
-                rel={item.value.startsWith('tel:') ? undefined : 'noreferrer'}
-                className="group flex items-center gap-3 rounded-xl px-2 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800/80"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 shadow-sm transition group-hover:text-amber-600 dark:bg-neutral-800 dark:text-neutral-300 dark:group-hover:text-amber-300">
-                  <Icon className="h-4 w-4 shrink-0" />
-                </span>
-                <PortalSocialText text={item.label} latin={item.latin} />
-              </a>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  ) : null
-
   return (
     <div
       ref={publicPageRootRef}
@@ -1688,14 +1611,16 @@ export default function PublicCatalogPage() {
       onDragStartCapture={(event) => {
         if (event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
       }}
+      onClickCapture={(event) => {
+        lastPressRef.current = event.target instanceof Element ? event.target.closest<HTMLElement>('button, a, [role="button"]') : null
+      }}
       onAuxClickCapture={(event) => {
         if (event.button === 1 && event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
       }}
     >
     {installBand}
     {bucketFab}
-    {contactFab}
-    {contactPopover}
+    {contactAnchor ? <PortalContactMenu entries={contactEntries} copy={copy} anchor={contactAnchor} onClose={closeContactSheet} /> : null}
     {bucketDrawer}
     {accountDrawer}
     {portalAccount.consentRenewal ? (
@@ -1733,6 +1658,7 @@ export default function PublicCatalogPage() {
       onOpenWishlist={() => setWishlistOpen(true)}
       wishlistCount={wishlist.count}
       accountSignedIn={!!portalAccount.account}
+      contactEntries={contactEntries}
       publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
       publicPortalNavPinned={false}
       publicPortalNavMetrics={{ left: 0, width: 0, height: 0 }}
@@ -1748,11 +1674,10 @@ export default function PublicCatalogPage() {
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}
       productDetailCautionDefault={displayConfig.productCautionDefault || ''}
       productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}
-      floatingStackClearanceRem={portalFloatClearanceRem(buildPortalContactFloat(contactChannels).length)}
       announcement={announcement}
       onDismissAnnouncement={dismissAnnouncement}
       onAnnouncementHeight={setAnnouncementHeight}
-      publicScrollButtonsVisible={scrollButtonsVisible && !bucketOpen && !contactOpen}
+      publicScrollButtonsVisible={scrollButtonsVisible && !bucketOpen && !contactAnchor}
       scrollPublicPortal={scrollPublicPortal}
       productGalleryView={productGalleryView}
       setProductGalleryView={setProductGalleryView}

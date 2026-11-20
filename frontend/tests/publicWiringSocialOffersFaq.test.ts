@@ -1,26 +1,14 @@
-// 6.0.875 public wiring: the social row (handles, own scrolling row, account picker),
-// the offers banner rendered once, the FAQ/AI props, the footer and the Khmer FAQ text.
+// 6.0.875 public wiring, reworked for the public-web overhaul (lane SHELL): the one Contact menu replaces the header's social chip
+// row and the floating chat buttons; plus the offers banner rendered once, the FAQ/AI props, the footer and the Khmer FAQ text.
 // Run: node tests/publicWiringSocialOffersFaq.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { createRequire } from 'node:module'
-import { transformSync } from 'esbuild'
-import { buildPortalSocialFromConfig, flattenPortalSocialGroups } from '../src/components/catalog/portalSocialLinks.ts'
+import { buildPortalContactEntries, buildPortalSocialFromConfig, portalContactFooterLinks } from '../src/components/catalog/portalSocialLinks.ts'
 import { FAQ_STARTER_TEXT } from '../src/components/catalog/faqStarterText.ts'
 import { localizePortalFaqText } from '../src/components/catalog/portalContentI18n.ts'
 import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
 
 const read = (rel: string) => fs.readFileSync(new URL(`../src/components/catalog/${rel}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-const require = createRequire(import.meta.url)
-const React = require('react')
-const render = require('react-dom/server').renderToStaticMarkup as (node: unknown) => string
-
-function compile(rel: string, resolve: (id: string) => unknown): Record<string, any> {
-  const code = transformSync(read(rel), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
-  const mod = { exports: {} as Record<string, any> }
-  new Function('require', 'module', 'exports', code)(resolve, mod, mod.exports)
-  return mod.exports
-}
 
 const failures: string[] = []
 function runCase(name: string, body: () => void): void {
@@ -33,30 +21,6 @@ function runCase(name: string, body: () => void): void {
   }
 }
 
-const Icon = () => null
-const brand = (() => {
-  const code = transformSync(fs.readFileSync(new URL('../src/components/shared/BrandIcons.tsx', import.meta.url), 'utf8'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
-  const mod = { exports: {} as Record<string, any> }
-  new Function('require', 'module', 'exports', code)((id: string) => require(id), mod, mod.exports)
-  return mod.exports
-})()
-const socialHandles = await import('../src/utils/socialHandles.ts') as Record<string, any>
-const portalSocialLinks = await import('../src/components/catalog/portalSocialLinks.ts') as Record<string, any>
-const scriptTypography = await import('../src/utils/scriptTypography.ts') as Record<string, any>
-const row = compile('PortalSocialRow.tsx', (id) => {
-  if (id === 'react' || id === 'react/jsx-runtime') return require(id)
-  if (id.startsWith('lucide-react/')) return { __esModule: true, default: Icon }
-  // The real menu opens on tap; the markup test only needs its trigger.
-  if (id.endsWith('/LazyPortalMenu')) return { __esModule: true, default: (props: { trigger: unknown }) => props.trigger }
-  if (id.endsWith('/BrandIcons.tsx')) return brand
-  if (id.endsWith('/scriptTypography.ts')) return scriptTypography
-  if (id.endsWith('/socialHandles.ts')) return socialHandles
-  if (id.endsWith('/portalSocialLinks.ts')) return portalSocialLinks
-  throw new Error(`PortalSocialRow.tsx imports ${id}, which this harness does not provide`)
-})
-const copy = (_key: string, fallback = '') => fallback
-const renderRow = (groups: unknown, language = 'en', mapLink = '') => render(React.createElement(row.default, { groups, pageLanguage: language, copy, mapLink }))
-
 const BASE_CONFIG = {
   showWebsite: true, showFacebook: true, showInstagram: true, showTelegram: true,
   // The Worker fills these default names into linkLabels; they must count as "no label".
@@ -64,76 +28,41 @@ const BASE_CONFIG = {
   links: { website: '', facebook: 'https://www.facebook.com/leangcosmetics', instagram: 'https://instagram.com/leang.cosmetics', telegram: '@leangshop' },
 }
 
-runCase('the header row shows each account handle, never the platform name', () => {
-  const { social } = buildPortalSocialFromConfig(BASE_CONFIG, 'en')
-  const markup = renderRow(social)
-  for (const handle of ['@leangcosmetics', '@leang.cosmetics', '@leangshop']) assert.ok(markup.includes(`>${handle}</span>`), `${handle} is not the visible text`)
-  for (const name of ['Facebook', 'Instagram', 'Telegram']) assert.ok(!markup.includes(`>${name}</span>`), `${name} is rendered as visible text`)
-  // The platform is still named for assistive technology.
-  assert.ok(markup.includes('aria-label="Facebook: @leangcosmetics"'))
-})
-
-runCase('an owner-typed label replaces the handle, and handles stay Latin and untranslated', () => {
-  const { social } = buildPortalSocialFromConfig({ ...BASE_CONFIG, linkLabels: { ...BASE_CONFIG.linkLabels, facebook: 'Leang Official' } }, 'en')
-  const markup = renderRow(social)
-  assert.ok(markup.includes('>Leang Official</span>'))
-  assert.match(markup, /translate="no" lang="en" dir="ltr" class="notranslate [^"]*">@leang\.cosmetics</)
-})
-
-runCase('the social links are their own row that scrolls sideways, with 44px targets', () => {
-  const markup = renderRow(buildPortalSocialFromConfig(BASE_CONFIG, 'en').social)
-  const nav = /<nav [^>]*data-portal-social-row="true"[^>]*>/.exec(markup)?.[0] || ''
-  assert.ok(nav, 'no dedicated social row')
-  assert.match(nav, /overflow-x-auto/)
-  assert.match(nav, /flex-nowrap/)
-  assert.match(nav, /min-h-11/)
-  const anchors = markup.match(/<a [^>]*>/g) || []
-  assert.equal(anchors.length, 3)
-  for (const anchor of anchors) assert.match(anchor, /min-h-11/, anchor)
+runCase('the header has no chip row and the page has no floating chat buttons: Contact is one menu', () => {
+  const row = read('PortalSocialRow.tsx')
+  assert.doesNotMatch(row, /export default|PortalContactFloat|data-portal-social-row|data-portal-contact-float/, 'the chip row and the float component are gone')
+  assert.match(row, /export const PORTAL_SOCIAL_ICONS/)
+  assert.match(row, /export function PortalSocialText/)
+  for (const file of ['CatalogPreviewSurface.tsx', 'PublicCatalogPage.tsx', 'CatalogPage.tsx']) {
+    assert.doesNotMatch(read(file), /PortalSocialRow|PortalContactFloat|contactFab|contactPopover|data-portal-social|data-portal-contact-float/, `${file} still mounts a chip row or a float`)
+  }
   const surface = read('CatalogPreviewSurface.tsx')
-  // The header is one row of name and actions now; the chip row under it is gone from the surface.
-  assert.doesNotMatch(surface, /<PortalSocialRow/)
-  assert.doesNotMatch(surface, /headerLinks/)
+  assert.match(surface, /<PortalContactMenu[\s\S]*?entries=\{contactEntries\}/, 'the header Contact button opens the menu')
+  assert.match(surface, /data-portal-contact-trigger=""/)
 })
 
-runCase('a platform with several accounts becomes one picker button; a single account stays a plain link', () => {
-  const { social } = buildPortalSocialFromConfig({
-    ...BASE_CONFIG,
-    links: { ...BASE_CONFIG.links, facebook: ['https://facebook.com/leangcosmetics', 'https://facebook.com/leangbeauty'] },
-  }, 'en')
-  const markup = renderRow(social)
-  assert.equal((markup.match(/data-portal-social-picker="facebook"/g) || []).length, 1)
-  assert.match(markup, /<button [^>]*aria-label="Choose account: Facebook"/)
-  assert.ok(markup.includes('>+1</span>'), 'the picker shows how many more accounts it holds')
-  assert.equal((markup.match(/data-portal-social-picker/g) || []).length, 1, 'Instagram and Telegram have one account each and stay links')
-  assert.ok(markup.includes('href="https://instagram.com/leang.cosmetics"'))
-})
-
-runCase('Khmer storefront: the picker and row names are Khmer-aware while handles stay Latin', () => {
-  const { social } = buildPortalSocialFromConfig({ ...BASE_CONFIG, links: { ...BASE_CONFIG.links, facebook: ['https://facebook.com/a1b2', 'https://facebook.com/c3d4'] } }, 'km')
-  const markup = renderRow(social, 'km')
-  assert.ok(markup.includes('ហ្វេសប៊ុក') || markup.includes('Facebook'), 'platform name present for assistive technology')
-  assert.ok(markup.includes('>@a1b2</span>'))
-})
-
-runCase('every page and sheet builds its social data through the one builder', () => {
+runCase('every page and sheet builds its contact data through the one builder', () => {
   for (const file of ['PublicCatalogPage.tsx', 'CatalogPage.tsx']) {
     const source = read(file)
     assert.match(source, /buildPortalSocialFromConfig\(/, file)
+    assert.match(source, /buildPortalContactEntries\(/, `${file} builds the Contact entries`)
+    assert.match(source, /const socialLinks = portalContactFooterLinks\(contactEntries\)/, `${file}: the footer takes its names from the same entries`)
     assert.doesNotMatch(source, /socialIconByKey|contactIconByKey|socialAccentByKey|const headerLinks/, `${file} still builds its own icon/header lists`)
     assert.doesNotMatch(source, /deriveMessengerLink|deriveWhatsappLink|resolveMessengerLink/, `${file} still normalises contact links itself`)
+    assert.match(source, /contactEntries=\{contactEntries\}/, `${file} hands the entries to the surface`)
   }
   const page = read('PublicCatalogPage.tsx')
-  assert.doesNotMatch(page, /socialGroups=\{socialGroups\}/, 'the surface takes no social groups: there is no chip row')
-  assert.match(page, /<PortalSocialText text=\{item\.label\} latin=\{item\.latin\} \/>/, 'contact sheets show the handle')
-  assert.equal((page.match(/<PortalSocialText /g) || []).length, 2, 'both contact lists (My List and the Contact button) render handles')
+  assert.doesNotMatch(page, /socialGroups=\{socialGroups\}/, 'the surface takes no social groups')
+  assert.doesNotMatch(page, /<PortalSocialText /, 'no second hand-built contact list: every list is the menu')
 })
 
-runCase('the footer and About list handles with an accessible platform name', () => {
-  const { social } = buildPortalSocialFromConfig(BASE_CONFIG, 'en')
-  const flat = flattenPortalSocialGroups(social)
-  assert.deepEqual(flat.map((link) => link.label), ['@leangcosmetics', '@leang.cosmetics', '@leangshop'])
-  assert.deepEqual(flat.map((link) => link.key), ['facebook-0', 'instagram-0', 'telegram-0'])
+runCase('the footer and About list the same account names as the menu, with an accessible platform name', () => {
+  const built = buildPortalSocialFromConfig(BASE_CONFIG, 'en')
+  const entries = buildPortalContactEntries({ social: built.social, contact: built.contact, shopName: 'Leang Cosmetics', language: 'en' })
+  const footer = portalContactFooterLinks(entries)
+  assert.deepEqual(footer.map((link) => link.label), entries.map((entry) => entry.label), 'one name per account on every surface')
+  assert.ok(footer.every((link) => !link.label.includes('@')), 'no "@" anywhere')
+  assert.deepEqual(footer.map((link) => link.label).sort(), ['leang.cosmetics', 'leangcosmetics', 'leangshop'])
   const legal = read('legal/LegalPages.tsx')
   assert.match(legal, /aria-label=\{link\.accessibleName\}/)
   assert.match(legal, /<PortalSocialText text=\{link\.label\}/)
@@ -169,10 +98,12 @@ runCase('the stale contrast pair names the real colour of the promotions link', 
 
 runCase('FAQ and AI props are wired from the storefront page, and the dead values are gone', () => {
   const page = read('PublicCatalogPage.tsx')
-  assert.match(page, /onOpenContact=\{contactChannels\.length > 0 \? openContactSheet : undefined\}/)
+  // The FAQ and About buttons keep calling the same prop (openContactSheet); it now opens the Contact menu beside the button pressed.
+  assert.match(page, /onOpenContact=\{contactEntries\.length > 0 \? openContactSheet : undefined\}/)
   assert.match(page, /faqLoading=\{!realConfigInHand\}/)
   assert.match(page, /<CatalogSecondaryTabs[\s\S]*?openProductById=\{openProductById\}/)
-  assert.match(page, /const openContactSheet = \(\) => setContactOpen\(true\)/, 'the FAQ Contact us button opens the list of every channel')
+  assert.match(page, /const openContactSheet = \(\) => \{[\s\S]*?setContactAnchor\(/, 'openContactSheet opens the menu')
+  assert.match(page, /<PortalContactMenu entries=\{contactEntries\} copy=\{copy\} anchor=\{contactAnchor\} onClose=\{closeContactSheet\} \/>/)
   assert.doesNotMatch(page, /aiUsageSummary|assistantRequestPolicy|assistantExpandedProductId|AssistantExpandedProductId/)
   const tabs = read('CatalogSecondaryTabs.tsx')
   for (const prop of ['aiUsageSummary', 'assistantRequestPolicy', 'assistantExpandedProductId']) assert.ok(!tabs.includes(prop), `${prop} is read by the tabs after all`)
@@ -207,4 +138,4 @@ if (failures.length) {
   console.log(`\n${failures.length} case(s) failed`)
   process.exit(1)
 }
-console.log('PASS public wiring: social row, offers banner, FAQ props, footer and Khmer FAQ text')
+console.log('PASS public wiring: Contact menu, offers banner, FAQ props, footer and Khmer FAQ text')

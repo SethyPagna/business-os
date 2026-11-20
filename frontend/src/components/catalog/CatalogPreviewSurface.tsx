@@ -5,15 +5,18 @@ import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
+import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
 import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import PortalContactMenu from './PortalContactMenu.tsx'
 import CatalogProductImage from './catalogImages'
 import { PortalNavSearchSlotContext } from './portalNavSearchSlot.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import type { PortalFooterProps } from './legal/LegalPages.tsx'
 import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
+import type { PortalContactEntry } from './portalSocialLinks.ts'
 import PortalAnnouncementStrip from './PortalAnnouncementStrip.tsx'
 import type { PortalAnnouncement } from './portalAnnouncement.ts'
 import '../../styles/public-portal.css'
@@ -102,6 +105,8 @@ type CatalogPreviewSurfaceProps = {
   onOpenWishlist?: () => void
   wishlistCount?: number
   accountSignedIn?: boolean
+  // Every way to reach the shop (buildPortalContactEntries): the header's Contact menu. None: no Contact button.
+  contactEntries?: readonly PortalContactEntry[]
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
   // N45 legal lane: the storefront <footer> (business details, quick links,
@@ -109,9 +114,6 @@ type CatalogPreviewSurfaceProps = {
   // the admin preview show the SAME footer from one place; the caller
   // supplies it so this surface never has to know the business-detail shape.
   footer?: ReactNode
-  // How far above the safe area the public page must end so the floating contact buttons never cover the footer
-  // (portalFloatClearanceRem). Omitted: the fixed reserve below.
-  floatingStackClearanceRem?: number
   // The announcement bar (owner, 2 Nov 2026), already resolved for this page and language: none draws nothing. The live page passes a way
   // to close it; the Website Editor preview does not.
   announcement?: PortalAnnouncement | null
@@ -149,6 +151,8 @@ type CatalogPreviewSurfaceProps = {
 
 // Header buttons: 40 px tall, 36 px wide below 400 px so six of them and the shop name share one row on a phone, 40 px from there up.
 const HEADER_ICON_CLASS = 'inline-flex h-10 w-9 min-[400px]:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
+// The main action of the header: icon + the word "Contact" from sm up, the icon alone on a phone.
+const HEADER_CONTACT_CLASS = 'inline-flex h-10 w-9 min-[400px]:w-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#23201b] text-[#f4f1ea] transition hover:bg-stone-700 sm:w-auto sm:px-4 sm:text-sm sm:font-semibold dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-neutral-300'
 const HEADER_ICON_GLYPH = 'h-[18px] w-[18px]'
 const HEADER_COUNT_CLASS = 'absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-700 px-1 text-[10px] font-bold leading-none text-white'
 // The surface recipe (spec section 1) for the floating scroll buttons.
@@ -182,10 +186,10 @@ export default function CatalogPreviewSurface({
   onOpenWishlist,
   wishlistCount = 0,
   accountSignedIn = false,
+  contactEntries = [],
   catalogSection,
   secondaryTabSection,
   footer,
-  floatingStackClearanceRem,
   announcement,
   onDismissAnnouncement,
   onAnnouncementHeight,
@@ -375,12 +379,10 @@ export default function CatalogPreviewSurface({
           column) actually uses the space instead of floating in a wide
           gutter on ordinary desktop widths. */}
       {announcement ? <PortalAnnouncementStrip announcement={announcement} copy={copy} onDismiss={onDismissAnnouncement} onHeight={publicView ? onAnnouncementHeight : undefined} /> : null}
-      {/* The bottom padding clears the tallest floating stack, so at the page end no button covers the footer: 7.5rem by default
-          (My List and the scroll buttons), taller when the contact buttons are shown (floatingStackClearanceRem, portalFloatClearanceRem). */}
+      {/* The bottom padding clears the floating buttons (My List, and the scroll buttons on the other side), so at the page end none covers the footer. */}
       <div
         className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''} data-[portal-announcement-shown=true]:pt-3 sm:data-[portal-announcement-shown=true]:pt-4`}
         data-portal-announcement-shown={announcement ? 'true' : undefined}
-        style={publicView && floatingStackClearanceRem ? { paddingBottom: `calc(${floatingStackClearanceRem}rem + env(safe-area-inset-bottom))` } : undefined}
       >
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
@@ -436,6 +438,25 @@ export default function CatalogPreviewSurface({
                 </div>
                 {/* `data-portal-header-icons` is the hook public-portal.css's pointer:coarse floor exempts: the targets here are 40 px and stay on the one row. */}
                 <div data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0.5 sm:gap-1">
+                  {contactEntries.length > 0 ? (
+                    <PortalContactMenu
+                      entries={contactEntries}
+                      copy={copy}
+                      align="right"
+                      trigger={(
+                        <button
+                          type="button"
+                          data-portal-contact-trigger=""
+                          className={HEADER_CONTACT_CLASS}
+                          aria-label={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
+                          title={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
+                        >
+                          <MessageCircle className={HEADER_ICON_GLYPH} />
+                          <span className="hidden sm:inline">{copy('contact', 'Contact', 'ទាក់ទង')}</span>
+                        </button>
+                      )}
+                    />
+                  ) : null}
                   {onOpenWishlist ? (
                     <button
                       type="button"

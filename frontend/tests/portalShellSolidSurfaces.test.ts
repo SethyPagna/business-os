@@ -33,6 +33,8 @@ function runTest(name: string, fn: () => void): void {
 const SHELL_FILES = [
   'components/catalog/CatalogPreviewSurface.tsx',
   // PublicCatalogPage.tsx joins when its drawers are replaced (steps 3 and 4)
+  'components/catalog/PortalContactMenu.tsx',
+  'components/catalog/PortalSocialRow.tsx',
   // The rest of the lane's files join this list in the commit that makes them solid.
 ]
 const present = SHELL_FILES.filter((file) => fs.existsSync(path.join(src, file)))

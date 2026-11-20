@@ -1,4 +1,4 @@
-// The storefront ends with room for its floating buttons, so at the page end none of them covers a
+// The storefront ends with room for its floating buttons (My List, and the scroll buttons on the other side), so at the page end none of them covers a
 // footer link on a phone. Heights come from the buttons' own classes; the browser twin is
 // e2e/storefront-footer-clearance.spec.ts.
 //
@@ -9,11 +9,9 @@ import path from 'node:path'
 
 const CATALOG = path.join(import.meta.dirname, '..', 'src', 'components', 'catalog')
 const read = (file: string) => fs.readFileSync(path.join(CATALOG, file), 'utf8').replace(/\r\n/g, '\n')
-import { PORTAL_CONTACT_FLOAT, portalFloatClearanceRem } from '../src/components/catalog/portalSocialLinks.ts'
 
 const surface = read('CatalogPreviewSurface.tsx')
 const publicPage = read('PublicCatalogPage.tsx')
-const socialRow = read('PortalSocialRow.tsx')
 
 const REM_PER_SPACING_UNIT = 0.25
 const BUCKET_ICON_REM = 1.25
@@ -47,22 +45,10 @@ assert.equal(scrollButtons.length, 2, 'the scroll-to-top and scroll-to-bottom bu
 const scrollHeight = scrollButtons.reduce((sum, classes) => sum + spacingRem(classes, 'h'), 0) + spacingRem(scrollWrapper, 'gap') * (scrollButtons.length - 1)
 
 const bucketClasses = classNames(block(publicPage, 'const bucketFab = (', '\n  )\n'))[0]
-// The contact buttons are a column of 0-5 round links (2 Nov): their height grows with how many are configured,
-// so the page passes the reserve for its own count (portalFloatClearanceRem) and this checks the numbers it uses.
-const contactSource = block(socialRow, 'export function PortalContactFloat', '/** Handles, numbers and domains stay Latin')
-const contactWrapper = classNames(contactSource.slice(contactSource.indexOf('className="')))[0]
-const contactButton = classNames(contactSource.slice(contactSource.indexOf('className="flex h-11')))[0]
-assert.match(contactWrapper, /(?:^|\s)fixed(?=\s)/)
-const contactBottomRem = bottomRem(contactWrapper)
-const contactButtonRem = spacingRem(contactButton, 'h')
-const contactGapRem = spacingRem(contactWrapper, 'gap')
-assert.deepEqual({ bottomRem: contactBottomRem, buttonRem: contactButtonRem, gapRem: contactGapRem }, { bottomRem: PORTAL_CONTACT_FLOAT.bottomRem, buttonRem: PORTAL_CONTACT_FLOAT.buttonRem, gapRem: PORTAL_CONTACT_FLOAT.gapRem }, 'the reserve is computed from the numbers the buttons really use')
-const contactTops = (count: number) => contactBottomRem + count * contactButtonRem + (count - 1) * contactGapRem
-for (let count = 1; count <= 5; count += 1) {
-  assert.ok(portalFloatClearanceRem(count) >= contactTops(count), `${count} contact buttons reach ${contactTops(count)}rem; the page reserves ${portalFloatClearanceRem(count)}rem`)
-}
-assert.match(surface, /style=\{publicView && floatingStackClearanceRem \? \{ paddingBottom: `calc\(\$\{floatingStackClearanceRem\}rem \+ env\(safe-area-inset-bottom\)\)` \} : undefined\}/, 'the surface applies the reserve it is given')
-assert.match(publicPage, /floatingStackClearanceRem=\{portalFloatClearanceRem\(buildPortalContactFloat\(contactChannels\)\.length\)\}/, 'and the page gives it for its own contact buttons')
+// The floating chat buttons are gone (the Contact menu is the one entry point), so nothing sits above My List any more and the
+// reserve is the fixed one the shell carries for every width.
+assert.doesNotMatch(surface, /floatingStackClearanceRem/, 'the surface no longer takes a reserve for a column of contact buttons')
+assert.doesNotMatch(publicPage, /floatingStackClearanceRem|portalFloatClearanceRem|PortalContactFloat/, 'and the page no longer computes one')
 
 const floatingTopsRem = {
   scrollButtonsPhone: bottomRem(scrollWrapper) + scrollHeight,

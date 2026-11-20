@@ -162,15 +162,14 @@ check('2 the header icon rows never wrap on a phone', () => {
 // (PortalContactFloat) shown from the first paint, each opening its chat directly, so there is no stub to expand
 // and no minimize control. What this check still guards: no remembered state, no overlaid or hover-gated control,
 // 44px targets, and the retired pieces staying retired.
-check('3 the contact buttons are always shown, open the chat directly, and have no minimize stub', () => {
+check('3 Contact is one header button that opens a menu: no floating buttons, no minimize stub', () => {
   assert.doesNotMatch(publicCatalogPage, /contactMinimized|setContactMinimized/, 'the page keeps no minimized state')
   assert.doesNotMatch(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY/, 'no remembered state can bring a stub back')
-  assert.match(publicCatalogPage, /<PortalContactFloat channels=\{contactChannels\} copy=\{copy\} \/>/, 'the float is the page contact control')
-  const floatSource = portalSocialRow.slice(portalSocialRow.indexOf('export function PortalContactFloat'), portalSocialRow.indexOf('/** Handles, numbers and domains stay Latin'))
-  assert.match(floatSource, /flex h-11 w-11 shrink-0 items-center justify-center rounded-full/, 'each button is a 44px touch target')
-  assert.doesNotMatch(floatSource, /-right-1\.5 -top-1\.5/, 'no control overlaps a button corner')
-  assert.doesNotMatch(floatSource, /opacity-0.*group-hover:opacity-100/, 'no control is hover-gated invisible by default')
-  assert.doesNotMatch(floatSource, /onClick/, 'a button is a plain link to the chat, not a handler that opens something else')
+  assert.doesNotMatch(publicCatalogPage, /PortalContactFloat/, 'the floating chat buttons are gone')
+  assert.doesNotMatch(portalSocialRow, /PortalContactFloat|data-portal-contact-float/, 'and so is their component')
+  assert.match(catalogPreviewSurface, /data-portal-contact-trigger=""/, 'the header Contact button is the one contact control')
+  assert.match(catalogPreviewSurface, /HEADER_CONTACT_CLASS = 'inline-flex h-10 w-9 min-\[400px\]:w-10/, 'a 40 px tall target, icon alone on a phone')
+  assert.match(catalogPreviewSurface, /<span className="hidden sm:inline">\{copy\('contact', 'Contact'/, 'the word Contact shows from sm up')
 })
 
 // P-public-5: the minimized icon IS the contact button (one tap expands and

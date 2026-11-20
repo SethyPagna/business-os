@@ -6,7 +6,7 @@ import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from
 import { fmtTime } from '../../utils/formatters.ts'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { settingsSaveNormalisedKeys } from '../../utils/settingsSave.ts'
-import { buildPortalSocialFromConfig, flattenPortalSocialGroups } from './portalSocialLinks.ts'
+import { buildPortalContactEntries, buildPortalSocialFromConfig, portalContactFooterLinks } from './portalSocialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
@@ -3030,9 +3030,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const mapEmbedUrl = shouldLoadMapEmbed
     ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '')
     : ''
-  // Same builder as the live page, so the editor preview shows the same handles.
-  const socialGroups = buildPortalSocialFromConfig(displayConfig, activeCopyLanguage).social
-  const socialLinks = flattenPortalSocialGroups(socialGroups)
 
   const businessFacts = [
     { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: displayConfig.businessPhone ? `tel:${displayConfig.businessPhone}` : '' },
@@ -3040,6 +3037,19 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
+  // Same builder as the live page, so the editor preview shows the same names and the same Contact menu.
+  const socialBuilt = buildPortalSocialFromConfig(displayConfig, activeCopyLanguage)
+  const contactEntries = buildPortalContactEntries({
+    social: socialBuilt.social,
+    contact: socialBuilt.contact,
+    phone: businessFacts.find((item) => item.key === 'phone')?.value,
+    email: businessFacts.find((item) => item.key === 'email')?.value,
+    mapHref: addressFact?.href,
+    address: addressFact?.value,
+    shopName: displayConfig.businessName || displayConfig.title,
+    language: activeCopyLanguage,
+  })
+  const socialLinks = portalContactFooterLinks(contactEntries)
 
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
   const redeemSummaryText = replaceVars(
@@ -3528,6 +3538,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
         publicPortalNavPinned={publicPortalNavPinned}
         publicPortalNavMetrics={publicPortalNavMetrics}
+        contactEntries={contactEntries}
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}
         footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} />}
