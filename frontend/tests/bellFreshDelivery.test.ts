@@ -89,6 +89,22 @@ reset()
   assert.deepEqual(summaries(), [PLAIN, FRESH], 'read in flight, own write, second read: the second is fresh')
 }
 
+// a write that names one section, arriving while a plain read is in flight, still gets its own read naming that section
+reset()
+{
+  let open!: () => void
+  gate = new Promise<void>((r) => { open = r })
+  const first = getNotificationSummary()
+  await new Promise((r) => setTimeout(r, 5))
+  const g = gate
+  gate = null
+  await http.apiFetch('PATCH', '/api/sales/7/status', { a: 2 })
+  const second = getNotificationSummary()
+  open()
+  await Promise.all([first, second, g])
+  assert.deepEqual(summaries(), [PLAIN, FRESH_SALES], 'read in flight, own sale-status write, second read: the second is fresh for sales')
+}
+
 // 4. The expanded list follows the same rule.
 reset()
 await getNotificationSectionItems('inventory')
