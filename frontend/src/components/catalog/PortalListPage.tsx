@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { clearAllStep } from './portalClearConfirm.ts'
+import { clearAllFocusLeft, clearAllPressIsOutside, clearAllStep } from './portalClearConfirm.ts'
 import type { ClearAllEvent } from './portalClearConfirm.ts'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
@@ -43,8 +43,15 @@ function ClearAllControl({ copy, count, label, onClear }: { copy: CopyFn; count:
     if (!confirming) return undefined
     keepRef.current?.focus({ preventScroll: true })
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setConfirming(false) }
+    // A press anywhere else puts the question away. This, not blur, covers the mouse and touch: Safari does not focus a button that is
+    // pressed, so a blur there arrives with no target while the visitor is pressing Clear itself.
+    const onPointerDown = (event: PointerEvent) => { if (clearAllPressIsOutside(rootRef.current, event.target)) setConfirming(false) }
     document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+    }
   }, [confirming])
   const question = count > 1
     ? replaceCount(copy('clearAllConfirm', 'Clear all {count} items?', 'សម្អាត {count} មុខទាំងអស់ឬ?'), count)
@@ -61,7 +68,7 @@ function ClearAllControl({ copy, count, label, onClear }: { copy: CopyFn; count:
       aria-label={question}
       data-portal-clear-all="confirm"
       className="inline-flex flex-wrap items-center gap-2"
-      onBlur={(event) => { if (!rootRef.current?.contains(event.relatedTarget as Node | null)) step('leave') }}
+      onBlur={(event) => { if (clearAllFocusLeft(rootRef.current, event.relatedTarget)) step('leave') }}
     >
       <span className="text-sm font-medium text-[#23201b] dark:text-neutral-100">{question}</span>
       <button type="button" className={`${CLEAR_BUTTON} bg-rose-700 text-white hover:bg-rose-800 dark:bg-rose-600 dark:hover:bg-rose-500`} onClick={() => step('confirm')}>{copy('clearAllYes', 'Clear', 'សម្អាត')}</button>

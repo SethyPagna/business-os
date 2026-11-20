@@ -37,6 +37,9 @@ export default function PortalSheet({ label, copy, onClose, corner, children }: 
         const panel = panelRef.current
         // A menu layered above the sheet owns its own keys.
         if (!panel || document.querySelector('[data-portal-menu-content]')) return
+        // So does a dialog opened from inside the sheet (the policy reader from the sign-up consent links): focus is in it, not in the sheet.
+        const active = document.activeElement
+        if (active instanceof HTMLElement && !panel.contains(active) && active.closest('[role="dialog"], [aria-modal="true"]')) return
         const focusable = Array.from(panel.querySelectorAll<HTMLElement>(PORTAL_FOCUSABLE_SELECTOR)).filter((element) => element.getClientRects().length > 0)
         event.preventDefault()
         const next = nextTrapIndex(focusable.length, focusable.indexOf(document.activeElement as HTMLElement), event.shiftKey)

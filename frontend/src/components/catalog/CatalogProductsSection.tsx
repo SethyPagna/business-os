@@ -1158,12 +1158,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
                     translate="no"
                     title={productHeading}
-                    {...getKhmerTextProps(productHeading, `notranslate block w-full break-words text-left${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
+                    {...getKhmerTextProps(productHeading, `notranslate block w-full break-words text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}
                   >
                     {productHeading}
                   </button>
                 ) : (
-                  <div translate="no" title={productHeading} {...getKhmerTextProps(productHeading, `notranslate break-words${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
+                  <div translate="no" title={productHeading} {...getKhmerTextProps(productHeading, `notranslate break-words ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-[#23201b] dark:text-neutral-100`)}>
                     {productHeading}
                   </div>
                 )}

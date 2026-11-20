@@ -48,7 +48,7 @@ export default function PortalContactMenu({ entries, copy, trigger, align = 'aut
     // Wait for that swap, then focus the trigger that is on the page. Focus the visitor moved elsewhere (a click outside) is left alone.
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       const target = resolveContactFocusTarget<HTMLElement>(opener, hostRef.current, document.activeElement, document.body)
-      target?.focus()
+      target?.focus({ preventScroll: true })
     }))
     onClose?.()
   }, [anchorOpener, onClose])

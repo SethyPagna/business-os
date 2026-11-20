@@ -157,4 +157,15 @@ assert.match(products, /underGroupHeading: index >= promotedRun/, 'the card asks
 const announcement = read('PortalAnnouncementStrip.tsx')
 assert.match(announcement, /border-b border-amber-700 bg-slate-900/)
 
+// 9. A conditional class is never glued to the class before it. `text-left${compact ? 'text-[13px]' : 'text-[15px]'}` yields the one
+//    token `text-lefttext-[15px]`, which matches no style: the card name lost its size and its left alignment (delta review D1).
+const GLUED_CONDITIONAL_CLASS = /[A-Za-z0-9\])]\$\{[A-Za-z_.!()&| ]+\? '[^']*' : '[^']*'\}/g
+for (const file of fs.readdirSync(catalogDir).filter((name) => name.endsWith('.tsx'))) {
+  const glued = read(file).match(GLUED_CONDITIONAL_CLASS) || []
+  assert.deepEqual(glued, [], `${file}: a conditional class needs a space before it`)
+}
+assert.match(products, /notranslate block w-full break-words text-left \$\{compactCatalogCards \? 'text-\[13px\]' : 'text-\[15px\]'\} font-medium/, 'the card name button keeps its size and left alignment')
+assert.match(products, /notranslate break-words \$\{compactCatalogCards \? 'text-\[13px\]' : 'text-\[15px\]'\} font-medium/, 'the preview card name keeps its size and wraps')
+assert.ok(GLUED_CONDITIONAL_CLASS.test("`break-words text-left${compact ? 'text-[13px]' : 'text-[15px]'} font-medium`"), 'control: the rule sees the defect it guards against')
+
 console.log('PASS products surfaces are solid, the field line clears 3:1, the helper line is gone')

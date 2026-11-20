@@ -6,7 +6,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { buildSync } from 'esbuild'
 import { createRequire } from 'node:module'
-import { clearAllStep } from '../src/components/catalog/portalClearConfirm.ts'
+import { clearAllFocusLeft, clearAllPressIsOutside, clearAllStep } from '../src/components/catalog/portalClearConfirm.ts'
 import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
 import { storefrontTranslator } from './storefrontCopyScan.ts'
 
@@ -50,9 +50,32 @@ for (const segment of ['list', 'saved'] as const) {
 const list = render('en', 'list')
 assert.equal((list.match(/lucide-trash-?2/g) || []).length, 2, 'two rows, two trash icons, none for Clear all')
 
-// The Escape and focus-leaving wiring is in the component.
+// Pressing Clear in Safari (and Firefox on a Mac) blurs Keep with NO next element, because those browsers do not focus a pressed button.
+// That blur must not put the question away, or Clear never gets its click and the list is never emptied (delta review D2).
+const inside = { id: 'clear' }
+const outside = { id: 'search' }
+const root = { contains: (node: unknown) => node === inside }
+assert.equal(clearAllFocusLeft(root, null), false, 'a blur with no next element is not a leave (the Safari press on Clear)')
+assert.equal(clearAllFocusLeft(root, undefined), false)
+assert.equal(clearAllFocusLeft(root, inside), false, 'focus moving between Clear and Keep stays in the question')
+assert.equal(clearAllFocusLeft(root, outside), true, 'Tab to another control puts the question away')
+assert.equal(clearAllFocusLeft(null, outside), false, 'nothing mounted, nothing to leave')
+assert.equal(clearAllPressIsOutside(root, inside), false, 'a press on Clear or Keep is theirs')
+assert.equal(clearAllPressIsOutside(root, outside), true, 'a press anywhere else puts the question away')
+assert.equal(clearAllPressIsOutside(root, null), true)
+assert.equal(clearAllPressIsOutside(null, outside), false)
+// The whole Safari sequence: ask, then the press on Clear (blur with no target, press inside), then the click.
+let confirming = clearAllStep(false, 'ask').confirming
+if (clearAllFocusLeft(root, null)) confirming = clearAllStep(confirming, 'leave').confirming
+if (clearAllPressIsOutside(root, inside)) confirming = false
+assert.deepEqual(clearAllStep(confirming, 'confirm'), { confirming: false, clear: true }, 'Clear still empties the list after that blur')
+
+// The Escape, press-outside and focus-leaving wiring is in the component.
 const source = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'PortalListPage.tsx'), 'utf8')
 assert.match(source, /event\.key === 'Escape'/)
+assert.match(source, /onBlur=\{\(event\) => \{ if \(clearAllFocusLeft\(rootRef\.current, event\.relatedTarget\)\) step\('leave'\) \}\}/, 'blur goes through the rule above')
+assert.match(source, /document\.addEventListener\('pointerdown', onPointerDown, true\)/, 'a press elsewhere is what closes it for mouse and touch')
+assert.doesNotMatch(source, /contains\(event\.relatedTarget as Node \| null\)/, 'the bare relatedTarget check that broke Clear in Safari is gone')
 assert.doesNotMatch(source, /window\.confirm|[^.\w]confirm\(/, 'never the native confirm')
 
 console.log('PASS Clear all asks first; only Clear empties the list')
