@@ -8,9 +8,11 @@ import {
   alertStoreKey,
   announceFreshAlerts,
   browserAlertStore,
-  mergeAlertTimes,
+  isSectionComplete,
+  mergeAlertMemory,
+  parseAlertMemory,
   popUpAlerts,
-  type AlertTimes,
+  type AlertMemory,
 } from '../src/components/shared/notificationAlerts.ts'
 import { toastStackTop, mobileChromeViewportOffset, AUTH_TOGGLE_TOP_REM, AUTH_TOGGLE_HEIGHT_REM, AUTH_TOGGLE_GAP_REM, authToggleBandRem } from '../src/utils/mobileNavChrome.ts'
 
@@ -321,17 +323,32 @@ assert.equal(getNotificationDuration('error', 3500), 3500)
 // ---------------------------------------------------------------------------------------------------------
 // Bell items: pop once per device, warning and danger only, ten seconds, memory merged and per user.
 // ---------------------------------------------------------------------------------------------------------
-const memoryStore = (backing: { times: AlertTimes } = { times: {} }) => ({
+const memoryStore = (backing: { times: AlertMemory } = { times: {} }) => ({
   backing,
-  read: () => ({ ...backing.times }),
-  write: (times: AlertTimes) => { backing.times = { ...times } },
+  read: () => JSON.parse(JSON.stringify(backing.times)) as AlertMemory,
+  write: (times: AlertMemory) => { backing.times = JSON.parse(JSON.stringify(times)) },
 })
+const QUIET = 10 * 60_000
+type Row = { id: string; tone?: string }
+// One summary load: the items sit in one section (default 'inv'), listed in full unless the test says otherwise.
+const announce = (args: { items: Row[]; sectionId?: string; sections?: Array<{ id: string; complete: boolean }>; blocked?: boolean; seenTimes?: Record<string, number>; skipIds?: Set<string>; now: number; store: any; quietMs?: number }) =>
+  announceFreshAlerts({
+    rows: args.items.map((item) => ({ item, sectionId: args.sectionId || 'inv' })),
+    sections: args.sections ?? [{ id: args.sectionId || 'inv', complete: true }],
+    blocked: !!args.blocked,
+    seenTimes: args.seenTimes ?? {},
+    skipIds: args.skipIds,
+    now: args.now,
+    quietMs: args.quietMs ?? QUIET,
+    store: args.store,
+  }) as any
+const ids = (plan: any) => plan.items.map((i: any) => i.id)
 const items = [
   { id: 'out-1', tone: 'danger' }, { id: 'pay-2', tone: 'warning' }, { id: 'delivery-3', tone: 'info' },
   { id: 'loyalty-4', tone: 'success' }, { id: 'out-1', tone: 'danger' },
 ]
-const loadAt = (store: ReturnType<typeof memoryStore>, at: number, extra: Partial<Parameters<typeof announceFreshAlerts>[0]> = {}) =>
-  announceFreshAlerts({ items, blocked: false, seenTimes: {}, now: at, store, ...extra } as any) as any
+const loadAt = (store: ReturnType<typeof memoryStore>, at: number, extra: Partial<Parameters<typeof announce>[0]> = {}) =>
+  announce({ items, now: at, store, ...extra })
 {
   const store = memoryStore()
   const first = loadAt(store, 1_000_000)
@@ -399,19 +416,154 @@ assert.match(centerSource, /const \{ displayLabel, displayMeta \} = itemText\(it
   ;(globalThis as any).window.localStorage = { getItem: (k: string) => disk.get(k) ?? null, setItem: (k: string, v: string) => { disk.set(k, v) } }
   const key = alertStoreKey('u1')
   assert.notEqual(key, alertStoreKey('u2'))
-  const a = (id: string, at: number) => announceFreshAlerts({ items: [{ id, tone: 'danger' }], blocked: false, seenTimes: {}, now: at, store: browserAlertStore('u1') })
+  const a = (id: string, at: number) => announce({ items: [{ id, tone: 'danger' }], now: at, store: browserAlertStore('u1'), sections: [] })
   assert.equal(a('one', 100).kind, 'each')
   disk.set(key, JSON.stringify({ ...JSON.parse(disk.get(key) as string), two: 200 }))
   assert.equal(a('three', 300).kind, 'each')
-  assert.deepEqual(JSON.parse(disk.get(key) as string), { one: 100, two: 200, three: 300 }, "another tab's entry survives this write")
+  assert.deepEqual(JSON.parse(disk.get(key) as string), { one: { at: 100, section: 'inv' }, two: { at: 200 }, three: { at: 300, section: 'inv' } }, "another tab's entry survives this write (a bare-number entry of an older build is read as one)")
   assert.equal(a('two', 400).kind, 'none', "another tab's item does not pop again here")
-  assert.equal(announceFreshAlerts({ items: [{ id: 'one', tone: 'danger' }], blocked: false, seenTimes: {}, now: 500, store: browserAlertStore('u2') }).kind, 'each', 'a second account on the device gets its own memory')
-  assert.deepEqual(mergeAlertTimes({ a: 1, b: 9 }, { a: 5, c: 2 }), { a: 5, b: 9, c: 2 })
+  assert.equal(announce({ items: [{ id: 'one', tone: 'danger' }], now: 500, store: browserAlertStore('u2') }).kind, 'each', 'a second account on the device gets its own memory')
+  assert.deepEqual(mergeAlertMemory({ a: { at: 1 }, b: { at: 9 } }, { a: { at: 5 }, c: { at: 2 } }), { a: { at: 5 }, b: { at: 9 }, c: { at: 2 } })
   // Storage that refuses writes still pops an item once per page life.
   ;(globalThis as any).window.localStorage = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
-  const denied = (id: string) => announceFreshAlerts({ items: [{ id, tone: 'danger' }], blocked: false, seenTimes: {}, now: 1, store: browserAlertStore('u3') }).kind
+  const denied = (id: string) => announce({ items: [{ id, tone: 'danger' }], now: 1, store: browserAlertStore('u3') }).kind
   assert.equal(denied('z'), 'each')
   assert.equal(denied('z'), 'none')
+}
+
+// A: "pin until resolved". An alert that left a fully listed section and stayed away for the quiet period is a new alert
+// when it comes back; one that only flickered is not; an incomplete, truncated, missing or failed summary forgets nothing.
+{
+  const T0 = 1_000_000
+  const low = [{ id: 'low-1', tone: 'warning' }]
+  const out = (store: any, at: number, over: any = {}) => announce({ items: [], now: at, store, ...over })
+  // Resolved, then it returns after the quiet period: it pops again, once.
+  {
+    const store = memoryStore()
+    assert.deepEqual(ids(announce({ items: low, now: T0, store })), ['low-1'])
+    assert.equal(announce({ items: low, now: T0 + 1000, store }).kind, 'none')
+    assert.equal(out(store, T0 + 60_000).kind, 'none')
+    assert.equal(store.backing.times['low-1'].absentSince, T0 + 60_000, 'the first load that finds it gone is recorded in its own entry')
+    assert.equal(store.backing.times['low-1'].resolved, undefined, 'not resolved yet')
+    out(store, T0 + 60_000 + QUIET - 1)
+    assert.equal(store.backing.times['low-1'].resolved, undefined, 'one millisecond short of the quiet period')
+    out(store, T0 + 60_000 + QUIET)
+    assert.equal(store.backing.times['low-1'].resolved, true, 'gone for the whole quiet period: resolved')
+    assert.deepEqual(ids(announce({ items: low, now: T0 + 2 * QUIET, store })), ['low-1'], 'it comes back: a new alert, it pops')
+    assert.equal(announce({ items: low, now: T0 + 2 * QUIET + 1000, store }).kind, 'none', 'and only once')
+    assert.deepEqual(store.backing.times['low-1'], { at: T0 + 2 * QUIET, section: 'inv' })
+  }
+  // Back inside the quiet period: it never counted as resolved, so it does not pop, and the absence clock starts over.
+  {
+    const store = memoryStore()
+    announce({ items: low, now: T0, store })
+    out(store, T0 + 1000)
+    assert.equal(announce({ items: low, now: T0 + 1000 + QUIET - 1, store }).kind, 'none', 'flickered out and in: no pop')
+    assert.equal(store.backing.times['low-1'].absentSince, undefined)
+    out(store, T0 + 3 * QUIET)
+    out(store, T0 + 3 * QUIET + QUIET - 1)
+    assert.equal(store.backing.times['low-1'].resolved, undefined, 'the earlier flicker does not shorten the next quiet period')
+  }
+  // A truncated or unlisted section never forgets; a failed or blocked summary never forgets.
+  {
+    const store = memoryStore()
+    announce({ items: low, now: T0, store })
+    const before = JSON.stringify(store.backing.times)
+    out(store, T0 + 5 * QUIET, { sections: [{ id: 'inv', complete: false }] })
+    out(store, T0 + 9 * QUIET, { sections: [{ id: 'inv', complete: false }] })
+    out(store, T0 + 9 * QUIET, { sections: [] })
+    out(store, T0 + 9 * QUIET, { sections: [{ id: 'other', complete: true }] })
+    out(store, T0 + 9 * QUIET, { blocked: true })
+    assert.equal(JSON.stringify(store.backing.times), before, 'nothing was recorded, removed or marked')
+    assert.equal(announce({ items: low, now: T0 + 10 * QUIET, store }).kind, 'none', 'still the same alert, no second pop')
+  }
+  // Only the section the alert belongs to counts: a complete other section does not resolve it.
+  {
+    const store = memoryStore()
+    announce({ items: low, now: T0, store })
+    out(store, T0 + QUIET, { sectionId: 'expiry' })
+    out(store, T0 + 3 * QUIET, { sectionId: 'expiry' })
+    assert.equal(store.backing.times['low-1'].absentSince, undefined)
+    assert.equal(store.backing.times['low-1'].resolved, undefined)
+  }
+  // Info and success never pop, before or after a resolution.
+  {
+    const store = memoryStore()
+    const calm = [{ id: 'i-1', tone: 'info' }, { id: 's-1', tone: 'success' }]
+    assert.equal(announce({ items: calm, now: T0, store }).kind, 'none')
+    assert.deepEqual(store.backing.times, {})
+  }
+  // A bell "seen" older than the resolution no longer hides the returning alert; one from after the return does.
+  {
+    const store = memoryStore()
+    announce({ items: low, now: T0, store })
+    out(store, T0 + 1000)
+    out(store, T0 + 1000 + QUIET)
+    assert.deepEqual(ids(announce({ items: low, now: T0 + 2 * QUIET, store, seenTimes: { 'low-1': T0 + 500 } })), ['low-1'], 'seen before it was resolved: pops')
+    const again = memoryStore()
+    announce({ items: low, now: T0, store: again })
+    out(again, T0 + 1000)
+    out(again, T0 + 1000 + QUIET)
+    assert.equal(announce({ items: low, now: T0 + 2 * QUIET, store: again, seenTimes: { 'low-1': T0 + 2 * QUIET - 1 } }).kind, 'none', 'opened in the bell after it came back: seen, no pop')
+    assert.equal(announce({ items: low, now: T0 + 2 * QUIET + 1, store: again, seenTimes: { 'low-1': T0 + 2 * QUIET - 1 } }).kind, 'none')
+  }
+  // The quiet period is the Settings repeat interval; off or zero means ten minutes.
+  {
+    const store = memoryStore()
+    announce({ items: low, now: T0, store })
+    out(store, T0 + 1000, { quietMs: 30 * 60_000 })
+    out(store, T0 + 1000 + 29 * 60_000, { quietMs: 30 * 60_000 })
+    assert.equal(store.backing.times['low-1'].resolved, undefined)
+    out(store, T0 + 1000 + 30 * 60_000, { quietMs: 30 * 60_000 })
+    assert.equal(store.backing.times['low-1'].resolved, true)
+    const zero = memoryStore()
+    announce({ items: low, now: T0, store: zero, quietMs: 0 })
+    out(zero, T0 + 1000, { quietMs: 0 })
+    out(zero, T0 + 1000 + 10 * 60_000 - 1, { quietMs: 0 })
+    assert.equal(zero.backing.times['low-1'].resolved, undefined)
+    out(zero, T0 + 1000 + 10 * 60_000, { quietMs: 0 })
+    assert.equal(zero.backing.times['low-1'].resolved, true)
+  }
+  // What counts as a complete section, and the bell wiring.
+  assert.equal(isSectionComplete({ items: [{}, {}] }), true)
+  assert.equal(isSectionComplete({ items: [{}], truncated: true, itemsTotal: 50 }), false)
+  assert.equal(isSectionComplete({ items: [{}], itemsTotal: 50 }), false, 'a preview is incomplete even without the flag')
+  assert.equal(isSectionComplete({ items: [{}, {}], itemsTotal: 2 }), true)
+  assert.equal(isSectionComplete(undefined), false)
+  assert.ok(centerSource.includes('complete: isSectionComplete(section)'))
+  assert.ok(centerSource.includes('quietMs: realertMinutes * 60000'))
+  // Merge: per user, latest time per item; another tab's newer entry is not lost when this tab resolves or marks something.
+  assert.deepEqual(mergeAlertMemory({ a: { at: 5, resolved: true } }, { a: { at: 9, section: 'inv' } }), { a: { at: 9, section: 'inv' } })
+  assert.deepEqual(mergeAlertMemory({ a: { at: 9, absentSince: 3 } }, { a: { at: 9, resolved: true, absentSince: 3 } }).a.resolved, true)
+  assert.deepEqual(parseAlertMemory(JSON.stringify({ n: 7, o: { at: 8, section: 'inv', absentSince: 6, resolved: true, junk: 1 }, bad: { at: 'x' }, worse: null })), { n: { at: 7 }, o: { at: 8, section: 'inv', absentSince: 6, resolved: true } })
+  {
+    const disk = new Map<string, string>()
+    ;(globalThis as any).window.localStorage = { getItem: (k: string) => disk.get(k) ?? null, setItem: (k: string, v: string) => { disk.set(k, v) } }
+    const k = alertStoreKey('merge-user')
+    const mine = () => browserAlertStore('merge-user')
+    const rows = [{ id: 'm1', tone: 'warning' }]
+    announce({ items: rows, now: T0, store: mine() })
+    announce({ items: [], now: T0 + 1000, store: mine() })
+    announce({ items: [], now: T0 + 1000 + QUIET, store: mine() })
+    assert.equal(JSON.parse(disk.get(k) as string).m1.resolved, true, 'this tab resolved m1')
+    // Another tab meanwhile saw m1 come back (a newer entry) and recorded a different alert.
+    const other = JSON.parse(disk.get(k) as string)
+    other.m1 = { at: T0 + 3 * QUIET, section: 'inv' }
+    other.m2 = { at: T0 + 3 * QUIET, section: 'expiry' }
+    disk.set(k, JSON.stringify(other))
+    announce({ items: [], now: T0 + 4 * QUIET, store: mine(), sections: [{ id: 'inv', complete: true }] })
+    const kept = JSON.parse(disk.get(k) as string)
+    assert.equal(kept.m1.at, T0 + 3 * QUIET, "the other tab's newer entry is not replaced by this tab's older resolution")
+    assert.equal(kept.m1.resolved, undefined, 'and it is not resolved: it came back after this tab resolved it')
+    assert.deepEqual(kept.m2, { at: T0 + 3 * QUIET, section: 'expiry' }, "the other tab's entry in a section this load did not list is untouched")
+  }
+  // The cap holds: the thousand newest entries stay.
+  {
+    const store = memoryStore()
+    const many = Array.from({ length: 1005 }, (_, n) => ({ id: 'c' + n, tone: 'warning' }))
+    assert.equal(announce({ items: many, now: T0, store }).kind, 'many')
+    assert.equal(Object.keys(store.backing.times).length, 1000)
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------------

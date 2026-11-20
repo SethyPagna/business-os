@@ -13,7 +13,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../app/AppContextCore.tsx'
-import { announceFreshAlerts, browserAlertStore, popUpAlerts } from './notificationAlerts.ts'
+import { announceFreshAlerts, browserAlertStore, isSectionComplete, popUpAlerts } from './notificationAlerts.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -955,12 +955,17 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   useEffect(() => {
     const blocked = !visibilityActive || open || !!summary.unavailable || typeof document === 'undefined' || document.visibilityState === 'hidden'
     const rows = (summary.sections || []).flatMap((section) => (section.items || []).map((item) => ({ item, sectionId: section.id })))
+    // An alert that left a fully listed section is forgotten after it stayed away for the repeat interval, so one that
+    // comes back later pops again. A cut-down (truncated) section, a section the summary lacks, and a failed or
+    // unavailable summary (blocked above) change nothing.
     const plan = announceFreshAlerts({
-      items: rows.map((row) => row.item),
+      rows: rows.map((row) => ({ item: row.item, sectionId: row.sectionId })),
+      sections: (summary.sections || []).map((section) => ({ id: section.id, complete: isSectionComplete(section) })),
       blocked,
       seenTimes: seenAlertTimes,
       skipIds: seenSecurityIds,
       now: Date.now(),
+      quietMs: realertMinutes * 60000,
       store: browserAlertStore(user?.id),
     })
     if (plan.kind === 'none') return
