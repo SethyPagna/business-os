@@ -714,8 +714,10 @@ const find = (node: any, test: (el: any) => boolean, found: any[] = []): any[] =
 // H: two live regions are always mounted, even with nothing to say; errors go to the assertive one only.
 {
   const empty = render({ visible: [] })
-  assert.match(empty, /role="status" aria-live="polite"/)
-  assert.match(empty, /role="alert" aria-live="assertive"/)
+  // Persistent regions carry aria-live and no role: an always-present empty role="alert" would tell every query an alert exists.
+  assert.ok(empty.includes('<div class="sr-only" aria-live="polite" aria-atomic="false">'))
+  assert.ok(empty.includes('<div class="sr-only" aria-live="assertive" aria-atomic="false">'))
+  assert.ok(!/role="(alert|status)"/.test(empty), 'no role on the persistent live regions')
   assert.doesNotMatch(empty, /data-toast-dismiss/)
   const html = render({ visible: [toast('t1', 'Saved failed', 'error'), toast('t2', 'Careful', 'warning')] })
   const polite = html.slice(html.indexOf('aria-live="polite"'), html.indexOf('aria-live="assertive"'))

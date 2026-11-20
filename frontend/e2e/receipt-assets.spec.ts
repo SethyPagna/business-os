@@ -236,7 +236,7 @@ for (const frame of [false, true]) {
       expect(content.blocks).toBe(0)
       expect(content.backgrounds.some(css => css.includes('receipt-asset-probe'))).toBe(false)
       expect(content.text).toMatch(/[ក-៿]/)
-      await expect(page.getByText(EN.receipt_payment_qr_omitted)).toBeVisible()
+      await expect(page.getByText(EN.receipt_payment_qr_omitted, { exact: true })).toBeVisible()
       // One fetch for the payment stage, one for the background's own stage.
       expect(await page.evaluate(() => (window as any).__assetCalls)).toBe(2)
       await info.attach('payment-qr-failure-timing', { body: JSON.stringify({ mode, elapsedMs }), contentType: 'application/json' })

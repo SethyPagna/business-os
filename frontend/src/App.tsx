@@ -1162,10 +1162,10 @@ function Notification({ notification, onDismiss, appUpdateVisible = false, heade
     <>
       {/* Two live regions, mounted from the start and never removed, carry the announcements (the visible
           pop-ups are not live regions themselves): a message inserted together with its own region is often not read. */}
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="false">
+      <div className="sr-only" aria-live="polite" aria-atomic="false">
         {everyToast.filter((toast) => toast.type !== 'error').map((toast) => <p key={toast.key}>{kindLabel(toast)}: {toast.message}</p>)}
       </div>
-      <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="false">
+      <div className="sr-only" aria-live="assertive" aria-atomic="false">
         {everyToast.filter((toast) => toast.type === 'error').map((toast) => <p key={toast.key}>{kindLabel(toast)}: {toast.message}</p>)}
       </div>
       {shown.length ? (
