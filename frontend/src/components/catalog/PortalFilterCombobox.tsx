@@ -171,7 +171,7 @@ export default function PortalFilterCombobox({
         key: `catgroup-${group.key}`,
         label: (
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="min-w-0 detail-scroll-text font-bold">{group.mainLabel}</span>
+            <span translate="no" className="notranslate min-w-0 detail-scroll-text font-bold">{group.mainLabel}</span>
             <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-px text-[9px] font-bold leading-4 text-slate-500 dark:bg-neutral-700 dark:text-neutral-300">
               {values.length}
             </span>
@@ -265,7 +265,7 @@ export default function PortalFilterCombobox({
       <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${row.active ? 'border-amber-700 bg-amber-700 dark:border-amber-400 dark:bg-amber-400' : 'border-slate-300 dark:border-neutral-600'}`} aria-hidden="true">
         {row.active ? <span className="h-1.5 w-1.5 rounded-sm bg-white" /> : null}
       </span>
-      <span className="min-w-0 detail-scroll-text">{row.label}</span>
+      <span translate="no" className="notranslate min-w-0 detail-scroll-text">{row.label}</span>
     </button>
   )
 
@@ -372,7 +372,7 @@ export default function PortalFilterCombobox({
         <div className="mt-1.5 flex min-w-0 flex-wrap gap-1">
           {selected.map((value) => (
             <span key={value} className="inline-flex max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
-              <span className="detail-scroll-text">{selectedLabelByValue.get(value) || value}</span>
+              <span translate="no" className="notranslate detail-scroll-text">{selectedLabelByValue.get(value) || value}</span>
               <button
                 type="button"
                 onClick={() => onToggle(value)}

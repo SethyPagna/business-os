@@ -132,7 +132,7 @@ runTest('the cart and the wishlist scroll the name instead of cutting it', () =>
   // implementation, and it is applied through `getKhmerTextProps` so a Khmer
   // name gets `khmer-text` -- the portal does not set the admin app's
   // `body.lang-km`, so the Khmer line box has to be bought off the value.
-  const scrollers = publicPage.match(/<div \{\.\.\.getKhmerTextProps\(row\.name, 'detail-scroll-text[^']*'\)\}>\{row\.name\}<\/div>/g) || []
+  const scrollers = publicPage.match(/<div translate="no" \{\.\.\.getKhmerTextProps\(row\.name, 'detail-scroll-text[^']*'\)\}>\{row\.name\}<\/div>/g) || []
   assert.equal(scrollers.length, 1, 'the one name block scrolls the name')
   assert.equal((publicPage.match(/\{nameBlock\(item\)\}/g) || []).length, 2, 'and both the List row and the Saved row use it')
   assert.match(publicPage, /import \{ getKhmerTextProps \} from '\.\.\/\.\.\/utils\/scriptTypography\.ts'/, 'the shared Khmer helper, not a local script test')
@@ -141,7 +141,7 @@ runTest('the cart and the wishlist scroll the name instead of cutting it', () =>
   // quantity stepper and the remove button, so it stays inside the flex child
   // that can shrink. A scroller that is not inside `min-w-0` would widen the
   // row instead of scrolling inside it.
-  assert.equal((publicPage.match(/<div className="min-w-0 flex-1">\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<div \{\.\.\.getKhmerTextProps\(row\.name/g) || []).length, 1,
+  assert.equal((publicPage.match(/<div className="min-w-0 flex-1">\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<div translate="no" \{\.\.\.getKhmerTextProps\(row\.name/g) || []).length, 1,
     'the name must stay inside the shrinking column of the row')
   // NEGATIVE CONTROL: the shape above is specific enough to fail if the name
   // goes back to being clipped, or leaks out of the shrinking column.

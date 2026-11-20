@@ -13,6 +13,7 @@ import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import PortalContactMenu from './PortalContactMenu.tsx'
+import { PORTAL_PRIMARY_COLORS } from './portalButtons.ts'
 import CatalogProductImage from './catalogImages'
 import { PortalNavSearchSlotContext } from './portalNavSearchSlot.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
@@ -162,7 +163,7 @@ type CatalogPreviewSurfaceProps = {
 // Header buttons: 40 px tall, 36 px wide below 400 px so six of them and the shop name share one row on a phone, 40 px from there up.
 const HEADER_ICON_CLASS = 'inline-flex h-10 w-9 min-[400px]:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
 // The main action of the header: icon + the word "Contact" from sm up, the icon alone on a phone.
-const HEADER_CONTACT_CLASS = 'inline-flex h-10 w-9 min-[400px]:w-10 shrink-0 items-center justify-center gap-2 rounded-full bg-[#23201b] text-[#f4f1ea] transition hover:bg-stone-700 sm:w-auto sm:px-4 sm:text-sm sm:font-semibold dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-neutral-300'
+const HEADER_CONTACT_CLASS = `inline-flex h-10 w-9 min-[400px]:w-10 shrink-0 items-center justify-center gap-2 rounded-full transition sm:w-auto sm:px-4 sm:text-sm sm:font-semibold ${PORTAL_PRIMARY_COLORS}`
 const HEADER_ICON_GLYPH = 'h-[18px] w-[18px]'
 const HEADER_COUNT_CLASS = 'absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-700 px-1 text-[10px] font-bold leading-none text-white'
 // The surface recipe (spec section 1) for the floating scroll buttons.

@@ -230,11 +230,9 @@ runTest('the shipped merchant defaults and the hero gradient are the documented 
 
 runTest('the account submit button is no longer white on emerald-500 (2.54:1)', () => {
   const source = read('CatalogAccountSection.tsx')
-  const submit = /const submitClass = '([^']+)'/.exec(source)
-  assert.ok(submit, 'submitClass must still be a single class string')
-  assert.ok(submit[1].includes('text-white'), 'the label is still white')
-  assert.doesNotMatch(submit[1], /bg-emerald-[45]00\b/, 'emerald-400/500 under white text is 2.54:1 / 1.94:1')
-  assert.match(submit[1], /bg-emerald-([78]00)\b/, 'the fill must be emerald-700 or darker (5.48:1)')
+  const submit = /const submitClass = `\$\{PORTAL_PRIMARY_BUTTON\}([^`]*)`/.exec(source)
+  assert.ok(submit, 'submitClass is the shared primary recipe plus layout only')
+  assert.doesNotMatch(submit[1], /bg-|text-white/, 'no private fill or label colour: ink on ivory is 15.97:1')
 })
 
 runTest('the account error alert clears AA on its own rose-50 ground', () => {

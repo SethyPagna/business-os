@@ -1,6 +1,7 @@
 // The three layers of the Products page, as class recipes (spec section 1 of the
 // public web overhaul): page (ivory, painted by the shell), surface, field.
 // Every recipe is solid: no opacity suffix, no blur, no transparent fill.
+import { portalPrimaryValue } from './portalMultiValue.ts'
 
 // A card, sheet or menu panel that sits over the page.
 export const PRODUCT_SURFACE_CLASS = 'border border-stone-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900'
@@ -39,7 +40,7 @@ export type ProductMetaField = { kind: 'category' | 'brand'; text: string }
 // left out, and so is a field the merchant hides. The promoted block above the first heading
 // (`underGroupHeading` false) keeps both: its heading says "Promotions", not a brand.
 export function productMetaFields(
-  product: { category?: unknown; brand?: unknown },
+  product: { category?: unknown; brand?: unknown; categories?: unknown; brands?: unknown },
   { showCategory, showBrand, groupField, underGroupHeading }: {
     showCategory: boolean
     showBrand: boolean
@@ -49,8 +50,8 @@ export function productMetaFields(
 ): ProductMetaField[] {
   const said = underGroupHeading ? groupField : null
   const fields: ProductMetaField[] = [
-    { kind: 'category', text: showCategory && said !== 'category' ? String(product.category ?? '').trim() : '' },
-    { kind: 'brand', text: showBrand && said !== 'brand' ? String(product.brand ?? '').trim() : '' },
+    { kind: 'category', text: showCategory && said !== 'category' ? portalPrimaryValue(product.category, product.categories) : '' },
+    { kind: 'brand', text: showBrand && said !== 'brand' ? portalPrimaryValue(product.brand, product.brands) : '' },
   ]
   return fields.filter((field) => field.text)
 }
