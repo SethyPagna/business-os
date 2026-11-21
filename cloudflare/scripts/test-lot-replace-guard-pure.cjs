@@ -77,6 +77,10 @@ const REPLACING = [
   'WITH s AS (SELECT 3 AS id) INSERT OR REPLACE INTO product_batches(id) SELECT id FROM s',
   'INSERT OR REPLACE INTO product_batches SELECT * FROM product_batches',
   "UPDATE OR REPLACE product_batches SET batch_key='a' WHERE id=2",
+  "INSERT OR REPLACE INTO 'product_batches'(id) VALUES(3)",
+  "REPLACE INTO 'product_batches'(id) VALUES(3)",
+  "UPDATE OR REPLACE 'product_batches' SET batch_key='a' WHERE id=2",
+  "INSERT OR REPLACE INTO main.'product_batches'(id) VALUES(3)",
 ]
 const INNOCENT = [
   "INSERT INTO product_batches(id,variant_product_id,batch_key) VALUES(3,10,'c')",
@@ -96,6 +100,10 @@ const INNOCENT = [
   '/* INSERT OR REPLACE INTO product_batches */ SELECT 1',
   'INSERT INTO notes(text) VALUES("REPLACE INTO product_batches")',
   'SELECT * FROM product_batches WHERE batch_key = ?1',
+  "INSERT INTO audit_logs(note) VALUES('product_batches')",
+  "UPDATE product_batches SET batch_key=replace(batch_key,'product_batches','') WHERE id=1",
+  "INSERT OR IGNORE INTO 'product_batches'(variant_product_id,batch_key) VALUES(10,'a')",
+  "INSERT INTO \"product_batches\"(variant_product_id,batch_key) VALUES(10,'a') ON CONFLICT(variant_product_id,batch_key) DO UPDATE SET is_active=1",
 ]
 
 ;(async () => {

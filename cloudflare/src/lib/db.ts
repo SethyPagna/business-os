@@ -188,15 +188,15 @@ export class ProductBatchesReplaceRefusedError extends Error {
   }
 }
 
-const SQL_NOISE = /'(?:[^']|'')*'|--[^\r\n]*|\/\*[\s\S]*?\*\/|"((?:[^"]|"")*)"|`((?:[^`]|``)*)`|\[([^\]]*)\]/g
+const SQL_NOISE = /'((?:[^']|'')*)'|--[^\r\n]*|\/\*[\s\S]*?\*\/|"((?:[^"]|"")*)"|`((?:[^`]|``)*)`|\[([^\]]*)\]/g
 const LOT_TABLE = '(?:[A-Za-z_]\\w*\\s*\\.\\s*)?product_batches\\b'
 const LOT_REPLACE = new RegExp('\\b(?:INSERT\\s+OR\\s+REPLACE|REPLACE)\\s+INTO\\s+' + LOT_TABLE + '|\\bUPDATE\\s+OR\\s+REPLACE\\s+' + LOT_TABLE, 'i')
 
 /** True when the SQL text would replace a product_batches row, in any case and spacing, with or without a schema prefix or identifier quotes. Comments and string literals are ignored. */
 export function replacesProductBatchesRow(sql: string): boolean {
   if (typeof sql !== 'string') return false
-  const flat = sql.replace(SQL_NOISE, (_match, dq: string | undefined, bt: string | undefined, br: string | undefined) => {
-    const ident = dq ?? bt ?? br
+  const flat = sql.replace(SQL_NOISE, (_match, sq: string | undefined, dq: string | undefined, bt: string | undefined, br: string | undefined) => {
+    const ident = sq ?? dq ?? bt ?? br
     return ident !== undefined && /^\w+$/.test(ident) ? ` ${ident} ` : ' '
   })
   return LOT_REPLACE.test(flat)
