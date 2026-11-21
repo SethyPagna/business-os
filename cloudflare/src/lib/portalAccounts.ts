@@ -107,19 +107,26 @@ const MEMBER_CODE_MINT_ATTEMPTS = 5
 
 // Accounts from before W- codes have none. Mint one on first read, compare-and-set, so calls racing on one account settle on
 // the code the first write stored. One read and one write for an account without a code; callers that already hold the row
-// skip this when member_code is set.
+// skip this when member_code is set. Only a duplicate code retries: any other failure (write quota, overload, a D1 error) is
+// logged and answers null, because a code that cannot be minted must never break sign-in, /auth/me or consent renewal; the
+// next call tries again. A stored code moves the customers cache version, since the Contacts list shows it.
 export async function ensurePortalMemberCode(env: Env, accountId: number, mint: () => string = mintMemberCode): Promise<string | null> {
   const db = getDb(env)
   for (let attempt = 0; attempt < MEMBER_CODE_MINT_ATTEMPTS; attempt += 1) {
-    const row = await db.prepare('SELECT member_code FROM portal_accounts WHERE id = @id LIMIT 1').get<{ member_code: string | null }>({ id: accountId })
-    if (!row) return null
-    if (row.member_code) return row.member_code
-    const code = mint()
     try {
+      const row = await db.prepare('SELECT member_code FROM portal_accounts WHERE id = @id LIMIT 1').get<{ member_code: string | null }>({ id: accountId })
+      if (!row) return null
+      if (row.member_code) return row.member_code
+      const code = mint()
       const result = await db.prepare('UPDATE portal_accounts SET member_code = @code WHERE id = @id AND member_code IS NULL').run({ code, id: accountId })
-      if (Number(result.changes || 0) > 0) return code
+      if (Number(result.changes || 0) > 0) {
+        await bumpVersions(env, ['customers']).catch(() => {})
+        return code
+      }
     } catch (error) {
-      if (!isMemberCodeCollision(error)) throw error
+      if (isMemberCodeCollision(error)) continue
+      console.warn('portal_member_code_mint_failed', error instanceof Error ? error.message : String(error))
+      return null
     }
   }
   return null
@@ -505,10 +512,11 @@ export async function renewPortalConsent(
     SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale,
         age_confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
+      AND status = 'active'
       AND NOT (consent_version = @version AND consent_at IS NOT NULL AND age_confirmed_at IS NOT NULL)
   `).run({ version: PORTAL_CONSENT_VERSION, locale: String(input.consentLocale || 'und').slice(0, 16), id: accountId })
   if (Number(result.changes || 0) > 0) return { ok: true, renewed: true }
-  const current = await db.prepare('SELECT id FROM portal_accounts WHERE id = @id LIMIT 1').get<{ id: number }>({ id: accountId })
+  const current = await db.prepare("SELECT id FROM portal_accounts WHERE id = @id AND status = 'active' LIMIT 1").get<{ id: number }>({ id: accountId })
   if (!current) return { ok: false, status: 404, error: 'Account not found.', code: 'portal_unauthenticated' }
   return { ok: true, renewed: false }
 }

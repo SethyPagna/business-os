@@ -68,7 +68,7 @@ const memberCode = loadReal('lib/memberCode.ts')
 const passwordHash = loadRealPasswordHash()
 const failedSignInCost = loadRealFailedSignInCost()
 
-function accountsModule(db, source = readSrc('lib/portalAccounts.ts')) {
+function accountsModule(db, source = readSrc('lib/portalAccounts.ts'), extra = {}) {
   return loadSource(source, 'lib/portalAccounts.ts', {
     './db': { getDb: () => db },
     './cache': { bumpVersions: async () => {} },
@@ -80,6 +80,7 @@ function accountsModule(db, source = readSrc('lib/portalAccounts.ts')) {
     './passwordHash': passwordHash,
     './failedSignInCost': failedSignInCost,
     './memberCode': memberCode,
+    ...extra,
   })
 }
 
@@ -182,6 +183,109 @@ async function run() {
     let tries = 0
     assert.equal(await ensurePortalMemberCode({}, id, () => { tries += 1; return 'W-0000-0000' }), null)
     assert.equal(tries, 5)
+  })
+
+  await check('a mint that fails for any reason but a duplicate code answers null and does not throw; the next call mints', async () => {
+    const { raw, db } = world()
+    const id = seedMember(raw)
+    let refuse = 'D1_ERROR: write quota exceeded'
+    const refusing = () => ({ get: async () => { throw new Error(refuse) }, all: async () => { throw new Error(refuse) }, run: async () => { throw new Error(refuse) } })
+    const failingDb = { ...db, prepare: (sql) => (refuse && /SET member_code/.test(sql) ? refusing() : db.prepare(sql)) }
+    const { ensurePortalMemberCode, loadPortalMemberView } = accountsModule(failingDb)
+    let tries = 0
+    assert.equal(await ensurePortalMemberCode({}, id, () => { tries += 1; return 'W-2222-2222' }), null, 'a quota error is not thrown')
+    assert.equal(tries, 1, 'a non-duplicate failure is not retried')
+    const view = await loadPortalMemberView({}, { id, membership_id: 'LC-00001', member_code: null, name: 'A' })
+    assert.equal(view.memberCode, null)
+    assert.equal(view.membershipId, 'LC-00001')
+    refuse = null
+    assert.equal(await ensurePortalMemberCode({}, id, () => 'W-2222-2222'), 'W-2222-2222', 'the next call tries again')
+
+    const code = readSrc('lib/portalAccounts.ts')
+    const mutant = code.replace('String(error))\n      return null', 'String(error))\n      throw error')
+    assert.notEqual(mutant, code, 'mutant applied')
+    const { raw: raw2, db: db2 } = world()
+    const id2 = seedMember(raw2)
+    refuse = 'boom'
+    const failing2 = { ...db2, prepare: (sql) => (/SET member_code/.test(sql) ? refusing() : db2.prepare(sql)) }
+    await assert.rejects(accountsModule(failing2, mutant).ensurePortalMemberCode({}, id2), /boom/, 'the rethrowing mutant throws')
+  })
+
+  await check('a stored code moves the customers cache version once; an existing code and a failure do not', async () => {
+    const { raw, db } = world()
+    const bumps = []
+    const cache = { bumpVersions: async (_env, names) => { bumps.push(names.join(',')) } }
+    const { ensurePortalMemberCode } = accountsModule(db, undefined, { './cache': cache })
+    const id = seedMember(raw)
+    assert.ok(await ensurePortalMemberCode({}, id))
+    assert.deepEqual(bumps, ['customers'])
+    await ensurePortalMemberCode({}, id)
+    await ensurePortalMemberCode({}, seedMember(raw, { member_code: 'W-0000-0000' }))
+    assert.equal(bumps.length, 1, 'no bump when no code was stored')
+    const throwing = { bumpVersions: async () => { throw new Error('cache down') } }
+    assert.ok(await accountsModule(db, undefined, { './cache': throwing }).ensurePortalMemberCode({}, seedMember(raw)), 'a failing cache bump does not lose the minted code')
+
+    const code = readSrc('lib/portalAccounts.ts')
+    const mutant = code.replace("        await bumpVersions(env, ['customers']).catch(() => {})\n", '')
+    assert.notEqual(mutant, code, 'mutant applied')
+    const { raw: raw2, db: db2 } = world()
+    const bumps2 = []
+    await accountsModule(db2, mutant, { './cache': { bumpVersions: async (_e, n) => { bumps2.push(n) } } }).ensurePortalMemberCode({}, seedMember(raw2))
+    assert.equal(bumps2.length, 0, 'the mutant leaves the Contacts list cache stale')
+  })
+
+  await check('consent renewal refuses a suspended or closed account and writes nothing; the mutant without the status term renews it', async () => {
+    const { raw, db } = world()
+    const accounts = accountsModule(db)
+    const input = { consent: true, ageConfirmed: true, consentLocale: 'en' }
+    const stale = { consent_version: 'portal-legal-older', age_confirmed_at: null }
+    const active = seedMember(raw, { ...stale })
+    const suspended = seedMember(raw, { ...stale, status: 'suspended' })
+    const closed = seedMember(raw, { ...stale, status: 'closed' })
+    for (const id of [suspended, closed]) {
+      const result = await accounts.renewPortalConsent({}, id, input)
+      assert.equal(result.ok, false, `account ${id}`)
+      assert.equal(result.code, 'portal_unauthenticated')
+      assert.equal(raw.prepare('SELECT consent_version FROM portal_accounts WHERE id = ?').get([id]).consent_version, 'portal-legal-older', 'nothing renewed')
+    }
+    assert.deepEqual({ ...(await accounts.renewPortalConsent({}, active, input)) }, { ok: true, renewed: true })
+    assert.deepEqual({ ...(await accounts.renewPortalConsent({}, active, input)) }, { ok: true, renewed: false })
+
+    const code = readSrc('lib/portalAccounts.ts')
+    const mutant = code.replace("      AND status = 'active'\n      AND NOT (consent_version", '      AND NOT (consent_version')
+    assert.notEqual(mutant, code, 'mutant applied')
+    const renewed = await accountsModule(db, mutant).renewPortalConsent({}, suspended, input)
+    assert.equal(renewed.ok && renewed.renewed, true, 'without the term a suspended account renews')
+  })
+
+  await check('a non-active account is refused BEFORE any write, at the same hash cost and with the same answer as a wrong password; the mutant without only the read-side check writes', async () => {
+    const { raw, db, writes } = world()
+    let spent = 0
+    const countingHash = { ...passwordHash, spendFailedSignInFloor: async (...args) => { spent += 1; return passwordHash.spendFailedSignInFloor(...args) } }
+    const accounts = accountsModule(db, undefined, { './passwordHash': countingHash })
+    const hash = await passwordHash.hashPassword('correct horse battery', {})
+    seedMember(raw, { name: 'Active', phone: '012333333', password_hash: hash })
+    seedMember(raw, { name: 'Suspended', phone: '012111111', password_hash: hash, status: 'suspended' })
+    const input = (identifier, phoneNumber, password = 'correct horse battery') => ({ identifier, phone: phoneNumber, password, consent: true, consentLocale: 'en', ageConfirmed: true })
+    writes.length = 0
+    spent = 0
+    const wrong = await accounts.signinPortalAccount({}, input('Active', '012333333', 'nope nope nope'))
+    const wrongSpent = spent
+    spent = 0
+    const refused = await accounts.signinPortalAccount({}, input('Suspended', '012111111'))
+    assert.deepEqual({ ...refused }, { ...wrong }, 'same answer as a wrong password')
+    assert.equal(spent, wrongSpent, 'same failed-sign-in floor spent')
+    assert.ok(spent > 0)
+    assert.deepEqual(writes, [], 'no UPDATE or INSERT ran for either')
+
+    const code = readSrc('lib/portalAccounts.ts')
+    const mutant = code.replace("account.status !== 'active' || ", '')
+    assert.notEqual(mutant, code, 'mutant applied')
+    writes.length = 0
+    spent = 0
+    const mutantResult = await accountsModule(db, mutant, { './passwordHash': countingHash }).signinPortalAccount({}, input('Suspended', '012111111'))
+    assert.equal(mutantResult.ok, false, 'the write-side status term still refuses it, so the answer alone cannot tell')
+    assert.ok(writes.length > 0 && spent === 0, `but the mutant ran the sign-in UPDATE and skipped the floor: ${writes.length} writes, ${spent} spent`)
   })
 
   await check('sign-in works for an account with no LC number, and a missing password hash fails closed without an error', async () => {
