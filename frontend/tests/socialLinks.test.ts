@@ -4,7 +4,6 @@ import {
   deriveTelegramLink,
   deriveWhatsappLink,
   deriveInstagramLink,
-  derivePhoneCallLink,
   resolveMessengerLink,
 } from '../src/utils/socialLinks.ts'
 
@@ -50,12 +49,6 @@ assert.equal(deriveWhatsappLink('+855 12 345 678'), 'https://wa.me/85512345678',
 assert.equal(deriveWhatsappLink('https://wa.me/85512345678'), 'https://wa.me/85512345678', 'accepts a full wa.me URL')
 assert.equal(deriveWhatsappLink('https://facebook.com/mystore'), '', 'rejects a non-WhatsApp URL')
 assert.equal(deriveWhatsappLink(''), '')
-
-// derivePhoneCallLink -- backs the receipt-settings "remove Viber, add clickable Call"
-// contact channel (business-os QR/contact merge session).
-assert.equal(derivePhoneCallLink('+855 12 345 678'), 'tel:+85512345678', 'normalizes a raw phone number to a tel: link')
-assert.equal(derivePhoneCallLink('tel:+85512345678'), 'tel:+85512345678', 'passes through an already-normalized tel: link')
-assert.equal(derivePhoneCallLink(''), '')
 
 // deriveInstagramLink -- Part 234 item 3, contact-us channel fix: Instagram
 // previously only linked to the profile, with no one-tap DM equivalent to

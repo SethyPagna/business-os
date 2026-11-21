@@ -15,7 +15,6 @@ import {
   contactHref,
   deriveInstagramLink,
   deriveMessengerLink,
-  derivePhoneCallLink,
   deriveTelegramLink,
   deriveWhatsappLink,
   resolveMessengerLink,
@@ -81,7 +80,7 @@ const CONTACT_NORMALIZERS: Partial<Record<SocialPlatform, (value: string) => str
   messenger: withScheme(resolveMessengerLink),
   telegram: withScheme(deriveTelegramLink),
   whatsapp: withScheme(deriveWhatsappLink),
-  phone: derivePhoneCallLink,
+  phone: (value) => contactHref('tel', value),
   instagram: withScheme(deriveInstagramLink),
 }
 
@@ -262,7 +261,7 @@ export function buildPortalContactEntries(input: {
 
   const phone = clean(input.phone)
   if (phone) {
-    const href = derivePhoneCallLink(phone)
+    const href = contactHref('tel', phone)
     const display = resolveSocialDisplay({ platform: 'phone', href: phone, language })
     push('phone', href, display.visibleText, display.accessibleName)
   }

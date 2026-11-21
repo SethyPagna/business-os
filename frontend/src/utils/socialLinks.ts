@@ -85,19 +85,6 @@ export function deriveWhatsappLink(value: string): string {
   return digits ? `https://wa.me/${digits}` : ''
 }
 
-/**
- * Given a phone number (or an existing tel: link), returns a normalized
- * tel: deep link so it opens the device's dialer, or '' if nothing usable
- * was given.
- */
-export function derivePhoneCallLink(value: string): string {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-  if (/^tel:/i.test(raw)) return raw
-  const digits = raw.replace(/[^\d+]/g, '')
-  return digits ? `tel:${digits}` : ''
-}
-
 // No whitespace, control character or character that could add a header, a second address or a query to a mailto: link.
 const MAILTO_UNSAFE = '\\s\\u0000-\\u001f\\u007f@?&,;%<>"\'\\\\'
 const SAFE_EMAIL = new RegExp(`^[^${MAILTO_UNSAFE}]+@[^${MAILTO_UNSAFE}]+\\.[^${MAILTO_UNSAFE}]+$`)
