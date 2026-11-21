@@ -370,7 +370,7 @@ await runTest('the page wires the load: parallel config only without an embed, t
   assert.match(page, /getPortalConfig/)
   assert.doesNotMatch(page, /setPortalError\(getErrorMessage\(/, 'a raw error message ("Portal bootstrap failed: 500") never reaches the shopper')
   assert.match(page, /copy\('portalLoadFailed', "We couldn't open the shop\. Check your connection and try again\.", '[^']+'\)/)
-  assert.match(page, /copy\('retry', 'Retry', 'ព្យាយាមម្ដងទៀត'\)/)
+  assert.match(page, /copy\('retry', 'Try again', 'ព្យាយាមម្ដងទៀត'\)/)
   const failurePanel = between(page, 'const loadFailedPanel = ', '\n  )\n')
   assert.match(failurePanel, /data-portal-load-failed="true"/)
   assert.match(failurePanel, /role="alert"/)

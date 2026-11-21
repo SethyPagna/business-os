@@ -137,8 +137,8 @@ runTest('FAQ: search filters question and answer text, case-insensitively, Khmer
 
 runTest('FAQ: no match shows the query with an icon-only Clear button; a matching query keeps the rows', () => {
   const none = renderToStaticMarkup(React.createElement(FaqList, listProps({ items: makeItems(8), query: 'zzz' }) as never) as never)
-  assert.match(none, /No question matches &quot;zzz&quot;/)
-  assert.match(none, /aria-label="Clear"[^>]*title="Clear"/)
+  assert.match(none, /No question matches &quot;<span translate="no" class="notranslate">zzz<\/span>&quot;/)
+  assert.match(none, /aria-label="Reset search"[^>]*title="Reset search"/)
   assert.doesNotMatch(none, /Question number 1\?/)
   const some = renderToStaticMarkup(React.createElement(FaqList, listProps({ items: makeItems(8), query: 'number 3' }) as never) as never)
   assert.match(some, /Question number 3\?/)

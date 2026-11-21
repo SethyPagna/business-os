@@ -44,7 +44,7 @@ const SIZES = [
 // 137 fixture products at 50 a page, 27-28 per category: page 1 is all of Body care and part of Fragrance.
 const CATEGORY_HEADERS_PAGE_1 = ['Body care', 'Fragrance']
 
-const EN = { view: 'View', sort: 'Sort', brand: 'Brand', category: 'Category', all: 'All products', featured: 'Featured', nameAsc: 'A-Z', nameDesc: 'Z-A', low: 'Low price', high: 'High price', filters: 'Filters' } as const
+const EN = { view: 'Group by', sort: 'Sort by', brand: 'Brand', category: 'Category', all: 'All products', featured: 'Featured', nameAsc: 'A-Z', nameDesc: 'Z-A', low: 'Low price', high: 'High price', filters: 'Filters' } as const
 const KM = { view: 'មើលតាម', sort: 'តម្រៀប', brand: 'ម៉ាក', category: 'ប្រភេទ', all: 'ផលិតផលទាំងអស់', featured: 'ពិសេស', nameAsc: 'ឈ្មោះ A-Z', nameDesc: 'ឈ្មោះ Z-A', low: 'តម្លៃទាប', high: 'តម្លៃខ្ពស់', filters: 'តម្រង' } as const
 
 function searchRequests(page: Page): URL[] {

@@ -1226,7 +1226,7 @@ export default function PublicCatalogPage() {
       <p>{loadFailedText}</p>
       <button type="button" className="btn-primary inline-flex items-center gap-2 text-sm" onClick={retryLoad}>
         <RotateCw className="h-4 w-4" />
-        {copy('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+        {copy('retry', 'Try again', 'ព្យាយាមម្ដងទៀត')}
       </button>
     </div>
   )

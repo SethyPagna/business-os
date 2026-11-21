@@ -71,7 +71,7 @@ function ClearAllControl({ copy, count, label, onClear }: { copy: CopyFn; count:
       onBlur={(event) => { if (clearAllFocusLeft(rootRef.current, event.relatedTarget)) step('leave') }}
     >
       <span className="text-sm font-medium text-[#23201b] dark:text-neutral-100">{question}</span>
-      <button type="button" className={`${CLEAR_BUTTON} bg-rose-700 text-white hover:bg-rose-800 dark:bg-rose-600 dark:hover:bg-rose-500`} onClick={() => step('confirm')}>{copy('clearAllYes', 'Clear', 'សម្អាត')}</button>
+      <button type="button" className={`${CLEAR_BUTTON} bg-rose-700 text-white hover:bg-rose-800 dark:bg-rose-600 dark:hover:bg-rose-500`} onClick={() => step('confirm')}>{copy('clearAllYes', 'Yes, clear', 'សម្អាត')}</button>
       <button ref={keepRef} type="button" className={`${CLEAR_BUTTON} border border-stone-300 text-[#23201b] hover:bg-stone-200 dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-800`} onClick={() => step('keep')}>{copy('clearAllKeep', 'Keep', 'រក្សា')}</button>
     </span>
   )
@@ -136,7 +136,7 @@ export default function PortalListPage({
   return (
     <section ref={pageRef} tabIndex={-1} data-portal-list-page="true" aria-label={`${listLabel} / ${savedLabel}`} className="mx-auto w-full max-w-[720px] space-y-4 py-4 outline-none sm:py-6">
       <div className="flex items-center gap-2">
-        <button type="button" className={ICON_BUTTON} onClick={onBack} aria-label={copy('back', 'Back', 'ត្រឡប់')} title={copy('back', 'Back', 'ត្រឡប់')} data-portal-list-back="">
+        <button type="button" className={ICON_BUTTON} onClick={onBack} aria-label={copy('back', 'Go back', 'ត្រឡប់')} title={copy('back', 'Go back', 'ត្រឡប់')} data-portal-list-back="">
           {/* arrow-right turned round: arrow-left is pinned to the sign-in icon chunk, which the storefront must not load (chunk cycle). */}
           <ArrowRight className="h-5 w-5 rotate-180" />
         </button>
@@ -191,12 +191,12 @@ export default function PortalListPage({
                   trigger={(
                     <button type="button" data-portal-list-contact="" className={`${PORTAL_PRIMARY_BUTTON} min-h-10 px-4`}>
                       <MessageCircle className="h-[18px] w-[18px]" />
-                      {copy('contactButton', 'Contact', 'ទាក់ទង')}
+                      <span translate="no" className="notranslate">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
                     </button>
                   )}
                 />
               ) : null}
-              <button type="button" className={ICON_BUTTON} onClick={onCopy} aria-label={copy('copyList', 'Copy list')} title={copy('copyList', 'Copy list')}>
+              <button type="button" className={ICON_BUTTON} onClick={onCopy} aria-label={copy('copyList', 'Copy the list')} title={copy('copyList', 'Copy the list')}>
                 {copyState === 'copied' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </button>
               <button type="button" className={ICON_BUTTON} onClick={onDownload} aria-label={copy('downloadList', 'Download')} title={copy('downloadList', 'Download')}>

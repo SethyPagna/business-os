@@ -23,7 +23,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu.tsx'
 import PortalEmbedConsent, { mapFallbackHref } from './legal/PortalEmbedConsent.tsx'
 import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../../utils/aboutCoverLayout.ts'
 import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
-import { SectionShell } from './catalogUi'
+import { SectionShell, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
 import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
@@ -246,7 +246,7 @@ function PortalContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenCont
   return (
     <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
       <MessageCircle aria-hidden="true" className="h-4 w-4" />
-      {copy('contactButton', 'Contact', 'ទាក់ទង')}
+      <span translate="no" className="notranslate">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
     </button>
   )
 }
@@ -311,7 +311,7 @@ function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyF
   const href = address ? item.href || mapFallbackHref(item.value || '', '') : contactHref('tel', item.value)
   const actionLabel = address
     ? copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
-    : copy('callUs', 'Call', 'ហៅទូរស័ព្ទ')
+    : copy('callUs', 'Call us', 'ហៅទូរស័ព្ទ')
   return (
     <div className="flex min-h-12 items-center gap-3">
       <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
@@ -609,16 +609,16 @@ export function FaqList(props: {
             autoComplete="off"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            aria-label={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
-            placeholder={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
+            aria-label={copy('faqSearch', 'Search the questions', 'ស្វែងរកសំណួរ')}
+            placeholder={copy('faqSearch', 'Search the questions', 'ស្វែងរកសំណួរ')}
             className={`h-11 w-full rounded-xl pl-10 pr-11 text-sm ${FIELD}`}
           />
           {query ? (
             <button
               type="button"
               className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-stone-600 dark:text-neutral-300"
-              aria-label={copy('clear', 'Clear', 'សម្អាត')}
-              title={copy('clear', 'Clear', 'សម្អាត')}
+              aria-label={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')}
+              title={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')}
               onClick={() => setQuery('')}
             >
               <X aria-hidden="true" className="h-4 w-4" />
@@ -666,8 +666,8 @@ export function FaqList(props: {
         </ul>
       ) : (
         <div className={`flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 text-sm text-stone-700 dark:text-neutral-300 ${SURFACE}`} role="status">
-          <span className="min-w-0 flex-1 leading-7 [overflow-wrap:anywhere]">{copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ').replace('{query}', activeQuery)}</span>
-          <button type="button" className={ICON_BUTTON} aria-label={copy('clear', 'Clear', 'សម្អាត')} title={copy('clear', 'Clear', 'សម្អាត')} onClick={() => setQuery('')}>
+          <span className="min-w-0 flex-1 leading-7 [overflow-wrap:anywhere]">{withTypedTerm(copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ'), '{query}', activeQuery)}</span>
+          <button type="button" className={ICON_BUTTON} aria-label={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')} title={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')} onClick={() => setQuery('')}>
             <X aria-hidden="true" className="h-4 w-4" />
           </button>
         </div>
@@ -868,7 +868,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
   const skinTypes = [
     { value: 'Dry', label: copy('skinDry', 'Dry', 'ស្ងួត') },
     { value: 'Oily', label: copy('skinOily', 'Oily', 'ខ្លាញ់') },
-    { value: 'Combination', label: copy('skinCombination', 'Combination', 'ចម្រុះ') },
+    { value: 'Combination', label: copy('skinCombination', 'Combination skin', 'ស្បែកចម្រុះ') },
     { value: 'Sensitive', label: copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម') },
     { value: 'Normal', label: copy('skinNormal', 'Normal', 'ធម្មតា') },
     { value: 'Acne-prone', label: copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន') },
@@ -1010,14 +1010,14 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
             type="button"
             className={ICON_BUTTON}
             onClick={clearAssistantState}
-            aria-label={copy('assistantReset', 'Clear')}
-            title={copy('assistantReset', 'Clear')}
+            aria-label={copy('assistantReset', 'Clear the question and answer')}
+            title={copy('assistantReset', 'Clear the question and answer')}
           >
             <RotateCcw aria-hidden="true" className="h-4 w-4" />
           </button>
           <button type="button" className={`${CHARCOAL_BUTTON} ml-auto`} onClick={send} disabled={assistantLoading}>
             <Send aria-hidden="true" className="h-4 w-4" />
-            {assistantLoading ? copy('assistantLoading', 'Thinking...') : copy('assistantSend', 'Send', 'ផ្ញើ')}
+            {assistantLoading ? copy('assistantLoading', 'Please wait…') : copy('assistantSend', 'Send', 'ផ្ញើ')}
           </button>
         </div>
       </div>
@@ -1026,7 +1026,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
 
       {assistantResponse?.summary ? (
         <div className={`mt-4 rounded-2xl p-4 ${SURFACE}`}>
-          <div className="text-xs font-semibold leading-6 text-stone-600 dark:text-neutral-300">{copy('assistantResults', 'Suggested matches')}</div>
+          <div className="text-xs font-semibold leading-6 text-stone-600 dark:text-neutral-300">{copy('assistantResults', 'Suggested products')}</div>
           <p className="mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300">{assistantResponse.summary}</p>
           {/* Backend returns follow_up_questions (snake_case); the camelCase followUpQuestions was
               pre-existing dead UI since askPortalAi returns the raw JSON body with no key remapping.
@@ -1096,7 +1096,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                   ) : null}
                 </div>
                 {item.reason ? <p className="mt-2 text-sm leading-7 text-stone-600 dark:text-neutral-300">{item.reason}</p> : null}
-                {item.fit_summary ? <p className="mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300"><span className="font-semibold text-[#23201b] dark:text-neutral-100">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</p> : null}
+                {item.fit_summary ? <p className="mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300"><span className="font-semibold text-[#23201b] dark:text-neutral-100">{copy('assistantWhy', 'Why recommended')}:</span> {item.fit_summary}</p> : null}
               </article>
             )
           })}

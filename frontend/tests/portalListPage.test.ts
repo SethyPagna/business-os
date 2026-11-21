@@ -74,7 +74,7 @@ for (const language of ['en', 'km'] as const) {
     assert.equal(text.split(PAYMENT[language]).length - 1, 1, 'the payment line is said once')
     assert.ok(text.includes(copy('contactButton', 'Contact', 'ទាក់ទង')), 'Contact is icon + word')
     assert.match(html, /aria-pressed="true"[^>]*data-portal-list-segment="list"|data-portal-list-segment="list"[^>]*aria-pressed="true"/, 'List is the pressed segment')
-    const fallbacks: Record<string, string> = { decreaseQty: 'Decrease quantity', increaseQty: 'Increase quantity', removeFromBucket: 'Remove', copyList: 'Copy list', downloadList: 'Download' }
+    const fallbacks: Record<string, string> = { decreaseQty: 'Decrease quantity', increaseQty: 'Increase quantity', removeFromBucket: 'Remove', copyList: 'Copy the list', downloadList: 'Download' }
     for (const [key, fallback] of Object.entries(fallbacks)) {
       const label = copy(key, fallback)
       assert.ok(label && html.includes(`aria-label="${label}"`) && html.includes(`title="${label}"`), `${key}: an icon-only button has an aria-label and a tooltip`)

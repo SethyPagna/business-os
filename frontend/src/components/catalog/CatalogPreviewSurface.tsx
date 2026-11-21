@@ -474,7 +474,7 @@ export default function CatalogPreviewSurface({
                           title={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
                         >
                           <MessageCircle className={HEADER_ICON_GLYPH} />
-                          <span className="hidden sm:inline">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
+                          <span translate="no" className="notranslate hidden sm:inline">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
                         </button>
                       )}
                     />

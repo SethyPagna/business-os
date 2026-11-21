@@ -28,7 +28,7 @@ import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogItems } from './catalogPagination'
 import { TopPager } from '../shared/PaginationControls'
-import { SectionShell, microLabelProps } from './catalogUi'
+import { SectionShell, microLabelProps, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
 import { PORTAL_PRIMARY_COLORS } from './portalButtons.ts'
 import { usePortalNavSearchSlot } from './portalNavSearchSlot.ts'
@@ -415,7 +415,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     && (showPromoStrip || visiblePromotionItems.length > 0 || !!promotionsBanner)
   const promotionsHeading = promotionsTitle || copy('promotionsSectionFallback', 'Featured offers')
   const searchTerm = String(search || '').trim()
-  const searchLabel = copy('searchProductsShort', 'Search products', 'ស្វែងរកផលិតផល')
+  const searchLabel = copy('searchProductsShort', 'Search products…', 'ស្វែងរកផលិតផល')
 
   // Section headers follow the shopper's View (brand by default, or category;
   // "all products" has none). They are computed per page from the order the
@@ -499,8 +499,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   // the shopper cannot see would leak it (the Worker refuses it too).
   const browseSortOptions: BrowseOption<PortalBrowseSort>[] = [
     { value: 'featured', icon: Sparkles, label: copy('portalSortFeatured', 'Featured'), tip: copy('portalSortFeaturedTip', 'Promotions first, then A-Z') },
-    { value: 'name_asc', icon: ArrowDownAZ, label: copy('portalSortNameAsc', 'A-Z'), tip: copy('portalSortNameAscTip', 'Name, A to Z') },
-    { value: 'name_desc', icon: ArrowDownZA, label: copy('portalSortNameDesc', 'Z-A'), tip: copy('portalSortNameDescTip', 'Name, Z to A') },
+    { value: 'name_asc', icon: ArrowDownAZ, label: copy('portalSortNameAsc', 'A-Z'), noTranslate: true, tip: copy('portalSortNameAscTip', 'Name, A to Z') },
+    { value: 'name_desc', icon: ArrowDownZA, label: copy('portalSortNameDesc', 'Z-A'), noTranslate: true, tip: copy('portalSortNameDescTip', 'Name, Z to A') },
     { value: 'price_asc', icon: ArrowUpNarrowWide, label: copy('portalSortPriceAsc', 'Low price'), tip: copy('portalSortPriceAscTip', 'Price, low to high') },
     { value: 'price_desc', icon: ArrowDownWideNarrow, label: copy('portalSortPriceDesc', 'High price'), tip: copy('portalSortPriceDescTip', 'Price, high to low') },
   ].filter((option) => previewConfig.showPrices === true || !isPortalPriceSort(option.value)) as BrowseOption<PortalBrowseSort>[]
@@ -514,10 +514,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   const renderFilterFields = () => (
     <>
       {setBrowseView ? (
-        <PortalBrowseRow label={copy('portalBrowseView', 'View')} options={browseViewOptions} value={browseView} defaultValue={DEFAULT_PORTAL_BROWSE_VIEW} onChange={setBrowseView} />
+        <PortalBrowseRow label={copy('portalBrowseView', 'Group by')} options={browseViewOptions} value={browseView} defaultValue={DEFAULT_PORTAL_BROWSE_VIEW} onChange={setBrowseView} />
       ) : null}
       {setBrowseSort ? (
-        <PortalBrowseRow label={copy('portalBrowseSort', 'Sort')} options={browseSortOptions} value={browseSort} defaultValue={DEFAULT_PORTAL_BROWSE_SORT} onChange={setBrowseSort} />
+        <PortalBrowseRow label={copy('portalBrowseSort', 'Sort by')} options={browseSortOptions} value={browseSort} defaultValue={DEFAULT_PORTAL_BROWSE_SORT} onChange={setBrowseSort} />
       ) : null}
 
       <PortalFilterRow label={copy('category', 'Category')}>
@@ -525,7 +525,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           copy={copy}
           label={copy('category', 'Category')}
           allLabel={copy('all', 'All')}
-          searchPlaceholder={copy('searchCategories', 'Search categories...')}
+          searchPlaceholder={copy('searchCategories', 'Search for categories...')}
           noMatchesLabel={copy('noMatches', 'No matches')}
           options={categories.map((category) => ({ value: category.name, label: category.name }))}
           selected={categoryFilter}
@@ -643,8 +643,8 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               type="button"
               data-search-clear="true"
               className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-xl text-stone-600 transition hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-[#d6b56b]"
-              aria-label={copy('clearSearch', 'Clear search', 'សម្អាតការស្វែងរក')}
-              title={copy('clearSearch', 'Clear search', 'សម្អាតការស្វែងរក')}
+              aria-label={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')}
+              title={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')}
               onClick={() => { setSearch(''); searchInputRef.current?.focus() }}
             >
               <X className="h-4 w-4" aria-hidden="true" />
@@ -686,7 +686,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     <div className="flex items-center gap-2">
                       {portalActiveFilterCount > 0 ? (
                         <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
-                          {copy('clear', 'Clear')}
+                          {copy('clear', 'Reset')}
                         </button>
                       ) : null}
                       <button
@@ -738,7 +738,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               <span className="text-sm font-semibold text-[#23201b] dark:text-neutral-100">{copy('filters', 'Filters')}</span>
               {portalActiveFilterCount > 0 ? (
                 <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-stone-600 hover:text-[#7a5c22] dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
-                  {copy('clear', 'Clear')}
+                  {copy('clear', 'Reset')}
                 </button>
               ) : null}
             </div>
@@ -771,7 +771,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : ''}</span>
             )}
             <span className="shrink-0 pt-1 font-semibold text-stone-700 dark:text-neutral-200">
-              {refreshingProducts ? copy('refreshing', 'Refreshing...') : loadingProducts ? copy('loadingProducts', 'Loading products...') : ''}
+              {refreshingProducts ? copy('refreshing', 'Updating…') : loadingProducts ? copy('loadingProducts', 'Loading products...') : ''}
             </span>
           </div>
         ) : null
@@ -787,7 +787,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       t={(key) => ({
         page: copy('page', 'Page'),
         of: copy('of', 'of'),
-        back: copy('back', 'Back'),
+        back: copy('portalPagerPrevious', 'Previous'),
         next: copy('next', 'Next'),
         per_page: copy('perPage', 'Per page'),
       })[key] || key}
@@ -970,7 +970,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           {onRetry ? (
             <button type="button" data-portal-retry="true" onClick={onRetry} className={BUTTON_QUIET_CLASS}>
               <RotateCcw className="h-4 w-4" aria-hidden="true" />
-              {copy('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+              {copy('retry', 'Try again', 'ព្យាយាមម្ដងទៀត')}
             </button>
           ) : null}
         </div>
@@ -1256,7 +1256,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         <div data-portal-empty="true" className={`mt-4 rounded-2xl border-dashed p-8 text-center text-sm ${PRODUCT_SURFACE_CLASS} ${PRODUCT_MUTED_TEXT_CLASS}`}>
           <p className="break-words">
             {searchTerm
-              ? replaceVars(copy('noProductsForSearch', 'No products match "{term}".', 'រកមិនឃើញផលិតផលសម្រាប់ "{term}"។'), { term: searchTerm })
+              ? withTypedTerm(copy('noProductsForSearch', 'No products match "{term}".', 'រកមិនឃើញផលិតផលសម្រាប់ "{term}"។'), '{term}', searchTerm)
               : copy('noProducts', 'No products matched the current filters.')}
           </p>
           {searchTerm || portalActiveFilterCount > 0 ? (
@@ -1264,13 +1264,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               {searchTerm ? (
                 <button type="button" data-empty-clear-search="true" onClick={() => setSearch('')} className={BUTTON_QUIET_CLASS}>
                   <X className="h-4 w-4" aria-hidden="true" />
-                  {copy('clearSearch', 'Clear search', 'សម្អាតការស្វែងរក')}
+                  {copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')}
                 </button>
               ) : null}
               {portalActiveFilterCount > 0 ? (
                 <button type="button" data-empty-clear-filters="true" onClick={clearPortalFilters} className={BUTTON_QUIET_CLASS}>
                   <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-                  {copy('clearFilters', 'Clear filters', 'សម្អាតតម្រង')}
+                  {copy('clearFilters', 'Reset filters', 'សម្អាតតម្រង')}
                 </button>
               ) : null}
             </div>
