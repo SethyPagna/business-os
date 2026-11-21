@@ -16,9 +16,24 @@
 --   age_confirmed_at (0262): 15 in all. All 15 are carried. The first guard below refuses to run if the table has
 --   any other column count, so a column added later cannot be dropped by this rebuild.
 --   No table references portal_accounts by foreign key and no trigger or view names it, so the
---   rename / create / copy / drop below touches nothing else.
+--   create / copy / drop / rename below touches nothing else.
 --
--- PRE-ASSERTIONS (read-only; ops/queries/g38-s1-premigration.sql runs them all)
+-- ORDER (designed for the worst case: remote D1 may run each statement on its own, so a stop between two
+-- statements leaves the database in that state; nothing here relies on the file being one unit)
+--   1. guard table, then every guard that can fire on the live data (columns_known_15, no_duplicate_contact_links);
+--   2. DROP any leftover portal_accounts_0321_new (only after the guards, so a re-run on a database that is
+--      already past step 5 is refused first and can never drop the only copy);
+--   3. CREATE portal_accounts_0321_new, copy every row into it, hold the AUTOINCREMENT mark, and run every
+--      verification guard (row_count_equal, old_columns_identical, age_confirmed_count_equal, sequence_preserved,
+--      member_codes_unminted) against the two tables side by side. The live table is not touched so far;
+--   4. the first statement that removes the old table: DROP TABLE portal_accounts;
+--   5. ALTER TABLE portal_accounts_0321_new RENAME TO portal_accounts, the five indexes, DROP of the guard table.
+--      None of these reads data, so none can fail on valid data.
+--   A stop before step 4 loses nothing: portal_accounts is exactly as it was; fix the cause and run the file again.
+--   A stop at step 4 or 5 has the rows in portal_accounts_0321_new: see RECOVERY.
+--
+-- PRE-ASSERTIONS (read-only; ops/queries/g38-s1-premigration.sql runs the data checks; the ops guard forbids
+-- pragma functions, so the column count is enforced by this file's first guard, columns_known_15)
 --   SELECT COUNT(*) AS account_rows, COALESCE(MAX(id), 0) AS max_id FROM portal_accounts;
 --   SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts';        -- record it
 --   SELECT COUNT(*) FROM portal_accounts WHERE age_confirmed_at IS NOT NULL;  -- record it
@@ -28,8 +43,7 @@
 --   SELECT contact_id, COUNT(*) FROM portal_accounts WHERE contact_id IS NOT NULL
 --     GROUP BY contact_id HAVING COUNT(*) > 1;                              -- expect no rows
 --
--- IN-FILE ASSERTIONS (portal_members_guard_0321: a failed CHECK aborts the file, and D1 applies a migration
--- file as one unit, so nothing is half-done):
+-- IN-FILE ASSERTIONS (portal_members_guard_0321: a failed CHECK aborts the file at that statement):
 --   columns_known_15             the table has exactly the 15 columns this file copies;
 --   no_duplicate_contact_links   two accounts on one customer is a staff decision, so the file refuses to run;
 --   row_count_equal              same number of rows after the copy;
@@ -48,14 +62,27 @@
 --   SELECT COUNT(*) FROM sqlite_master WHERE name IN ('idx_portal_accounts_phone',
 --     'idx_portal_accounts_membership', 'idx_portal_accounts_member_code',
 --     'idx_portal_accounts_contact', 'idx_portal_accounts_status_seen');     -- 5
---   SELECT COUNT(*) FROM sqlite_master WHERE name = 'portal_accounts_0321_old';  -- 0
+--   SELECT COUNT(*) FROM sqlite_master WHERE name IN ('portal_accounts_0321_new', 'portal_members_guard_0321');  -- 0
 --
--- RECOVERY
---   Before apply: nothing to undo (the file is all-or-nothing).
---   After apply: take a D1 Time Travel bookmark BEFORE applying (7 days on Free) and roll the Worker back first.
---   The previous Worker reads only columns that still exist, but it would INSERT accounts with a NULL
---   member_code and fail on NULL phone rows, so restore the old shape with a forward file (append-only: never
---   edit this one):
+-- RECOVERY IF THE FILE STOPS (each case is run by test-migration-0321-portal-members-separation-pure.cjs)
+--   Take a D1 Time Travel bookmark BEFORE applying (7 days on Free).
+--   Stop at any statement BEFORE `DROP TABLE portal_accounts;` (a guard fired, or an error in the copy):
+--     portal_accounts is unchanged (15 columns, all rows, the 0087 indexes). Leftovers are harmless
+--     (portal_members_guard_0321, portal_accounts_0321_new). Fix the cause and apply the file again: it clears
+--     both leftovers itself. To clean up without re-running:
+--       DROP TABLE IF EXISTS portal_accounts_0321_new;
+--       DROP TABLE IF EXISTS portal_members_guard_0321;
+--   Stop right AFTER `DROP TABLE portal_accounts;` (no portal_accounts table, every row in
+--   portal_accounts_0321_new; applying the file again is refused by columns_known_15 and changes nothing):
+--       ALTER TABLE portal_accounts_0321_new RENAME TO portal_accounts;
+--     then the five CREATE INDEX statements at the end of this file, then
+--       DROP TABLE IF EXISTS portal_members_guard_0321;
+--   Stop after the rename (portal_accounts is the new table, some or all indexes missing): run the five
+--   CREATE INDEX IF NOT EXISTS statements at the end of this file, then
+--       DROP TABLE IF EXISTS portal_members_guard_0321;
+--   After a complete apply: roll the Worker back first if needed. The previous Worker reads only columns that
+--   still exist, but it would INSERT accounts with a NULL member_code and fail on NULL phone rows, so restore the
+--   old shape with a forward file (append-only: never edit this one):
 --     ALTER TABLE portal_accounts RENAME TO portal_accounts_0321_new;
 --     CREATE TABLE portal_accounts (<0087, 0130 and 0262 columns, NOT NULL as before>);
 --     INSERT INTO portal_accounts (<the 15 old columns, age_confirmed_at included>)
@@ -80,9 +107,9 @@ SELECT 'no_duplicate_contact_links', CASE WHEN NOT EXISTS (
   GROUP BY contact_id HAVING COUNT(*) > 1
 ) THEN 1 ELSE 0 END;
 
-ALTER TABLE portal_accounts RENAME TO portal_accounts_0321_old;
+DROP TABLE IF EXISTS portal_accounts_0321_new;
 
-CREATE TABLE portal_accounts (
+CREATE TABLE portal_accounts_0321_new (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   membership_id TEXT,
   name TEXT NOT NULL,
@@ -117,7 +144,7 @@ CREATE TABLE portal_accounts (
   closed_at TEXT
 );
 
-INSERT INTO portal_accounts (
+INSERT INTO portal_accounts_0321_new (
   id, membership_id, name, phone, password_hash, email, contact_id,
   cart_json, wishlist_json, created_at, updated_at,
   consent_version, consent_at, consent_locale, age_confirmed_at,
@@ -144,64 +171,74 @@ SELECT
     COALESCE(datetime(o.updated_at), ''),
     COALESCE(datetime(o.created_at), '')
   ), '')
-FROM portal_accounts_0321_old o
+FROM portal_accounts o
 ORDER BY o.id;
 
 -- Keep the AUTOINCREMENT high-water mark: copying rows only sets it to MAX(id), so an id above that (a row
 -- removed in the past) could be issued again and inherit that account's leftover session rows. A placeholder
--- at the old mark raises it, then leaves.
-INSERT INTO portal_accounts (id, name, status)
+-- at the old mark raises it, then leaves. The delete names the placeholder's whole shape (closed, no phone, no
+-- password) and an id above every copied row, so no real account can be removed by it.
+INSERT INTO portal_accounts_0321_new (id, name, status)
 SELECT s.seq, '__portal_members_0321_sequence__', 'closed'
 FROM sqlite_sequence s
-WHERE s.name = 'portal_accounts_0321_old'
-  AND s.seq > (SELECT COALESCE(MAX(id), 0) FROM portal_accounts);
-DELETE FROM portal_accounts WHERE name = '__portal_members_0321_sequence__';
+WHERE s.name = 'portal_accounts'
+  AND s.seq > (SELECT COALESCE(MAX(id), 0) FROM portal_accounts_0321_new);
+DELETE FROM portal_accounts_0321_new
+WHERE name = '__portal_members_0321_sequence__'
+  AND status = 'closed'
+  AND phone IS NULL
+  AND password_hash IS NULL
+  AND id > (SELECT COALESCE(MAX(id), 0) FROM portal_accounts);
 
 INSERT INTO portal_members_guard_0321 (check_name, ok)
 SELECT 'row_count_equal', CASE WHEN
-  (SELECT COUNT(*) FROM portal_accounts) = (SELECT COUNT(*) FROM portal_accounts_0321_old)
+  (SELECT COUNT(*) FROM portal_accounts_0321_new) = (SELECT COUNT(*) FROM portal_accounts)
 THEN 1 ELSE 0 END;
 
 INSERT INTO portal_members_guard_0321 (check_name, ok)
 SELECT 'old_columns_identical', CASE WHEN NOT EXISTS (
   SELECT id, membership_id, name, phone, password_hash, email, contact_id, cart_json, wishlist_json,
-         created_at, updated_at, consent_version, consent_at, consent_locale, age_confirmed_at FROM portal_accounts_0321_old
+         created_at, updated_at, consent_version, consent_at, consent_locale, age_confirmed_at FROM portal_accounts
   EXCEPT
   SELECT id, membership_id, name, phone, password_hash, email, contact_id, cart_json, wishlist_json,
-         created_at, updated_at, consent_version, consent_at, consent_locale, age_confirmed_at FROM portal_accounts
+         created_at, updated_at, consent_version, consent_at, consent_locale, age_confirmed_at FROM portal_accounts_0321_new
 ) AND NOT EXISTS (
   SELECT id, membership_id, name, phone, password_hash, email, contact_id, cart_json, wishlist_json,
-         created_at, updated_at, consent_version, consent_at, consent_locale, age_confirmed_at FROM portal_accounts
+         created_at, updated_at, consent_version, consent_at, consent_locale, age_confirmed_at FROM portal_accounts_0321_new
   EXCEPT
   SELECT id, membership_id, name, phone, password_hash, email, contact_id, cart_json, wishlist_json,
-         created_at, updated_at, consent_version, consent_at, consent_locale, age_confirmed_at FROM portal_accounts_0321_old
+         created_at, updated_at, consent_version, consent_at, consent_locale, age_confirmed_at FROM portal_accounts
 ) THEN 1 ELSE 0 END;
 
 INSERT INTO portal_members_guard_0321 (check_name, ok)
 SELECT 'age_confirmed_count_equal', CASE WHEN
-  (SELECT COUNT(*) FROM portal_accounts WHERE age_confirmed_at IS NOT NULL)
-    = (SELECT COUNT(*) FROM portal_accounts_0321_old WHERE age_confirmed_at IS NOT NULL)
+  (SELECT COUNT(*) FROM portal_accounts_0321_new WHERE age_confirmed_at IS NOT NULL)
+    = (SELECT COUNT(*) FROM portal_accounts WHERE age_confirmed_at IS NOT NULL)
 THEN 1 ELSE 0 END;
 
 INSERT INTO portal_members_guard_0321 (check_name, ok)
 SELECT 'sequence_preserved', CASE WHEN
-  COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts'), 0)
-    >= COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts_0321_old'), 0)
+  COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts_0321_new'), 0)
+    >= COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts'), 0)
 THEN 1 ELSE 0 END;
 
 INSERT INTO portal_members_guard_0321 (check_name, ok)
 SELECT 'member_codes_unminted', CASE WHEN NOT EXISTS (
-  SELECT 1 FROM portal_accounts WHERE member_code IS NOT NULL
+  SELECT 1 FROM portal_accounts_0321_new WHERE member_code IS NOT NULL
 ) THEN 1 ELSE 0 END;
 
-DROP TABLE portal_accounts_0321_old;
+DROP TABLE portal_accounts;
+
+ALTER TABLE portal_accounts_0321_new RENAME TO portal_accounts;
 
 -- One account per phone, where a phone is set (the sign-in key for phone + password accounts).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_accounts_phone
   ON portal_accounts (phone) WHERE phone IS NOT NULL;
--- Legacy LC ids stay case-insensitively unique (same rule as 0087).
+-- Legacy LC ids stay case-insensitively unique (same rule as 0087). Not partial: SQLite UNIQUE allows many NULLs,
+-- and a partial index would not serve the lookups in lib/membershipNumber.ts and lib/importEngine.ts
+-- (lower(trim(membership_id)) GLOB / = ...), which do not repeat the partial predicate.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_accounts_membership
-  ON portal_accounts (lower(trim(membership_id))) WHERE membership_id IS NOT NULL;
+  ON portal_accounts (lower(trim(membership_id)));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_accounts_member_code
   ON portal_accounts (member_code) WHERE member_code IS NOT NULL;
 -- One member per customer: the link is a pointer, never shared.

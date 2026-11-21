@@ -166,7 +166,7 @@ function cutBetween(sql, startMarker, endMarker) {
 }
 
 check('a removed id is never reissued; without the placeholder the guard stops the file, and without both the id comes back', () => {
-  const noPlaceholder = cutBetween(SQL, 'INSERT INTO portal_accounts (id, name, status)', "WHERE name = '__portal_members_0321_sequence__';\n")
+  const noPlaceholder = cutBetween(SQL, 'INSERT INTO portal_accounts_0321_new (id, name, status)', 'AND id > (SELECT COALESCE(MAX(id), 0) FROM portal_accounts);\n')
   assert.notEqual(noPlaceholder, SQL)
   assert.throws(() => applyAtomically(beforeMigration(), noPlaceholder), /CHECK constraint failed/)
   const noGuard = cutBetween(noPlaceholder, "INSERT INTO portal_members_guard_0321 (check_name, ok)\nSELECT 'sequence_preserved'", 'THEN 1 ELSE 0 END;\n')
@@ -223,6 +223,149 @@ check('an empty table (production today) rebuilds to the new shape with no rows'
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM portal_accounts').get().n, 0)
   assert.equal(columnsOf(raw).length, 21)
   assert.equal(Number(raw.prepare("INSERT INTO portal_accounts (name) VALUES ('First')").run().lastInsertRowid), 1)
+})
+
+// ---- worst case: remote D1 may not apply the file as one unit, so a stop between statements leaves that state ----
+function statementsOf(sql) {
+  const body = sql.split('\n').filter((line) => !/^\s*--/.test(line)).join('\n')
+  return body.split(/;[ \t]*\n/).map((s) => s.trim()).filter(Boolean).map((s) => `${s};`)
+}
+const STATEMENTS = statementsOf(SQL)
+const DROP_OLD = 'DROP TABLE portal_accounts;'
+const DROP_INDEX = STATEMENTS.indexOf(DROP_OLD)
+const INDEX_STATEMENTS = STATEMENTS.filter((s) => /^CREATE (UNIQUE )?INDEX IF NOT EXISTS/.test(s))
+const RENAME_NEW = 'ALTER TABLE portal_accounts_0321_new RENAME TO portal_accounts;'
+const DROP_GUARD = 'DROP TABLE IF EXISTS portal_members_guard_0321;'
+
+// Every guard that can fire must run before the first statement that removes or renames portal_accounts; every
+// statement after it must be one that cannot fail on valid data (rename of the new table, IF NOT EXISTS index, IF EXISTS drop).
+function orderViolations(sql) {
+  const statements = statementsOf(sql)
+  const first = statements.findIndex((s) => /^DROP TABLE portal_accounts;$/.test(s) || /^ALTER TABLE portal_accounts RENAME/.test(s))
+  if (first < 0) return ['no statement removes the old table']
+  const problems = []
+  statements.forEach((statement, index) => {
+    if (index < first) return
+    const allowed = index === first || statement === RENAME_NEW || /^CREATE (UNIQUE )?INDEX IF NOT EXISTS/.test(statement) || statement === DROP_GUARD
+    if (!allowed) problems.push(`after the old table is removed: ${statement.slice(0, 70)}`)
+  })
+  return problems
+}
+
+function applyStatements(raw, statements) { for (const statement of statements) raw.exec(statement) }
+function signature(raw) {
+  const sqlOf = (type) => raw.prepare('SELECT name, sql FROM sqlite_master WHERE tbl_name = ? AND type = ? ORDER BY name').all('portal_accounts', type).map((r) => `${r.name}: ${String(r.sql).replace(/\s+/g, ' ')}`)
+  return JSON.stringify({
+    columns: columnsOf(raw),
+    rows: raw.prepare('SELECT * FROM portal_accounts ORDER BY id').all().map((r) => ({ ...r })),
+    tables: sqlOf('table'),
+    indexes: sqlOf('index'),
+    seq: raw.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts'").get()?.seq ?? null,
+    leftovers: raw.prepare("SELECT name FROM sqlite_master WHERE name IN ('portal_accounts_0321_new', 'portal_accounts_0321_old', 'portal_members_guard_0321') ORDER BY name").all().map((r) => r.name),
+  })
+}
+const cleanRun = beforeMigration()
+applyStatements(cleanRun, STATEMENTS)
+const CLEAN = signature(cleanRun)
+const BEFORE_ROWS = beforeMigration().prepare(`SELECT ${OLD_LIST} FROM portal_accounts ORDER BY id`).all().map((r) => ({ ...r }))
+const rowsOf = (raw, table) => raw.prepare(`SELECT ${OLD_LIST} FROM ${table} ORDER BY id`).all().map((r) => ({ ...r }))
+
+check('the order: every guard runs before the first statement that removes the old table, and only statements that cannot fail follow it', () => {
+  assert.ok(DROP_INDEX > 0)
+  assert.deepEqual(orderViolations(SQL), [])
+  const guards = STATEMENTS.map((s, i) => [s, i]).filter(([s]) => /^INSERT INTO portal_members_guard_0321/.test(s))
+  assert.equal(guards.length, 7)
+  assert.ok(guards.every(([, i]) => i < DROP_INDEX), 'all seven guards precede the DROP')
+  assert.ok(!STATEMENTS.slice(0, DROP_INDEX).some((s) => /^ALTER TABLE portal_accounts /.test(s) || /^DROP TABLE portal_accounts\b/.test(s)))
+  const lastGuard = STATEMENTS.findIndex((s) => s.includes("'member_codes_unminted'"))
+  const moved = STATEMENTS.slice()
+  const [guard] = moved.splice(lastGuard, 1)
+  moved.push(guard)
+  assert.notDeepEqual(orderViolations(moved.join('\n')), [], 'the mutant that runs a guard after the DROP is reported')
+  const renameFirst = [STATEMENTS[0], 'ALTER TABLE portal_accounts RENAME TO portal_accounts_0321_old;', 'CREATE TABLE portal_accounts (id INTEGER);', STATEMENTS.find((s) => s.includes("'row_count_equal'")), 'DROP TABLE portal_accounts_0321_old;'].join('\n')
+  assert.notDeepEqual(orderViolations(renameFirst), [], 'the mutant with the old rename-first order is reported')
+})
+
+check('a stop before any statement before the DROP leaves portal_accounts exactly as it was; running the file again from there ends in the clean result', () => {
+  for (let stopAt = 0; stopAt <= DROP_INDEX; stopAt += 1) {
+    const raw = beforeMigration()
+    applyStatements(raw, STATEMENTS.slice(0, stopAt))
+    assert.deepEqual(columnsOf(raw), OLD_COLUMNS, `stop ${stopAt}`)
+    assert.deepEqual(rowsOf(raw, 'portal_accounts'), BEFORE_ROWS, `stop ${stopAt}`)
+    for (const index of ['idx_portal_accounts_phone', 'idx_portal_accounts_membership', 'idx_portal_accounts_contact']) {
+      assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM sqlite_master WHERE name = ?').get(index).n, 1, `stop ${stopAt}: ${index}`)
+    }
+    assert.equal(raw.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts'").get().seq, 6, `stop ${stopAt}`)
+    applyStatements(raw, STATEMENTS)
+    assert.equal(signature(raw), CLEAN, `rerun after a stop before statement ${stopAt}`)
+  }
+})
+
+check('a stop right after the old table is dropped keeps every row in portal_accounts_0321_new; applying the file again is refused and drops nothing; the recorded recovery restores the clean result', () => {
+  const raw = beforeMigration()
+  applyStatements(raw, STATEMENTS.slice(0, DROP_INDEX + 1))
+  assert.equal(raw.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'portal_accounts'").get().n, 0)
+  assert.deepEqual(rowsOf(raw, 'portal_accounts_0321_new'), BEFORE_ROWS)
+  assert.throws(() => applyStatements(raw, STATEMENTS), /CHECK constraint failed/)
+  assert.deepEqual(rowsOf(raw, 'portal_accounts_0321_new'), BEFORE_ROWS, 'the only copy of the data is still there')
+  assert.ok(SQL.includes(`--       ${RENAME_NEW}`), 'the note records the rename')
+  assert.ok(SQL.includes(`--       ${DROP_GUARD}`), 'the note records the guard clean-up')
+  raw.exec(RENAME_NEW)
+  for (const statement of INDEX_STATEMENTS) raw.exec(statement)
+  raw.exec(DROP_GUARD)
+  assert.equal(signature(raw), CLEAN)
+})
+
+check('a stop after the rename, at any index, is repaired by the CREATE INDEX IF NOT EXISTS statements and the guard drop; applying the file again is refused', () => {
+  const renameIndex = STATEMENTS.indexOf(RENAME_NEW)
+  assert.equal(renameIndex, DROP_INDEX + 1)
+  for (let stopAt = renameIndex + 1; stopAt < STATEMENTS.length; stopAt += 1) {
+    const raw = beforeMigration()
+    applyStatements(raw, STATEMENTS.slice(0, stopAt))
+    assert.deepEqual(rowsOf(raw, 'portal_accounts'), BEFORE_ROWS, `stop ${stopAt}`)
+    assert.throws(() => applyStatements(raw, STATEMENTS), /CHECK constraint failed/, `stop ${stopAt}`)
+    for (const statement of INDEX_STATEMENTS) raw.exec(statement)
+    raw.exec(DROP_GUARD)
+    assert.equal(signature(raw), CLEAN, `repair after a stop before statement ${stopAt}`)
+  }
+})
+
+check('a guard that fires BEFORE the drop, run without any transaction, leaves the live table untouched (duplicate contact link, and a copy that loses a value)', () => {
+  const dup = beforeMigration()
+  dup.exec('DROP INDEX idx_portal_accounts_contact')
+  dup.prepare('UPDATE portal_accounts SET contact_id = 10 WHERE id = 3').run()
+  assert.throws(() => applyStatements(dup, STATEMENTS), /CHECK constraint failed/)
+  assert.deepEqual(columnsOf(dup), OLD_COLUMNS)
+  assert.equal(dup.prepare('SELECT COUNT(*) AS n FROM portal_accounts').get().n, 4)
+  assert.equal(dup.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'portal_accounts_0321_new'").get().n, 0, 'refused before anything was created')
+  const lossy = beforeMigration()
+  assert.throws(() => applyStatements(lossy, statementsOf(SQL.replace('o.consent_locale, o.age_confirmed_at,', 'o.consent_locale, NULL,'))), /CHECK constraint failed/)
+  assert.deepEqual(columnsOf(lossy), OLD_COLUMNS, 'the verification guard fired while the live table was still whole')
+  assert.deepEqual(rowsOf(lossy, 'portal_accounts'), BEFORE_ROWS)
+})
+
+check('a real account named like the placeholder survives; the mutant that deletes by name alone removes it', () => {
+  const NAME_SQL = "__portal_members_0321_sequence__"
+  const withReal = () => {
+    const raw = beforeMigration()
+    raw.prepare("INSERT INTO portal_accounts (id, membership_id, name, phone, password_hash) VALUES (4, 'LC-00040', ?, '012400400', '$pbkdf2-sha256$d')").run(NAME_SQL)
+    return raw
+  }
+  const raw = withReal()
+  applyAtomically(raw, SQL)
+  assert.deepEqual({ ...raw.prepare('SELECT id, name, phone, status FROM portal_accounts WHERE id = 4').get() }, { id: 4, name: NAME_SQL, phone: '012400400', status: 'active' })
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM portal_accounts WHERE name = ?').get(NAME_SQL).n, 1)
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM portal_accounts WHERE id > 6').get().n, 0, 'the placeholder at id 6 is gone')
+  assert.equal(Number(raw.prepare("INSERT INTO portal_accounts (name) VALUES ('After')").run().lastInsertRowid), 7)
+
+  const deleteStatement = STATEMENTS.find((s) => s.startsWith('DELETE FROM portal_accounts_0321_new'))
+  assert.ok(deleteStatement)
+  const mutantSql = SQL.replace(/DELETE FROM portal_accounts_0321_new\nWHERE name = '__portal_members_0321_sequence__'[\s\S]*?FROM portal_accounts\);\n/, "DELETE FROM portal_accounts_0321_new WHERE name = '__portal_members_0321_sequence__';\n")
+  assert.notEqual(mutantSql, SQL)
+  const mutant = withReal()
+  assert.throws(() => applyAtomically(mutant, mutantSql), /CHECK constraint failed/, 'the name-only delete removes a real account, which the row-count guard turns into a refused migration')
+  assert.equal(mutant.prepare('SELECT COUNT(*) AS n FROM portal_accounts WHERE id = 4').get().n, 1)
+  assert.ok(columnsOf(mutant).length === 15, 'and the live table stays whole')
 })
 
 console.log(`\n${passed} passed${failed ? `, ${failed} FAILED` : ''}`)
