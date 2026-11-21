@@ -206,4 +206,17 @@ check('the Website Editor preview gets the dock too: a sticky zero-height row in
   assert.match(renderDock('en'), /\bfixed\b/, 'control: the live dock is fixed')
 })
 
+check('every dock menu hands focus back to its opener on close (Esc included, from any inner view): the menus go through FocusReturnMenu', () => {
+  const dock = read('components/catalog/PortalDock.tsx')
+  const contact = read('components/catalog/PortalContactMenu.tsx')
+  // LazyPortalMenu swaps the trigger node when it closes, so PortalMenu's own focus() lands on a removed button: the wrapper refocuses the live one.
+  assert.equal((dock.match(/<FocusReturnMenu/g) || []).length, 2, 'the phone menu and the wide Language menu')
+  assert.doesNotMatch(dock, /<LazyPortalMenu/, 'control: a bare LazyPortalMenu in the dock would lose focus on close')
+  const refocuses = (source: string) => ['export function FocusReturnMenu', 'window.requestAnimationFrame(() => window.requestAnimationFrame', 'resolveContactFocusTarget<HTMLElement>', 'target?.focus'].every((part) => source.includes(part))
+  assert.ok(refocuses(contact), 'the wrapper refocuses the live trigger after the trigger swap')
+  assert.ok(!refocuses(contact.split('target?.focus').join('target')), 'control: a wrapper that never calls focus fails the scan')
+  assert.match(contact, /<FocusReturnMenu\s+align=\{align}/, 'the Contact panel uses the same wrapper')
+  assert.doesNotMatch(contact, /<LazyPortalMenu\s+align/, 'one implementation, not two')
+})
+
 console.log('portalDock: ' + passed + ' checks passed')
