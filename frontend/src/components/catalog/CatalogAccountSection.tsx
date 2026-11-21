@@ -55,7 +55,7 @@ export default function CatalogAccountSection({
   signupEnabled?: boolean
   /** The Worker's refusal code for `error` (usePortalAccount errorCode). */
   errorCode?: string
-  /** "Forgot password?" opens the Contact menu with these. None: the link is not shown (there would be nowhere to go). */
+  /** "Forgot password?" opens the Contact menu with these. None: a plain line (data-portal-forgot-password-hint) tells the shopper to ask the shop, since there is no menu to open. */
   contactEntries?: readonly PortalContactEntry[]
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
@@ -228,7 +228,11 @@ export default function CatalogAccountSection({
                 </button>
               )}
             />
-          ) : null}
+          ) : (
+            <p data-portal-forgot-password-hint="" className="text-sm text-stone-600 dark:text-neutral-300">
+              {copy('forgotPasswordAskShop', 'Forgot your password? Ask the shop to reset it.', 'ភ្លេចពាក្យសម្ងាត់? សូមសុំហាងកំណត់ថ្មី។')}
+            </p>
+          )}
         </form>
       ) : (
         <form onSubmit={onSignUp} className="space-y-3" autoComplete="on">
