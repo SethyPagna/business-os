@@ -187,7 +187,7 @@ async function loadPreferences(env: Env) {
 // answered from the Workers Cache API for a short while.
 //
 // The sections the /summary handler marks ttlOnly in its cachedSection calls (since the owner's 11 Nov decision: the bell may be up to
-// 5 minutes old and says when it was computed) are keyed by their INPUTS only (low-stock config, expiry window and the like) and live for getPlanLimits(env).notificationSectionCacheSeconds
+// 5 minutes old and says when its producer STARTED) are keyed by their INPUTS only (low-stock config, expiry window and the like) and live for getPlanLimits(env).notificationSectionCacheSeconds
 // whatever happens to the data meanwhile: a sale on another till no longer makes the next poll re-walk
 // the catalog. The actor's own write must never show stale, so the bell asks for `?fresh=1` after its
 // own bell-relevant write (frontend/src/api/bellFreshness.ts: `fresh=1`, or `fresh=a,b` naming only the sections the write resolves) or on the refresh button: that request recomputes and overwrites the

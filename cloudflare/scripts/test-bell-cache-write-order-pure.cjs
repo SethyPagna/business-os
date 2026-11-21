@@ -16,6 +16,7 @@
 //   match before the producer, not the put   -> case 2
 //   the header is ignored (always write)     -> 9a
 //   an entry without the header counts as newer (never write) -> 9c, 9d
+//   the header is set at the put, not the start              -> C3
 //
 // Run: node scripts/test-bell-cache-write-order-pure.cjs
 const assert = require('node:assert/strict')
@@ -418,6 +419,17 @@ async function main() {
     const next = await plain()
     assert.equal(next.json.generatedAt, new Date(T).toISOString())
     assert.equal(res.status, 200)
+  })
+
+  await check('C3. the x-bell-at header is the START of the producer, not the time of the put: a producer that takes 5 s stores a header equal to t0', async () => {
+    at(T)
+    afterInventoryRows = async () => { at(T + 5000) }
+    await plain()
+    const response = cacheStore.get(knownKey)
+    assert.ok(response, 'the entry was stored')
+    assert.equal(Number(response.headers.get('x-bell-at')), T, 'the header says when the producer started')
+    assert.notEqual(Number(response.headers.get('x-bell-at')), T + 5000, 'control: the put happened 5 s after the start')
+    assert.equal(clock.t, T + 5000, 'control: the clock really moved during the producer')
   })
 
   Date.now = realNow

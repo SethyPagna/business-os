@@ -491,13 +491,21 @@ check('Inventory Check bounds come from the plan: no numeric literal caps the li
   assert.deepEqual([free.inventoryCheckProductsPerSubmission, paid.inventoryCheckProductsPerSubmission], [40, 500])
 })
 
-check('the bell section lifetime is a plan field the follow-up arithmetic bounds: L + 25 s slack + 20 s jitter + 8 s read must stay within the 5 minutes the owner allowed (L <= 247), 245 s on both tiers', async () => {
-  const SLACK_S = 25, JITTER_S = 20, READ_LIMIT_S = 8, OWNER_LIMIT_S = 300
-  const ceiling = OWNER_LIMIT_S - SLACK_S - JITTER_S - READ_LIMIT_S
-  assert.equal(ceiling, 247)
+check('the bell section lifetime is a plan field the follow-up arithmetic bounds: L + slack + jitter + merge window + 8 s read must stay within the 5 minutes the owner allowed (L <= 246), 245 s on both tiers', async () => {
+  const followUp = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'api', 'bellFollowUp.ts'), 'utf8')
+  const constantMs = (name) => {
+    const found = new RegExp('export const ' + name + '\\s*=\\s*([0-9_]+)').exec(followUp)
+    assert.ok(found, name + ' must be an exported number in frontend/src/api/bellFollowUp.ts (renamed or removed?)')
+    return Number(found[1].replace(/_/g, '')) / 1000
+  }
+  const SLACK_S = constantMs('BELL_FOLLOW_UP_SLACK_MS'), JITTER_S = constantMs('BELL_FOLLOW_UP_JITTER_MS'), MERGE_S = constantMs('BELL_EVENT_MERGE_MS')
+  const READ_LIMIT_S = 8, OWNER_LIMIT_S = 300
+  const ceiling = OWNER_LIMIT_S - SLACK_S - JITTER_S - MERGE_S - READ_LIMIT_S
+  assert.equal(ceiling, 246, 'the highest allowed lifetime is 300 - ' + SLACK_S + ' - ' + JITTER_S + ' - ' + MERGE_S + ' - ' + READ_LIMIT_S + ' = ' + ceiling + ' (a dropped term would give 247)')
   for (const tier of ['free', 'paid']) {
     const seconds = PLAN_LIMITS_BY_TIER[tier].notificationSectionCacheSeconds
-    assert.ok(Number.isInteger(seconds) && seconds > 0 && seconds <= ceiling, tier + ' lifetime ' + seconds + ' s: ' + seconds + ' + ' + SLACK_S + ' + ' + JITTER_S + ' + ' + READ_LIMIT_S + ' = ' + (seconds + SLACK_S + JITTER_S + READ_LIMIT_S) + ' s must be <= ' + OWNER_LIMIT_S + ' s (the bell is at most 5 minutes old), so the field must be 1..' + ceiling)
+    const worst = seconds + SLACK_S + JITTER_S + MERGE_S + READ_LIMIT_S
+    assert.ok(Number.isInteger(seconds) && seconds > 0 && worst <= OWNER_LIMIT_S, tier + ' lifetime ' + seconds + ' s: ' + seconds + ' + ' + SLACK_S + ' + ' + JITTER_S + ' + ' + MERGE_S + ' + ' + READ_LIMIT_S + ' = ' + worst + ' s must be <= ' + OWNER_LIMIT_S + ' s (the bell is at most 5 minutes old), so the field must be 1..' + ceiling)
   }
   assert.equal(PLAN_LIMITS_BY_TIER.free.notificationSectionCacheSeconds, 245)
   assert.equal(PLAN_LIMITS_BY_TIER.paid.notificationSectionCacheSeconds, 245)
