@@ -757,13 +757,15 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     }
   }, [tr, visibilityActive])
 
-  // After a reload a sync event caused, ONE plain reload one section lifetime (plus slack) later on a timer of its own: a device whose reload was served
-  // an entry older than the event is correct again by then. loadSummary's idle timer never replaces it.
+  // After a sync event, one plain reload at the oldest event not yet covered + one section lifetime + slack + jitter, on a timer of its own: a device whose
+  // reload was served an entry older than the event is correct again by then. loadSummary's idle timer never replaces it.
   const bellFollowUpRef = useRef<ReturnType<typeof createBellFollowUp> | null>(null)
   useEffect(() => {
     if (!visibilityActive) return undefined
     const followUp = createBellFollowUp({
       lifetimeSeconds: getSectionLifetimeSeconds,
+      now: () => performance.now(),
+      random: Math.random,
       setTimer: (run, delayMs) => window.setTimeout(run, delayMs),
       clearTimer: (handle) => window.clearTimeout(handle as number),
       isHidden: () => document.visibilityState === 'hidden',
