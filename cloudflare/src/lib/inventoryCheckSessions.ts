@@ -301,10 +301,12 @@ export const countDiffersSql = (i: string, eps: string, dated = true): string =>
  * rejected it (a rejected line is never applied). The lines are the set the approval was created with (line_set_json, migration 0316): one stored answer for every reader, whatever the rule that built it
  * (a product whose received dates differ with equal totals is a line). Only an approval with no recorded set (NULL: made by a Worker that does not know the column, in a deploy window or after a rollback) falls back to the engine's own rule, countDiffersSql (the item total or any received date), so every reader and the engine agree for it too.
  */
+/** The three conditions that keep a line waiting once it is in the approval's set: no stock write recorded for it, no newer count replaced it, the approver has not rejected it. `key` is a SQL expression for the product id as text-comparable key. The one copy of the rule. */
+export const waitingKeySql = (a: string, key: string): string => `json_extract(${a}.applied_json,'$.lines."'||${key}||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${key}||'"') IS NULL
+  AND json_extract(${a}.line_decisions_json,'$."'||${key}||'".decision') IS NOT 'reject'`
 export const waitingLineSql = (a: string, i: string): string => `${a}.status='pending' AND CASE WHEN ${a}.line_set_json IS NULL THEN ${countDiffersSql(i, '0.000000001')}
     ELSE json_extract(${a}.line_set_json,'$."'||${i}.product_id||'"') IS NOT NULL END
-  AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL
-  AND json_extract(${a}.line_decisions_json,'$."'||${i}.product_id||'".decision') IS NOT 'reject'`
+  AND ${waitingKeySql(a, `${i}.product_id`)}`
 const WAITING_LINE_SQL = waitingLineSql('a', 'i')
 /** Does this one count line still wait for approval? (Fix stock is held while it does.) */
 export async function lineWaitsForApproval(db: D1Compat, sessionId: string, productId: number): Promise<boolean> {

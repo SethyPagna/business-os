@@ -74,5 +74,56 @@ mutate('switch not checked', 'route', "if (!await readSwitch(c.env, 'ic_marks'))
 mutate('pending for every viewer', 'route', 'permitted: access.fields.stock && await fixStockOn(c)', 'permitted: true', 'I9')
 mutate('a plan number written in the reader', 'lib', "export const MARKS_FORMAT = 1", 'export const MARKS_FORMAT = 1\nexport const PAGE = 2000', 'no plan-sized literal')
 
+// F.5: the waiting-line rule has ONE copy (waitingKeySql), and the text waitingLineSql generates is byte-identical to production's (git show b6b54c73f:cloudflare/src/lib/inventoryCheckSessions.ts).
+const sessionsText = read('src/lib/inventoryCheckSessions.ts')
+const PRODUCTION_WAITING_LINE_SQL = (a, i, countDiffers) => `${a}.status='pending' AND CASE WHEN ${a}.line_set_json IS NULL THEN ${countDiffers(i, '0.000000001')}
+    ELSE json_extract(${a}.line_set_json,'$."'||${i}.product_id||'"') IS NOT NULL END
+  AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL
+  AND json_extract(${a}.line_decisions_json,'$."'||${i}.product_id||'".decision') IS NOT 'reject'`
+const exprOf = (src, name, until) => { const a = src.indexOf('export const ' + name + ' = '); assert.ok(a >= 0, name + ' is not exported'); const b = src.indexOf(until, a); assert.ok(b > a, 'end of ' + name + ' not found'); return src.slice(a, b) }
+const loadRule = (src) => {
+  const parts = [exprOf(src, 'countDiffersSql', '/**')]
+  if (src.includes('export const waitingKeySql')) parts.push(exprOf(src, 'waitingKeySql', 'export const waitingLineSql'))
+  parts.push(exprOf(src, 'waitingLineSql', 'const WAITING_LINE_SQL'))
+  const js = parts.join('\n').replace(/export const /g, 'const ').replace(/: (string|boolean)\b/g, '')
+  return new Function(js + '\nreturn { countDiffersSql, waitingLineSql }')()
+}
+const waitingCallPairs = () => {
+  const pairs = new Map()
+  const walk = (dir) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.ts')) collect(p) } }
+  const collect = (p) => {
+    const text = fs.readFileSync(p, 'utf8')
+    for (const m of text.matchAll(/waitingLineSql\(\s*([^,()]+?)\s*,\s*([^,()]+?)\s*\)/g)) {
+      const arg = (raw) => { const lit = /^'([^']*)'$/.exec(raw); if (lit) return lit[1]; const c = new RegExp('const ' + raw + " = '([^']*)'").exec(text); assert.ok(c, 'argument ' + raw + ' of waitingLineSql in ' + p + ' is neither a literal nor a const literal'); return c[1] }
+      const a = arg(m[1]), i = arg(m[2])
+      pairs.set(a + '|' + i, [a, i])
+    }
+  }
+  walk(path.join(ROOT, 'src'))
+  return [...pairs.values()]
+}
+const bytePin = (src) => {
+  const rule = loadRule(src)
+  const pairs = waitingCallPairs()
+  assert.ok(pairs.some(([a, i]) => a === 'a' && i === 'i') && pairs.some(([a]) => a === 'inventory_check_approvals'), 'the walk must find the call sites (found ' + JSON.stringify(pairs) + ')')
+  for (const [a, i] of pairs) assert.equal(rule.waitingLineSql(a, i), PRODUCTION_WAITING_LINE_SQL(a, i, rule.countDiffersSql), 'waitingLineSql(' + a + ', ' + i + ') differs from production')
+}
+check('F.5: waitingKeySql is exported and waitingLineSql is built on it', () => {
+  assert.ok(/export const waitingKeySql = \(a: string, key: string\): string =>/.test(sessionsText), 'waitingKeySql(a, key) is not exported')
+  const line = exprOf(sessionsText, 'waitingLineSql', 'const WAITING_LINE_SQL')
+  assert.ok(line.includes('waitingKeySql(a, `${i}.product_id`)'), 'waitingLineSql must call waitingKeySql(a, `${i}.product_id`)')
+  assert.ok(!/json_extract\(\$\{a\}\.(applied|superseded|line_decisions)_json/.test(line), 'waitingLineSql must not carry its own copy of the three line conditions')
+  assert.equal((sessionsText.match(/\$\.lines\."'\|\|/g) || []).length, 1, 'the applied_json line condition is written once in the file')
+})
+check('F.5: waitingLineSql generates the production text byte for byte for every call site pair', () => bytePin(sessionsText))
+check('F.5: the pin turns red on a scratch copy with one space changed', () => {
+  const changed = sessionsText.replace("'$.lines.\"'||${key}||'\"') IS NULL", "'$.lines.\"'||${key}||'\"')  IS NULL")
+  assert.notEqual(changed, sessionsText, 'the scratch copy must differ')
+  assert.throws(() => bytePin(changed), /differs from production/)
+})
+check('F.5: countDiffersSql keeps its arguments (the NULL line set fallback uses eps 0.000000001)', () => {
+  assert.ok(exprOf(sessionsText, 'waitingLineSql', 'const WAITING_LINE_SQL').includes("countDiffersSql(i, '0.000000001')"))
+})
+
 console.log(failed ? 'SOME CHECKS FAILED' : 'all checks passed')
 process.exit(failed ? 1 : 0)
