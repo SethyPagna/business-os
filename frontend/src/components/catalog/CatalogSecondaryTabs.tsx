@@ -521,6 +521,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
                   loading="lazy"
                   referrerPolicy="strict-origin-when-cross-origin"
+                  // Google Maps needs scripts and its own origin; it must never navigate the storefront out from under the visitor.
+                  sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
                   className="block h-full w-full border-0"
                   allowFullScreen
                 />

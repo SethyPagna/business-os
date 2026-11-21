@@ -132,7 +132,10 @@ run('the map is live with no consent click: 16:9 wide, 4:3 on a phone, lazy, saf
   assert.match(about, /title=\{copy\('portal_a11y_map_title'/, 'the title is kept')
   assert.match(about, /copy\('openInMaps', 'Open in Maps', 'បើកក្នុងផែនទី'\)/, 'one button, icon and the words Open in Maps')
   assert.match(about, /portalMapOpenHref\(addressFact\?\.href, addressText\)/, 'to the shop link, else a maps search for the address')
-  assert.doesNotMatch(about, /sandbox=|<PortalEmbed/, 'control: nothing gates the iframe')
+  assert.doesNotMatch(about, /<PortalEmbed/, 'control: nothing gates the iframe')
+  // The sandbox does not gate loading: it keeps the frame from navigating the storefront (as the earlier consent frame did).
+  assert.match(about, /sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"/, 'the map frame is sandboxed')
+  assert.doesNotMatch(about, /sandbox="[^"]*allow-top-navigation/, 'the map frame can never navigate the storefront')
 })
 
 run('every surface on the About page is solid: no opacity suffix, no blur, no transparent fill, in light or dark', () => {

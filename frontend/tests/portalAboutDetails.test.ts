@@ -104,6 +104,7 @@ for (const language of ['en', 'km'] as const) {
     const html = aboutHtml(language)
     assert.ok(/<iframe[^>]*src="https:\/\/www\.google\.com\/maps\/embed\?pb=!1m18"/.test(html), 'the map iframe is in the first markup')
     assert.ok(/<iframe[^>]*referrerPolicy="strict-origin-when-cross-origin"/.test(html), 'referrer policy')
+    assert.ok(/<iframe[^>]*sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"/.test(html), 'the map frame is sandboxed')
     assert.ok(/<iframe[^>]*title="[^"]+"/.test(html), 'title kept')
     assert.ok(/<iframe[^>]*loading="lazy"/.test(html), 'lazy')
     assert.ok(html.includes('aspect-[4/3]') && html.includes('sm:aspect-video'), '4:3 on a phone, 16:9 wide')
