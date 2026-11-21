@@ -105,7 +105,7 @@ runTest('control: the drift check names a key whose wording changed by one word,
 
 const NOTICE = FIXTURE.portal_legal_official_notice
 const KM_NOTICE = PORTAL_LEGAL_KM.portal_legal_official_notice
-const visible = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+const visible = (html: string) => html.replace(/<\/?span\b[^>]*>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 
 const bundle = buildSync({
   entryPoints: [path.join(SRC, 'components/catalog/legal/LegalPages.tsx')],

@@ -63,7 +63,7 @@ const CONCERNS_KM = /បើមានខ្លឹមសារអំពីអ្�
 runTest('with an e-mail the concerns line names the e-mail, as before', () => {
   const html = footer({ email: 'hello@example.com', phone: '012 345 678', socialLinks: [TELEGRAM] })
   assert.match(html, CONCERNS_EN)
-  assert.match(html, /contact hello@example\.com\./)
+  assert.match(html, /contact <span\b[^>]*>hello@example\.com<\/span>\./)
   assert.doesNotMatch(html, /contact us using the contact details on this page/, 'the fallback wording is not used while an e-mail exists')
 })
 

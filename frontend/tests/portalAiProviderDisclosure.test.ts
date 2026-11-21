@@ -68,6 +68,8 @@ const stateOf = (status: AiProviderState | null): AiProviderState => status || {
 const consentOf = (language: Lang, status: AiProviderState | null) => renderToStaticMarkup(React.createElement(Consent, { copy: copyFor(language), aiState: stateOf(status), language, onAgree: () => {} }))
 const noteOf = (language: Lang, status: AiProviderState | null) => renderToStaticMarkup(React.createElement(Disclosure, { copy: copyFor(language), aiState: stateOf(status), language, ownerDisclaimer: '' }))
 
+// The protected facts sit in translate="no" spans; the visible text is what these checks compare.
+const plain = (html: string) => html.replace(/<\/?span\b[^>]*>/g, '')
 const policyHtml = (language: Lang, status: unknown) => {
   const text = (key: string) => legalText(language, key)
   return renderToStaticMarkup(React.createElement(Paragraphs, {
@@ -149,22 +151,25 @@ for (const language of ['en', 'km'] as const) {
     runTest(`privacy policy names ${id}, its retention and its terms link (${language})`, () => {
       const html = policyHtml(language, { providers: [{ id }] })
       const entry = AI_PROVIDER_DISCLOSURE[id]
-      assert.ok(html.includes(entry.displayName))
-      assert.ok(html.includes(entry.retention[language].replace(/&/g, '&amp;')))
+      // The protected facts (provider names, numbers with their unit) sit in translate="no" spans; the visible text is unchanged.
+      const visible = html.replace(/<\/?span\b[^>]*>/g, '')
+      assert.ok(visible.includes(entry.displayName))
+      assert.ok(html.includes(`<span translate="no" class="notranslate">${entry.displayName}</span>`), 'the provider name is not translated')
+      assert.ok(visible.includes(entry.retention[language].replace(/&/g, '&amp;')))
       assert.ok(html.includes(`href="${entry.policyUrl}"`))
       assert.match(html, /rel="noopener noreferrer"/)
-      assert.match(html, language === 'en' ? /processed outside Cambodia/ : /ដំណើរការក្រៅប្រទេសកម្ពុជា/)
-      assert.match(html, language === 'en' ? /We delete our own copy after 30 days/ : /យើងលុបច្បាប់ចម្លងរបស់យើងផ្ទាល់បន្ទាប់ពី ៣០ ថ្ងៃ/)
+      assert.match(visible, language === 'en' ? /processed outside Cambodia/ : /ដំណើរការក្រៅប្រទេសកម្ពុជា/)
+      assert.match(visible, language === 'en' ? /We delete our own copy after 30 days/ : /យើងលុបច្បាប់ចម្លងរបស់យើងផ្ទាល់បន្ទាប់ពី ៣០ ថ្ងៃ/)
     })
   }
 
   runTest(`privacy policy: neutral when unknown, "no AI provider" when the assistant is off (${language})`, () => {
     const neutral = policyHtml(language, null)
     assert.equal(neutral, policyHtml(language, { providers: [{ id: 'someone-new' }] }))
-    assert.ok(neutral.includes(legalText(language, 'portal_legal_privacy_ai_b')))
+    assert.ok(plain(neutral).includes(legalText(language, 'portal_legal_privacy_ai_b')))
     for (const entry of Object.values(AI_PROVIDER_DISCLOSURE)) assert.ok(!neutral.includes(entry.displayName))
     const off = policyHtml(language, { providers: [] })
-    assert.ok(off.includes(legalText(language, 'portal_legal_privacy_ai_off')))
+    assert.ok(plain(off).includes(legalText(language, 'portal_legal_privacy_ai_off')))
     assert.doesNotMatch(off, /outside Cambodia|ក្រៅប្រទេសកម្ពុជា/, 'nothing is processed when no provider is in use')
   })
 }
@@ -172,7 +177,8 @@ for (const language of ['en', 'km'] as const) {
 runTest('several providers are all named and all described, since the chat fails over between them', () => {
   const html = policyHtml('en', { providers: ids.map((id) => ({ id })) })
   for (const id of ids) assert.ok(html.includes(`data-portal-ai-provider="${id}"`), `${id} paragraph`)
-  assert.ok(html.includes('Groq, Mistral AI, Cerebras and Google AI'))
+  assert.ok(plain(html).includes('Groq, Mistral AI, Cerebras and Google AI'))
+  for (const name of ['Groq', 'Mistral AI', 'Cerebras', 'Google AI']) assert.ok(html.includes(`<span translate="no" class="notranslate">${name}</span>`), `${name} is not translated`)
 })
 
 runTest('template fill leaves neither a placeholder nor stray spacing in the neutral case', () => {
@@ -191,7 +197,7 @@ runTest('the real privacy page renders the assistant section (neutral until the 
     try {
       const html = renderToStaticMarkup(React.createElement(Footer, { copy: copyFor(language), businessName: 'Leang Cosmetics' }))
       assert.ok(html.includes(legalText(language, 'portal_legal_privacy_ai_h')), 'the assistant heading renders')
-      assert.ok(html.includes(legalText(language, 'portal_legal_privacy_ai_b')), 'the neutral assistant sentence renders first')
+      assert.ok(plain(html).includes(legalText(language, 'portal_legal_privacy_ai_b')), 'the neutral assistant sentence renders first')
       assert.ok(!html.includes('data-portal-ai-provider'))
     } finally {
       delete globals.window

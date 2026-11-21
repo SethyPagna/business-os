@@ -37,7 +37,7 @@ const moduleObj = { exports: {} as Record<string, unknown> }
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), moduleObj, moduleObj.exports)
 const PortalFooter = moduleObj.exports.default as React.ComponentType<Record<string, unknown>>
 
-const visible = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+const visible = (html: string) => html.replace(/<\/?span\b[^>]*>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 const globals = globalThis as unknown as { window?: unknown }
 for (const language of ['en', 'km'] as const) {
   const copy = (key: string, fallback = '', fallbackKm = fallback) => resolveStorefrontCopy(language, (k: string) => k, key, fallback, fallbackKm)

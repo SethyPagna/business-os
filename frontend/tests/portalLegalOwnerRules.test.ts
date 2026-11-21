@@ -102,9 +102,9 @@ test("the fallback name 'This business' is translated", async () => {
 test('the footer bottom row shows the independent-retailer line in both languages', async () => {
   const mod = await bundle<{ default: React.FunctionComponent<Record<string, unknown>> }>('../src/components/catalog/legal/LegalPages.tsx')
   const en = renderToStaticMarkup(React.createElement(mod.default, { copy: copyIn('en'), businessName: 'Leang Cosmetics' }))
-  assert.match(en, /data-portal-footer-independent="true">Leang Cosmetics is an independent beauty retailer in Cambodia\.</)
+  assert.match(en, /data-portal-footer-independent="true"><span\b[^>]*>Leang Cosmetics<\/span> is an independent beauty retailer in Cambodia\.</)
   const km = renderToStaticMarkup(React.createElement(mod.default, { copy: copyIn('km'), businessName: 'Leang Cosmetics' }))
-  assert.match(km, /data-portal-footer-independent="true">Leang Cosmetics ជាអ្នកលក់រាយ[^<]*កម្ពុជា។</)
+  assert.match(km, /data-portal-footer-independent="true"><span\b[^>]*>Leang Cosmetics<\/span> ជាអ្នកលក់រាយ[^<]*កម្ពុជា។</)
   assert.doesNotMatch(km, /independent beauty retailer/)
 })
 

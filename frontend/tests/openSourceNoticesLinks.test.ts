@@ -81,7 +81,7 @@ runCase('the same link renders in Khmer with the Khmer label, never the English 
 runCase('the footer row that holds the link has Khmer-safe line height and keeps the rights line and a 40px target', () => {
   const markup = renderFooter('km')
   // 6.0.864 grouped the rights line with the independent-retailer line in one block; the link stays beside that block.
-  const row = markup.match(/<div class="[^"]*border-t[^"]*"><div class="min-w-0"><p>[^<]*<\/p><p data-portal-footer-independent="true">[^<]*<\/p><\/div><a\b[^>]*data-portal-footer-notices[\s\S]*?<\/a><\/div>/)?.[0] ?? ''
+  const row = markup.match(/<div class="[^"]*border-t[^"]*"><div class="min-w-0"><p>(?:[^<]|<span\b[^>]*>[^<]*<\/span>)*<\/p><p data-portal-footer-independent="true">(?:[^<]|<span\b[^>]*>[^<]*<\/span>)*<\/p><\/div><a\b[^>]*data-portal-footer-notices[\s\S]*?<\/a><\/div>/)?.[0] ?? ''
   assert.ok(row, 'the notices link is not in the same row as the rights line')
   assert.match(row, /leading-relaxed/)
   assert.doesNotMatch(row, /leading-5/)

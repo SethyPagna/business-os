@@ -74,7 +74,7 @@ runCase('the footer and About list the same account names as the menu, with an a
 
 runCase('the footer states the independent-retailer line', () => {
   const legal = read('legal/LegalPages.tsx')
-  assert.match(legal, /data-portal-footer-independent="true">\{text\('portal_legal_footer_independent'\)\}/)
+  assert.match(legal, /data-portal-footer-independent="true"><ProtectedText text=\{text\('portal_legal_footer_independent'\)\}/)
   const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
   assert.equal(en.portal_legal_footer_independent, 'Leang Cosmetics is an independent beauty retailer in Cambodia.')
 })
