@@ -21,6 +21,7 @@ import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
 import { PORTAL_CONTACT_ROW_INLINE, PortalContactRows } from './PortalSocialRow.tsx'
+import { PRODUCT_INSET_CLASS } from './portalProductSurfaces.ts'
 import { portalAccountsNotShown, portalMapOpenHref } from './portalSocialLinks.ts'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 import { assistantRowNames } from './portalProductNames.ts'
@@ -485,7 +486,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           {hasMap ? (
             <div data-portal-map-card="true" className={`flex flex-col overflow-hidden rounded-2xl ${SURFACE}`}>
               {/* The live map loads as soon as this tab is shown (no click): 16:9 on a wide screen, 4:3 on a phone, lazy-loaded, no referrer sent beyond the origin. */}
-              <div className="aspect-[4/3] w-full bg-stone-200 sm:aspect-video dark:bg-neutral-800">
+              <div className="aspect-[4/3] w-full bg-[#f6ece0] sm:aspect-video dark:bg-neutral-800">
                 <iframe
                   src={mapEmbedUrl || ''}
                   title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
@@ -496,7 +497,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                 />
               </div>
               {addressText || mapOpenHref ? (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e3d9c8] bg-[#faf6ef] p-3 dark:border-neutral-700 dark:bg-neutral-900">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e3d9c8] bg-[#faf6ef] p-3 dark:border-neutral-700 dark:bg-neutral-800">
                   {addressText ? <p className="min-w-0 flex-1 break-words text-sm leading-6 text-[#23201b] dark:text-neutral-100"><span translate="no" className="notranslate">{addressText}</span></p> : null}
                   {mapOpenHref ? (
                     <a href={mapOpenHref} target="_blank" rel="noreferrer noopener" className={`${CHARCOAL_BUTTON} shrink-0`}>
@@ -628,7 +629,7 @@ export function FaqList(props: {
                 <h3 className="m-0">
                   <button
                     type="button"
-                    className="flex min-h-11 w-full items-start justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-stone-50 dark:hover:bg-neutral-800"
+                    className="flex min-h-11 w-full items-start justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-[#f6ece0] dark:hover:bg-neutral-800"
                     aria-expanded={open}
                     aria-controls={open ? answerId : undefined}
                     onClick={() => setExpandedFaqId((current) => nextOpenFaqKey(current, key))}

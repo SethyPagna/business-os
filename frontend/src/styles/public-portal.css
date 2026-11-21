@@ -390,6 +390,8 @@ body[data-public-portal='true'] :focus-visible,
      --portal-brass        accent for UI parts and LARGE text only (>=3:1)
      --portal-brass-text   darker brass for SMALL text (>=4.5:1 on ground + card)
      --portal-on-ink       text on a charcoal (ink) fill
+     --portal-inset        the quiet tint of a secondary block (filter panel, details rows, segment track, notices) with --portal-inset-line as its border
+     --portal-band         a section header band or an active state
    Utility classes for components to adopt instead of Tailwind colour classes:
      .portal-page          ivory page ground + ink text
      .portal-card          card surface
@@ -406,6 +408,9 @@ html[data-public-portal='true'],
   --portal-brass: #9c7a3c;
   --portal-brass-text: #7a5c22;
   --portal-on-ink: #f4f1ea;
+  --portal-inset: #faf6ef;
+  --portal-inset-line: #e3d9c8;
+  --portal-band: #f6ece0;
 }
 
 .dark[data-public-portal='true'],
@@ -418,6 +423,9 @@ html[data-public-portal='true'],
   --portal-brass: #d6b56b;
   --portal-brass-text: #e3c887;
   --portal-on-ink: #23201b;
+  --portal-inset: #262626;
+  --portal-inset-line: #404040;
+  --portal-band: #404040;
 }
 
 .portal-page {

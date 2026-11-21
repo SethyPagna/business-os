@@ -50,6 +50,7 @@ import {
   PRODUCT_CONTROL_CLASS,
   PRODUCT_FIELD_CLASS,
   PRODUCT_MUTED_TEXT_CLASS,
+  PRODUCT_INSET_CLASS,
   PRODUCT_SURFACE_CLASS,
   productMetaFields,
   productStockBadge,
@@ -733,7 +734,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           </div>
   )
   const desktopFiltersPanel = desktopFiltersOpen ? (
-          <div id="portal-desktop-filters" data-portal-desktop-filters="true" className={`hidden lg:block ${searchDocked ? 'absolute right-0 top-full z-50 mt-2 w-[min(56rem,calc(100vw-3rem))] rounded-2xl border border-stone-300 bg-white p-3 shadow-xl dark:border-neutral-700 dark:bg-neutral-900' : 'border-t border-stone-300 px-1 pt-2 dark:border-neutral-700'}`}>
+          <div id="portal-desktop-filters" data-portal-desktop-filters="true" className={`hidden lg:block ${searchDocked ? `absolute right-0 top-full z-50 mt-2 w-[min(56rem,calc(100vw-3rem))] rounded-2xl p-3 shadow-xl ${PRODUCT_INSET_CLASS}` : 'border-t border-stone-300 px-1 pt-2 dark:border-neutral-700'}`}>
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-sm font-semibold text-[#23201b] dark:text-neutral-100">{copy('filters', 'Filters')}</span>
               {portalActiveFilterCount > 0 ? (

@@ -6,6 +6,7 @@ import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import SignupConsentField, { AGE_CONFIRMATION_REQUIRED_CODE, consentRequiredMessage, signupConsentFields } from './legal/SignupConsentField.tsx'
 import { PortalContactRows } from './PortalSocialRow.tsx'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
+import { PRODUCT_BAND_CLASS, PRODUCT_INSET_CLASS } from './portalProductSurfaces.ts'
 import { PORTAL_SHEET_CORNER_PAD } from './PortalSheet.tsx'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 import type { PortalAccountProfile } from './portalAccount.ts'
@@ -143,14 +144,14 @@ export default function CatalogAccountSection({
       {/* The first thing in the sheet: the Sign in / Sign up switch. With sign-up off there is no Sign up side at all: one muted line takes its place. */}
       <div className={`${PORTAL_SHEET_CORNER_PAD} flex items-center`}>
         {signupOpen ? (
-          <div role="group" className="inline-flex rounded-xl bg-stone-100 p-1 text-sm dark:bg-neutral-800">
+          <div role="group" className={`inline-flex rounded-xl p-1 text-sm ${PRODUCT_INSET_CLASS}`}>
             {(['signin', 'signup'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => switchMode(value)}
                 aria-pressed={mode === value}
-                className={`min-h-9 rounded-lg px-4 font-semibold transition ${mode === value ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
+                className={`min-h-9 rounded-lg px-4 font-semibold transition ${mode === value ? `${PRODUCT_BAND_CLASS} shadow-sm` : 'border border-transparent text-stone-600 dark:text-neutral-300'}`}
               >
                 {value === 'signin' ? copy('signIn', 'Sign in') : copy('signUp', 'Sign up')}
               </button>

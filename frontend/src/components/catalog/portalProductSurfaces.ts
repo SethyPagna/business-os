@@ -6,6 +6,14 @@ import { portalPrimaryValue } from './portalMultiValue.ts'
 // A card, sheet or menu panel that sits over the page.
 export const PRODUCT_SURFACE_CLASS = 'border border-stone-300 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-900'
 
+// The quiet tint of a secondary block: the filter panel, the About details rows, a segment track, a contact row, a notice. Light is warm #faf6ef with a
+// #e3d9c8 border (PORTAL_TOKENS.light.inset / insetLine); dark keeps the neutral-800 fill it always had, with its neutral-700 border. The border is
+// part of the recipe on purpose: two neighbouring functions never share a tone without a line between them (owner A61, 21 Nov 2026).
+export const PRODUCT_INSET_CLASS = 'border border-[#e3d9c8] bg-[#faf6ef] dark:border-neutral-700 dark:bg-neutral-800'
+
+// A section header band or an active state (the chosen segment, a hovered row): the light brand tint #f6ece0 with the dark ink.
+export const PRODUCT_BAND_CLASS = 'border border-[#e3d9c8] bg-[#f6ece0] text-[#23201b] dark:border-neutral-600 dark:bg-neutral-700 dark:text-white'
+
 // Inputs, the search field and select triggers. The line is stone-500 / neutral-500, not the
 // spec's first-draft stone-400 / neutral-600: those measure 2.24:1 on ivory and 2.52:1 on the dark
 // ground, under the 3:1 a control boundary needs (tests/portalProductSurfaces.test.ts).

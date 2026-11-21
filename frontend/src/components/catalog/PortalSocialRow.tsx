@@ -4,6 +4,7 @@ import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import { FacebookIcon, InstagramIcon, MessengerIcon, TelegramIcon, TikTokIcon, WhatsAppIcon } from '../shared/BrandIcons.tsx'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import type { SocialPlatform } from '../../utils/socialHandles.ts'
+import { PRODUCT_INSET_CLASS } from './portalProductSurfaces.ts'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 
 type IconComponent = ComponentType<{ className?: string }>
@@ -28,8 +29,8 @@ export function PortalSocialText({ text, latin, className = '' }: { text: string
   return <span translate="no" {...getKhmerTextProps(text, `notranslate ${wrap}`)}>{text}</span>
 }
 
-/** One inline contact row: a tinted inset (page tone, a border, brass on hover). The About address row wears the same recipe. */
-export const PORTAL_CONTACT_ROW_INLINE = 'flex min-h-11 items-center gap-3 rounded-xl border border-[#e3d9c8] bg-[#faf6ef] px-4 py-2 text-sm text-[#23201b] transition hover:bg-[#f6ece0] dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
+/** One inline contact row: the inset tone with its border, the band tone on hover. The About address row wears the same recipe. */
+export const PORTAL_CONTACT_ROW_INLINE = `flex min-h-11 items-center gap-3 rounded-xl px-4 py-2 text-sm text-[#23201b] transition hover:bg-[#f6ece0] dark:text-neutral-100 dark:hover:bg-neutral-700 ${PRODUCT_INSET_CLASS}`
 
 /**
  * The rows themselves: one tappable 44 px row per entry (brand icon, then the real account name or number; the platform word is only the
