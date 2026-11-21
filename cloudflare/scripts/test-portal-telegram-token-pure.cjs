@@ -25,7 +25,7 @@ function loadLib(name) {
   return mod.exports
 }
 
-const sourceText = fs.readFileSync(path.join(libRoot, 'portalTelegramToken.ts'), 'utf8')
+const sourceText = fs.readFileSync(path.join(libRoot, 'portalTelegramToken.ts'), 'utf8').replace(/\r\n/g, '\n')
 const lib = loadLib('portalTelegramToken')
 const { PLAN_LIMITS_BY_TIER } = loadLib('planTier')
 const TTL = PLAN_LIMITS_BY_TIER.paid.portalTelegramTokenTtlSeconds
