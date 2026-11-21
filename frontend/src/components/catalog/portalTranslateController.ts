@@ -283,6 +283,8 @@ export async function applyPortalGoogleTranslate(target: unknown): Promise<boole
  * Take the translation off: clear googtrans everywhere and, when Google already rewrote this
  * page, reload so the hand-written text comes back (React cannot patch text nodes Google moved).
  * A pure clean-up: it never loads anything, so it is safe on any hostname.
+ * 'clean': nothing of this module's is on the page (a translated mark alone, on a reloaded page or with no reload left, is not this module's).
+ * 'present': this module's Google is here and the caller passed `reload: false`; nothing was removed.
  */
 export function removePortalGoogleTranslate(options?: { reload?: boolean }): 'clean' | 'reloading' | 'present' {
   if (typeof document === 'undefined') return 'clean'

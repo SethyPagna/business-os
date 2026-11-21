@@ -202,7 +202,7 @@ await check('every import of the controller sits behind the rule or is a removal
   assert.deepEqual(loaders, ['applyPortalGoogleTranslateOrFallBack('], 'one place can load Google')
 })
 
-await check('the account sheet starts open from the reopen flag, read through the one-shot helper', () => {
+await check('the account sheet starts open from the reopen flag, read through the helper that keeps one answer per page', () => {
   assert.match(page, /isStorefrontSignInPath\(window\.location\?\.pathname\) \|\| consumePortalReopenAccount\(\)/)
   assert.match(page, /if \(accountOpen && !reloadSpent\) markPortalReopenAccount\(\)/)
   assert.match(page, /clearPortalReopenAccount\(\)/)

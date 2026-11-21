@@ -701,7 +701,8 @@ export default function PublicCatalogPage() {
       // Still waiting for the first session check and nothing is against Google yet: nothing is loaded and nothing is said. A marker, a
       // signed-in shopper or an open sheet is blocked even before the check ends (a page restored from the cache may already run Google).
       if (!sessionChecked && !accountOpen && signInMarker === 'absent') return undefined
-      // Blocked: the pick is kept, the hand-written English shows, and Google is taken off the page (one clean reload when it is already there).
+      // Blocked: the pick is kept, the hand-written English shows, and Google is taken off the page by one clean reload when it is there. A
+      // sheet that has already had its reload gets no second one: it closes if Google's script is still on the page.
       // At most one guard reload per opening of the sheet, whatever is found on the page: a second one could only repeat.
       const reloadSpent = accountOpen && guardReloadSpentRef.current === true
       if (accountOpen && !reloadSpent) markPortalReopenAccount()
