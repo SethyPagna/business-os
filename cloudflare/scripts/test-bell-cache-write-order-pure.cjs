@@ -141,7 +141,7 @@ async function stored() {
 }
 async function learnKey() {
   for (const [url, response] of cacheStore) { const entry = await response.clone().json(); if (entry?.value?.id === 'inventory') return url }
-  throw new Error('no inventory entry')
+  return null
 }
 function seed() {
   seedStockFixture(raw.db, () => {
@@ -190,6 +190,7 @@ async function main() {
 
   await check('1. a plain read alone fills the empty slot under its START time, and the next plain read is served from it', async () => {
     at(T)
+    assert.ok(knownKey, 'the priming read stored an inventory entry')
     const first = await plain()
     base = inventoryCount(first)
     assert.equal(base, baseCount())
