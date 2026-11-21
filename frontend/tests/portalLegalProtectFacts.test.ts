@@ -1,16 +1,18 @@
-// The legal pages stay translatable by Google, but every fact is cut out of its sentence and rendered inside
-// <span translate="no" className="notranslate"> (owner, 21 Nov 2026: "make sure crucial and vital information are not
-// translated or affected"). protectLegalFacts (legal/legalContent.ts) does the cutting; ProtectedText (legal/LegalPages.tsx)
-// renders it.
+// The legal pages stay translatable by Google (owner, 21 Nov 2026: "make sure crucial and vital information are not
+// translated or affected"). Google translates each piece between two untranslated spans on its own, so a span in the middle
+// of a sentence breaks the sentence (measured: zh-CN read "16 or 18 years old" once numbers were wrapped). Only the shop's own
+// details and the AI provider names are protected; numbers, units, dates and brand names stay in their sentence, where
+// Google kept every one of them right (round 1, 644 pieces). protectLegalFacts (legal/legalContent.ts) does the cutting;
+// ProtectedText (legal/LegalPages.tsx) renders it.
 //
-//   1. each fact class wraps its own samples (numbers WITH their unit, currency, dates, names, handles, e-mails, links, storage
-//      names, provider and brand names) and the shop's own details (exact literals)
-//   2. control: with one class dropped, that class's sample is no longer wrapped whole
+//   1. the shop's own details are protected wherever a sentence repeats them; the longest literal wins; control
+//   2. numbers with units, dates, currency, links, handles, storage names and brand names are NOT cut out of a sentence
 //   3. the visible text is byte-identical: every segment list joins back to its input, and every rendered page shows the exact
 //      text of every key once the protective spans are taken away
-//   4. the real pages wrap the real facts, in English and Khmer
-//   5. the Cookie type cell is KEEP-OFFICIAL; the other type cells stay translatable
-//   6. no regex look-behind in the legal module (Safari before 16.4 rejects the whole file at parse time)
+//   4. on the real pages every span holds a shop detail, and no number or brand is wrapped, in English and Khmer
+//   5. the spaces next to a protected detail sit inside its span (Google trims the edges of what it translates)
+//   6. the Cookie type cell is KEEP-OFFICIAL; the other type cells stay translatable
+//   7. no regex look-behind in the legal module (Safari before 16.4 rejects the whole file at parse time)
 //
 // Run: node tests/portalLegalProtectFacts.test.ts
 import assert from 'node:assert/strict'
@@ -23,13 +25,11 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
 import {
-  LEGAL_FACT_CLASSES,
   LEGAL_KEEP_OFFICIAL_KEYS,
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_SECTIONS,
   LEGAL_STORAGE_ROWS,
   PORTAL_LEGAL_EN,
-  PORTAL_LEGAL_KM,
   interpolateLegal,
   legalText,
   padProtectedSegments,
@@ -43,53 +43,32 @@ function runTest(name: string, fn: () => void): void {
   try { fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.log(`FAIL ${name}: ${(error as Error).message}`) }
 }
 
-const protectedParts = (text: string, literals: readonly string[] = [], classes = LEGAL_FACT_CLASSES) =>
-  protectLegalFacts(text, literals, classes).filter((part) => part.protect).map((part) => part.text)
+const protectedParts = (text: string, literals: readonly string[] = []) =>
+  protectLegalFacts(text, literals).filter((part) => part.protect).map((part) => part.text)
 
-// One row per class: a sentence and exactly the pieces that must be protected.
-const SAMPLES: Array<{ id: string; text: string; expected: string[] }> = [
-  { id: 'number-unit', text: 'You stay signed in for up to 399 days. Your password needs at least 10 characters.', expected: ['399 days', '10 characters'] },
-  { id: 'number-unit', text: 'យើងលុបកំណត់ត្រាសុវត្ថិភាពបន្ទាប់ពី ១ ថ្ងៃ។ ត្រូវមានយ៉ាងតិច ១០ តួអក្សរ។', expected: ['១ ថ្ងៃ', '១០ តួអក្សរ'] },
-  { id: 'number', text: 'You must be 16 or older. If you think someone under 16 has given us information.', expected: ['16', '16'] },
-  { id: 'currency', text: 'The deposit is $12.50 or 50000៛ or 12 USD.', expected: ['$12.50', '50000៛', '12 USD'] },
-  { id: 'date', text: 'Last updated 21/11/2026 and 2026-11-21.', expected: ['21/11/2026', '2026-11-21'] },
-  { id: 'phone', text: 'Call 012 345 678 or +855 12 345 678.', expected: ['012 345 678', '+855 12 345 678'] },
-  { id: 'email', text: 'Write to hello@example.com today.', expected: ['hello@example.com'] },
-  { id: 'url', text: 'Open https://t.me/leang_cosmetics. Then stop.', expected: ['https://t.me/leang_cosmetics'] },
-  { id: 'handle', text: 'Message @leang_cosmetics on the app.', expected: ['@leang_cosmetics'] },
-  { id: 'domain', text: 'Visit leangbeauty.com for the shop.', expected: ['leangbeauty.com'] },
-  { id: 'storage-name', text: 'This site and the Google translation script set the googtrans cookie. It also keeps business-os:portal-translate-target and business-os-portal-bucket-v1 and bos_portal and businessos_device_settings.', expected: ['Google', 'googtrans', 'business-os:portal-translate-target', 'business-os-portal-bucket-v1', 'bos_portal', 'businessos_device_settings'] },
-  { id: 'brand', text: 'Cloudflare hosts it, Sentry gets errors, Cloudinary resizes, Google Maps and Google Translate load, Groq, Mistral AI, Cerebras and Google AI answer. Telegram, Facebook, Instagram, WhatsApp and Messenger open apps over HTTPS.', expected: ['Cloudflare', 'Sentry', 'Cloudinary', 'Google Maps', 'Google Translate', 'Groq', 'Mistral AI', 'Cerebras', 'Google AI', 'Telegram', 'Facebook', 'Instagram', 'WhatsApp', 'Messenger', 'HTTPS'] },
-]
-
-runTest('each fact class wraps exactly its own samples', () => {
-  const covered = new Set(SAMPLES.map((sample) => sample.id))
-  for (const entry of LEGAL_FACT_CLASSES) assert.ok(covered.has(entry.id), `class ${entry.id} has no sample`)
-  for (const sample of SAMPLES) assert.deepEqual(protectedParts(sample.text), sample.expected, `${sample.id}: ${sample.text}`)
-})
-
-runTest('the match is the longest at its start: "399 days" and "Google Translate" are one span each, a bare number stays a number', () => {
-  assert.deepEqual(protectedParts('399 days'), ['399 days'])
-  assert.deepEqual(protectedParts('Google Translate'), ['Google Translate'])
-  assert.deepEqual(protectedParts('Googlebot and Groqueen'), [], 'a word that only starts like a brand is not a brand')
-  assert.deepEqual(protectedParts('version v1 of the page 5'), ['5'], 'a digit glued to a letter is not a number')
-})
-
-runTest('the shop\'s own details are protected wherever a sentence repeats them', () => {
-  const details = ['Leang Beauty', 'Leang Beauty Co., Ltd.', 'KH-0001', 'Street 271, Phnom Penh', '012 345 678', 'hello@example.com']
+runTest('the shop\'s own details are protected wherever a sentence repeats them; the longest literal wins', () => {
+  const shop = ['Leang Beauty', 'Leang Beauty Co., Ltd.', 'KH-0001', 'Street 271, Phnom Penh', '012 345 678', 'hello@example.com']
   const text = 'This site shows what Leang Beauty has. Registered as Leang Beauty Co., Ltd. KH-0001. Find us at Street 271, Phnom Penh or on 012 345 678 or hello@example.com.'
-  assert.deepEqual(protectedParts(text, details), ['Leang Beauty', 'Leang Beauty Co., Ltd.', 'KH-0001', 'Street 271, Phnom Penh', '012 345 678', 'hello@example.com'])
-  assert.deepEqual(protectedParts(text, []).includes('Street 271, Phnom Penh'), false)
+  assert.deepEqual(protectedParts(text, shop), ['Leang Beauty', 'Leang Beauty Co., Ltd.', 'KH-0001', 'Street 271, Phnom Penh', '012 345 678', 'hello@example.com'])
+  assert.deepEqual(protectedParts('Answers come from Groq and Mistral AI.', ['Groq', 'Mistral AI']), ['Groq', 'Mistral AI'])
   assert.deepEqual(protectedParts('a b', ['a']), [], 'a one-letter literal is ignored')
+  assert.deepEqual(protectedParts(text, []), [], 'control: without the literals nothing is protected')
 })
 
-runTest('control: with one class dropped, its sample is no longer wrapped whole', () => {
-  for (const sample of SAMPLES) {
-    const without = LEGAL_FACT_CLASSES.filter((entry) => entry.id !== sample.id)
-    assert.notDeepEqual(protectedParts(sample.text, [], without), sample.expected, `dropping ${sample.id} changes nothing: the sample proves nothing`)
+runTest('numbers, units, dates, currency, links, handles, storage names and brand names stay in their sentence', () => {
+  const sentences = [
+    'You stay signed in for up to 399 days. Your password needs at least 10 characters.',
+    'យើងលុបកំណត់ត្រាសុវត្ថិភាពបន្ទាប់ពី ១ ថ្ងៃ។ ត្រូវមានយ៉ាងតិច ១០ តួអក្សរ។',
+    'Create an account only if you are 16 or older.',
+    'The deposit is $12.50 or 50000៛. Last updated 21/11/2026.',
+    'Open https://t.me/leang_cosmetics or message @leang_cosmetics. Visit leangbeauty.com.',
+    'This site and the Google translation script set the googtrans cookie and keep businessos_device_settings.',
+    'Cloudflare hosts it, Sentry gets errors, Cloudinary resizes, Google Maps and Google Translate load. Telegram and Messenger open apps.',
+  ]
+  for (const sentence of sentences) {
+    assert.deepEqual(protectedParts(sentence), [], sentence)
+    assert.deepEqual(protectLegalFacts(sentence), [{ text: sentence, protect: false }], `${sentence}: kept whole`)
   }
-  const literalText = 'Find us at Street 271, Phnom Penh.'
-  assert.notDeepEqual(protectedParts(literalText, []), protectedParts(literalText, ['Street 271, Phnom Penh']), 'control: dropping the literal changes the result')
 })
 
 const allKeys = Object.keys(PORTAL_LEGAL_EN)
@@ -100,8 +79,10 @@ runTest('every legal string, filled in, is byte-identical once its segments are 
   for (const lang of ['en', 'km'] as const) {
     for (const key of allKeys) {
       const filled = interpolateLegal(legalText(lang, key), details, 2026)
-      assert.equal(protectLegalFacts(filled, literals).map((part) => part.text).join(''), filled, `${lang} ${key}`)
-      assert.equal(protectLegalFacts(filled, literals).some((part) => !part.text), false, `${lang} ${key} has an empty segment`)
+      for (const parts of [protectLegalFacts(filled, literals), padProtectedSegments(protectLegalFacts(filled, literals))]) {
+        assert.equal(parts.map((part) => part.text).join(''), filled, `${lang} ${key}`)
+        assert.equal(parts.some((part) => !part.text), false, `${lang} ${key} has an empty segment`)
+      }
     }
   }
 })
@@ -123,17 +104,14 @@ const renderPage = (page: string, language: 'en' | 'km') => {
   } finally { delete globals.window }
 }
 const SPAN = '<span translate="no" class="notranslate">'
-const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-// The spaces next to a fact sit inside its span (padProtectedSegments), so a wrapped fact may carry them.
-const wraps = (html: string, fact: string) => new RegExp(`${escapePattern(SPAN)}\\s*${escapePattern(fact)}\\s*</span>`).test(html)
 const unwrap = (html: string) => html.split(SPAN).join('').replace(/<\/span>/g, '')
 const escapeHtml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;')
+const spanTexts = (html: string) => [...html.matchAll(/<span translate="no" class="notranslate">([^<]*)<\/span>/g)].map((match) => match[1])
 
 runTest('every rendered page shows the exact text of every key, in English and Khmer, once the protective spans are taken away', () => {
   for (const lang of ['en', 'km'] as const) {
     for (const page of LEGAL_PAGE_ORDER) {
       const html = renderPage(page, lang)
-      assert.ok(html.includes(SPAN), `${lang} ${page} wraps no fact at all`)
       const plainPage = unwrap(html)
       const keys = LEGAL_PAGE_SECTIONS[page].flatMap((section) => [section.heading, ...section.bodies])
       for (const key of keys) {
@@ -147,20 +125,34 @@ runTest('every rendered page shows the exact text of every key, in English and K
   }
 })
 
-runTest('the real pages wrap the real facts', () => {
-  const privacy = renderPage('privacy', 'en')
-  for (const fact of ['399 days', '1 day', '30 days', '90 days', '180 days', '200 days', '16', 'Sentry', 'Cloudflare', 'Cloudinary', 'Google', 'Google Translate', details.name]) {
-    assert.ok(wraps(privacy, fact), `privacy: ${fact} is not wrapped`)
+runTest('on the real pages every span holds a shop detail, and no number or brand is wrapped', () => {
+  const shownLiterals = new Set(literals.map(escapeHtml))
+  for (const lang of ['en', 'km'] as const) {
+    for (const page of LEGAL_PAGE_ORDER) {
+      const spans = spanTexts(renderPage(page, lang))
+      assert.ok(spans.length > 0, `${lang} ${page}: the shop's details are not wrapped at all`)
+      for (const span of spans) assert.ok(shownLiterals.has(span.trim()), `${lang} ${page}: "${span}" is wrapped but is not a shop detail`)
+    }
   }
   const terms = renderPage('terms', 'en')
-  for (const fact of ['7 days', '16', details.name]) assert.ok(wraps(terms, fact), `terms: ${fact} is not wrapped`)
-  const cookies = renderPage('cookies', 'en')
-  for (const fact of ['399 days', '200 days', 'googtrans', 'Google Maps', 'Google Translate', 'Telegram', 'WhatsApp', 'Messenger', 'Facebook', 'Instagram']) {
-    assert.ok(wraps(cookies, fact), `cookies: ${fact} is not wrapped`)
+  assert.ok(spanTexts(terms).some((span) => span.trim() === details.name), 'terms: the shop name in a sentence is not wrapped')
+  const privacy = unwrap(renderPage('privacy', 'en'))
+  for (const fact of ['399 days', '16', 'Sentry', 'Cloudflare', 'Google']) assert.ok(privacy.includes(fact), `control: privacy still shows ${fact}`)
+})
+
+runTest('PAD: the spaces next to a protected detail sit inside its span, so Google cannot glue it to its neighbours', () => {
+  const text = 'Visit Leang Beauty today.'
+  const raw = protectLegalFacts(text, ['Leang Beauty'])
+  assert.deepEqual(raw.map((part) => part.text), ['Visit ', 'Leang Beauty', ' today.'], 'control: the bare cut leaves the spaces outside')
+  assert.deepEqual(padProtectedSegments(raw).map((part) => part.text), ['Visit', ' Leang Beauty ', 'today.'])
+  assert.deepEqual(padProtectedSegments(protectLegalFacts('Groq Mistral', ['Groq', 'Mistral'])).map((part) => part.text), ['Groq ', 'Mistral'], 'a space between two details goes to the first')
+  for (const lang of ['en', 'km'] as const) {
+    for (const page of LEGAL_PAGE_ORDER) {
+      const html = renderPage(page, lang)
+      assert.equal(html.includes(` ${SPAN}`), false, `${lang} ${page}: a space is left outside a detail's span (before it)`)
+      assert.equal(/<span translate="no" class="notranslate">[^<]*<\/span> /.test(html), false, `${lang} ${page}: a space is left outside a detail's span (after it)`)
+    }
   }
-  for (const page of LEGAL_PAGE_ORDER) assert.ok(wraps(renderPage(page, 'en'), '21/11/2026'), `${page}: the date is not wrapped`)
-  const km = renderPage('privacy', 'km')
-  for (const fact of ['៣៩៩ ថ្ងៃ', '១ ថ្ងៃ', '៣០ ថ្ងៃ', '១៦ ឆ្នាំ', 'Sentry', 'Cloudflare', '21/11/2026']) assert.ok(wraps(km, fact), `km privacy: ${fact} is not wrapped`)
 })
 
 runTest('KEEP-OFFICIAL: the Cookie type cell is not translated, the other type cells still are', () => {
@@ -174,23 +166,6 @@ runTest('KEEP-OFFICIAL: the Cookie type cell is not translated, the other type c
   assert.ok(localCell && !/translate="no"/.test(localCell[1]), 'the Local storage cell stays translatable')
   const km = renderPage('cookies', 'km')
   assert.equal([...km.matchAll(/<td\b[^>]*translate="no"[^>]*>ខូឃី<\/td>/g)].length, cookieCells.length, 'the Khmer Cookie cells are kept too')
-})
-
-runTest('PAD: the spaces next to a fact sit inside its span, so Google cannot glue the fact to its neighbours', () => {
-  const text = 'You can return an unopened item within 7 days. Bring the receipt.'
-  const raw = protectLegalFacts(text)
-  assert.deepEqual(raw.filter((part) => part.protect).map((part) => part.text), ['7 days'], 'control: the bare cut has no spaces in the fact')
-  const padded = padProtectedSegments(raw)
-  assert.deepEqual(padded.map((part) => part.text), ['You can return an unopened item within', ' 7 days', '. Bring the receipt.'])
-  assert.equal(padded.map((part) => part.text).join(''), text)
-  assert.deepEqual(padProtectedSegments(protectLegalFacts('Hosted by Cloudflare and Sentry.')).map((part) => part.text), ['Hosted by', ' Cloudflare ', 'and', ' Sentry', '.'])
-  for (const lang of ['en', 'km'] as const) {
-    for (const page of LEGAL_PAGE_ORDER) {
-      const html = renderPage(page, lang)
-      assert.equal(html.includes(` ${SPAN}`), false, `${lang} ${page}: a space is left outside a fact's span (before it)`)
-      assert.equal(/<span translate="no" class="notranslate">[^<]*<\/span> /.test(html), false, `${lang} ${page}: a space is left outside a fact's span (after it)`)
-    }
-  }
 })
 
 runTest('the legal module uses no regex look-behind', () => {

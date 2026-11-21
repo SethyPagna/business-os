@@ -467,61 +467,33 @@ export function interpolateLegal(text: string, details: LegalBusinessDetails, ye
 // Protected facts (owner, 21 Nov 2026: keep Google Translate, but "make sure crucial and vital information are not
 // translated or affected").
 //
-// The four machine-translated languages run Google Translate over the rendered page. Google rewrites numbers, units,
-// names and storage keys it thinks it understands, so every fact a reader might rely on is cut out of the sentence
-// and rendered inside <span translate="no" className="notranslate">. The visible text never changes: the segments
-// below always join back to the exact input (tests/portalLegalProtectFacts.test.ts pins that).
-//
-// One list of classes, matched together; the leftmost match wins and a longer match beats a shorter one that starts
-// at the same place, so "399 days" is one span (not "399" plus a translatable "days") and "Google Translate" is one
-// span (not "Google" plus "Translate"). The shop's own details are not patterns: they are exact strings the page
-// already holds (name, registered name, registration number, address, phone, e-mail) and are passed in as `literals`.
-//
-// No regex look-behind here: older iPhones (Safari before 16.4) reject the whole module at parse time, and this one
-// loads on every policy page. `notAfter` checks the one character before a match instead.
+// Google translates each piece of text between two untranslated spans on its own, so a span in the middle of a sentence
+// breaks the sentence. Measured 21 Nov 2026 on the three policy pages: with numbers, units, dates and brand names wrapped,
+// zh-CN read "16 or 18 years old" and "problems may occur" for the sign-in rule; without any wrapping (round 1, 644
+// pieces in four languages) every number and unit came out right and only the shop's own name was translated. So only
+// the shop's own details (name, registered name, registration number, address, phone, e-mail) and the AI provider names
+// are protected: exact strings passed in as `literals`. Everything else stays in its sentence. The visible text never
+// changes: the segments always join back to the exact input (tests/portalLegalProtectFacts.test.ts pins that).
 // ---------------------------------------------------------------------------
-export type LegalFactClass = { id: string; pattern: RegExp; notAfter?: RegExp }
-
-const AMOUNT = String.raw`(?:\d[\d,]*(?:\.\d+)?|[០-៩]+(?:[.,][០-៩]+)?)`
-const CURRENCY = String.raw`(?:US\$|\$|€|£|៛|USD|KHR|riels?|dollars?)`
-const UNITS = String.raw`(?:(?:days?|hours?|minutes?|seconds?|weeks?|months?|years?|characters?|digits?)(?![A-Za-z])|%|ថ្ងៃ|ម៉ោង|នាទី|វិនាទី|សប្តាហ៍|ខែ|ឆ្នាំ|តួអក្សរ|ខ្ទង់)`
-const BRANDS = ['Google Translate', 'Google Maps', 'Google AI', 'Google', 'Sentry', 'Groq', 'Mistral AI', 'Mistral', 'Cerebras', 'Cloudflare', 'Cloudinary', 'Telegram', 'Facebook', 'Instagram', 'WhatsApp', 'Messenger', 'Leang Cosmetics', 'HTTPS']
-
-export const LEGAL_FACT_CLASSES: readonly LegalFactClass[] = [
-  { id: 'url', pattern: /https?:\/\/[^\s<>"']*[^\s<>"'.,;:!?)\]]/g },
-  { id: 'email', pattern: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g },
-  { id: 'handle', pattern: /@[A-Za-z0-9_][A-Za-z0-9_.]+/g, notAfter: /[\w@]/ },
-  { id: 'domain', pattern: /(?:[a-z0-9-]+\.)+(?:com|net|org|kh|io|app|dev)\b/gi, notAfter: /[\w@.-]/ },
-  { id: 'storage-name', pattern: /(?:googtrans|bos_portal|businessos_[a-z_]+|business-os(?:[:-][a-z0-9]+)+)(?![\w-])/g, notAfter: /[\w-]/ },
-  { id: 'date', pattern: /(?:\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})(?!\d)/g, notAfter: /\d/ },
-  { id: 'currency', pattern: new RegExp(`(?:${CURRENCY}\\s?${AMOUNT}|${AMOUNT}\\s?${CURRENCY})(?![\\w$€£៛])`, 'gi') },
-  { id: 'phone', pattern: /\+\d[\d\s-]{7,}\d|0\d{1,2}[\s-]\d{3}[\s-]\d{3,4}(?!\d)/g, notAfter: /\d/ },
-  { id: 'number-unit', pattern: new RegExp(`${AMOUNT}\\s?${UNITS}`, 'g'), notAfter: /[\w.]/ },
-  { id: 'number', pattern: new RegExp(`${AMOUNT}(?!\\w)`, 'g'), notAfter: /[\w.]/ },
-  { id: 'brand', pattern: new RegExp(`(?:${[...BRANDS].sort((a, b) => b.length - a.length).join('|')})(?![A-Za-z])`, 'g'), notAfter: /[A-Za-z]/ },
-]
-
 export type LegalTextSegment = { text: string; protect: boolean }
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
- * Cuts `text` into segments, each either plain text or a protected fact. `literals` are exact strings (the shop's
- * name, address, phone, ...; the AI provider names) that are protected wherever they occur. The segments always join
- * back to `text`.
+ * Cuts `text` into segments, each either plain text or one of the `literals` (the shop's details, the AI provider names),
+ * which are protected wherever they occur; the longest literal wins where two start at the same place. The segments
+ * always join back to `text`.
  */
-export function protectLegalFacts(text: string, literals: readonly string[] = [], classes: readonly LegalFactClass[] = LEGAL_FACT_CLASSES): LegalTextSegment[] {
+export function protectLegalFacts(text: string, literals: readonly string[] = []): LegalTextSegment[] {
   const source = String(text ?? '')
   const found: Array<{ start: number; end: number }> = []
-  const scan = (pattern: RegExp, notAfter?: RegExp) => {
-    for (const match of source.matchAll(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))) {
+  for (const value of literals) {
+    if (value.trim().length < 2) continue
+    for (const match of source.matchAll(new RegExp(escapeRegExp(value), 'g'))) {
       const start = match.index ?? 0
-      if (!match[0].length || (notAfter && start > 0 && notAfter.test(source.charAt(start - 1)))) continue
       found.push({ start, end: start + match[0].length })
     }
   }
-  for (const entry of classes) scan(entry.pattern, entry.notAfter)
-  for (const value of literals) if (value.trim().length >= 2) scan(new RegExp(escapeRegExp(value), 'g'))
   found.sort((a, b) => a.start - b.start || b.end - a.end)
   const segments: LegalTextSegment[] = []
   let cursor = 0

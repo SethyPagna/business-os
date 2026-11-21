@@ -75,9 +75,9 @@ type LegalOpenDetail = { page: LegalPageKey; handled: boolean }
 const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200'
 
 /**
- * Legal text rendered so the machine translators leave the facts alone: numbers with their unit, dates, names, storage keys,
- * links and the shop's own details sit in <span translate="no" className="notranslate">. The visible text is unchanged
- * (protectLegalFacts cuts it into segments that join back to the input).
+ * Legal text rendered so the machine translators leave the shop's own details and the AI provider names alone: those sit in
+ * <span translate="no" className="notranslate">, everything else stays in its sentence (see protectLegalFacts for why). The
+ * visible text is unchanged (the segments join back to the input).
  */
 export function ProtectedText({ text, literals = [] }: { text: string; literals?: readonly string[] }) {
   return (
