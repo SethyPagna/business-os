@@ -267,9 +267,19 @@ const kernelVersionOf = (text) => { const m = /export const SALES_DAILY_KERNEL_V
 const currentVersion = (overrides) => kernelVersionOf(overrides && overrides.has(VERSION_FILE) ? overrides.get(VERSION_FILE) : fs.readFileSync(path.join(ROOT, VERSION_FILE), 'utf8'))
 const readPin = () => JSON.parse(fs.readFileSync(PIN_FILE, 'utf8'))
 
-/** What --write-pin does, as a pure function: { refused: string | null, pin }. A refusal of the limit scan is never pinned; a changed aggregate is never pinned under a version that already has one. */
+/** Why a pin history is not 1..n without a gap (or is missing), or null. */
+const historyGap = (history) => {
+  if (!Array.isArray(history) || !history.length) return 'the pin has no history (a deleted pin file cannot be rebuilt by a re-pin)'
+  const at = history.findIndex((h, i) => !h || h.version !== i + 1)
+  return at < 0 ? null : `the pin history is not versions 1..${history.length} without a gap (entry ${at + 1} is ${history[at] ? `version ${history[at].version}` : 'missing'})`
+}
+
+/** What --write-pin does, as a pure function: { refused: string | null, pin }. A refusal of the limit scan is never pinned; a changed aggregate is never pinned under a version that already has one; a history with a gap, or none, is never extended. */
 function pinWrite(pin, now, version) {
   if (now.refusals && now.refusals.length) return { refused: `REFUSED: ${now.refusals.length} plan-limit refusal(s), nothing is pinned:\n${now.refusals.join('\n')}`, pin: null }
+  const gap = historyGap(pin.history)
+  if (gap) return { refused: `REFUSED: ${gap}.`, pin: null }
+  if (version !== pin.history.length && version !== pin.history.length + 1) return { refused: `REFUSED: SALES_DAILY_KERNEL_VERSION ${version} does not follow the pin history (1..${pin.history.length}).`, pin: null }
   const prior = pin.history.find((h) => h.version === version)
   if (prior && prior.aggregate !== now.aggregate) return { refused: `REFUSED: the kernel changed (${diff({ files: pin.files || {} }, now).length} statements) but SALES_DAILY_KERNEL_VERSION is still ${version}. Bump it in ${VERSION_FILE} first.`, pin: null }
   const history = prior ? pin.history : [...pin.history, { version, aggregate: now.aggregate }]
@@ -287,4 +297,4 @@ if (require.main === module) {
   console.log(`pinned version ${version}, aggregate ${now.aggregate}, ${Object.keys(now.files).length} files`)
 }
 
-module.exports = { fingerprint, diff, fileHashes, limitReads, pinWrite, relativeImports, readPin, currentVersion, kernelVersionOf, ENTRY, VERSION_FILE, ROOT, PIN_FILE }
+module.exports = { historyGap, fingerprint, diff, fileHashes, limitReads, pinWrite, relativeImports, readPin, currentVersion, kernelVersionOf, ENTRY, VERSION_FILE, ROOT, PIN_FILE }
