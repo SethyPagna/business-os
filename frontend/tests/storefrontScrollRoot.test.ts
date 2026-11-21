@@ -104,7 +104,7 @@ runTest('every storefront flyout is an overlay, so a CLOSED flyout leaves nothin
   // Each of these renders null (or nothing) when closed; none of them is a
   // wrapper whose closed state could still be constraining the page.
   assert.match(publicPage, /const pullToRefreshEnabled = !productGalleryView\.open/, 'the flyout inventory must stay explicit')
-  for (const flag of ['listView', 'contactAnchor', 'accountOpen', 'portalImageView.open', 'filePicker.open']) {
+  for (const flag of ['listView', 'accountOpen', 'portalImageView.open', 'filePicker.open']) {
     assert.ok(
       publicPage.includes(`!${flag}`),
       `${flag} must be part of the closed-flyout condition; a flyout outside it could hold the page while looking shut`,

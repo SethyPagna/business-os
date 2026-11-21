@@ -67,12 +67,16 @@ const render = (language: 'en' | 'km', extra: Record<string, unknown> = {}) =>
 
 for (const language of ['en', 'km'] as const) {
   const copy = copyFor(language)
-  await check(`${language}: the List segment shows the rows, one payment line, and Contact as the main action`, () => {
+  await check(`${language}: the List segment shows the rows, one payment line, and Contact and the chat rows inline`, () => {
     const html = render(language)
     const text = visibleText(html)
     assert.ok(text.includes('Rose Cleanser') && text.includes('ក្រែមលាបមុខ'), 'both rows are there from the first paint')
     assert.equal(text.split(PAYMENT[language]).length - 1, 1, 'the payment line is said once')
-    assert.ok(text.includes(copy('contactButton', 'Contact', 'ទាក់ទង')), 'Contact is icon + word')
+    assert.doesNotMatch(text, /(^|\s)Contact(\s|$)|ទាក់ទង(\s|$)/, 'no Contact button any more')
+    assert.match(html, /data-portal-list-contact=""[\s\S]*?data-portal-contact-inline="true"[\s\S]*?href="tel:012345678"/, 'the chat rows themselves, tappable, under the payment line')
+    assert.ok(html.indexOf('data-portal-list-contact') > html.indexOf(PAYMENT[language]), 'the rows come after the no-payment line')
+    assert.ok(text.includes('012 345 678'), 'the real number is shown')
+    assert.doesNotMatch(render(language, { listItems: [] }), /data-portal-list-contact/, 'control: an empty list shows no rows')
     assert.match(html, /aria-pressed="true"[^>]*data-portal-list-segment="list"|data-portal-list-segment="list"[^>]*aria-pressed="true"/, 'List is the pressed segment')
     const fallbacks: Record<string, string> = { decreaseQty: 'Decrease quantity', increaseQty: 'Increase quantity', removeFromBucket: 'Remove', copyList: 'Copy the list', downloadList: 'Download' }
     for (const [key, fallback] of Object.entries(fallbacks)) {

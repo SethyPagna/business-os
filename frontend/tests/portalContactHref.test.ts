@@ -30,7 +30,7 @@ runCase('tel: the Contact menu helper rebuilds the link from digits (moved from 
 })
 
 runCase('tel: the Contact menu row and the About link agree on a short or tel:-prefixed value', () => {
-  const rows = (phone: string) => buildPortalContactEntries({ phone }).filter((entry) => entry.platform === 'phone')
+  const rows = (phone: string) => buildPortalContactEntries({ phone }).chat.filter((entry) => entry.platform === 'phone')
   assert.equal(rows('12345').length, 0, 'fewer than 6 digits: no menu row')
   assert.equal(rows('tel:+85512345678')[0]?.href, 'tel:+85512345678')
 })
@@ -66,14 +66,10 @@ runCase('tel: needs six digits and is rebuilt from digits and +', () => {
   for (const bad of ['', '12345', 'abc', 'javascript:alert(1)', '+++', undefined]) assert.equal(contactHref('tel', bad), '', String(bad))
 })
 
-const entriesWithEmail = (email: string) => buildPortalContactEntries({ email, shopName: 'Shop', language: 'en' })
-
-runCase('Contact menu: a malformed e-mail is left out, a good one is kept', () => {
-  assert.equal(entriesWithEmail('a@b.c?cc=x@y.z').some((entry) => entry.platform === 'email'), false)
-  assert.equal(entriesWithEmail('not an email').length, 0)
-  const good = entriesWithEmail('shop@example.com').find((entry) => entry.platform === 'email')
-  assert.equal(good?.href, 'mailto:shop@example.com')
-  assert.equal(good?.label, 'shop@example.com')
+runCase('Contact entries: an e-mail is not a way to chat, so it is no entry at all (the footer prints the address itself)', () => {
+  const built = buildPortalContactEntries({ phone: '012 345 678', shopName: 'Shop', language: 'en' }) as { chat: unknown[]; accounts: unknown[] }
+  assert.equal(JSON.stringify(built).includes('mailto:'), false)
+  assert.equal(built.chat.length, 1, 'control: the phone is still a chat row')
 })
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -91,7 +87,7 @@ runCase('source pin: no catalog file builds a mailto: or tel: link by hand', () 
 
 runCase('source pin: the four places call the shared rule', () => {
   const read = (...parts: string[]) => fs.readFileSync(path.join(catalogDir, ...parts), 'utf8')
-  assert.match(read('portalSocialLinks.ts'), /contactHref\('mailto', email\)/)
+  assert.match(read('portalSocialLinks.ts'), /contactHref\('tel', phone\)/)
   assert.equal((read('PublicCatalogPage.tsx').match(/contactHref\('(?:tel|mailto)', displayConfig\./g) || []).length, 2)
   assert.equal((read('CatalogPage.tsx').match(/contactHref\('(?:tel|mailto)', displayConfig\./g) || []).length, 2)
   assert.match(read('legal', 'LegalPages.tsx'), /import \{ contactHref \} from '\.\.\/\.\.\/\.\.\/utils\/socialLinks\.ts'/)

@@ -6,7 +6,7 @@ import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from
 import { fmtTime } from '../../utils/formatters.ts'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { settingsSaveNormalisedKeys } from '../../utils/settingsSave.ts'
-import { buildPortalContactEntries, buildPortalSocialFromConfig, portalContactFooterLinks } from './portalSocialLinks.ts'
+import { buildPortalContactEntries, buildPortalSocialFromConfig, portalContactFooterLinks, portalFooterAccounts } from './portalSocialLinks.ts'
 import { contactHref } from '../../utils/socialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
@@ -3019,19 +3019,16 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
-  // Same builder as the live page, so the editor preview shows the same names and the same Contact menu.
+  // Same builder as the live page, so the editor preview shows the same names, the same chat rows and the same account rows.
   const socialBuilt = buildPortalSocialFromConfig(displayConfig, activeCopyLanguage)
-  const contactEntries = buildPortalContactEntries({
+  const { chat: contactEntries, accounts: accountEntries } = buildPortalContactEntries({
     social: socialBuilt.social,
     contact: socialBuilt.contact,
     phone: businessFacts.find((item) => item.key === 'phone')?.value,
-    email: businessFacts.find((item) => item.key === 'email')?.value,
-    mapHref: addressFact?.href,
-    address: addressFact?.value,
     shopName: displayConfig.businessName || displayConfig.title,
     language: activeCopyLanguage,
   })
-  const socialLinks = portalContactFooterLinks(contactEntries)
+  const socialLinks = portalContactFooterLinks(portalFooterAccounts(accountEntries, contactEntries, { tab: activeTab, listOpen: false }))
 
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
   const redeemSummaryText = replaceVars(

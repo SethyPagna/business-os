@@ -309,7 +309,7 @@ check('every visible contactButton text sits in an element with translate="no" a
     total += result.found.length
     unmarked.push(...result.unmarked.map((entry) => `${path.relative(SRC, file)} ${entry}`))
   }
-  assert.ok(total >= 3, `found the header, assistant and list Contact buttons (${total})`)
+  assert.ok(total >= 1, `found the dock Contact button (${total})`)
   assert.deepEqual(unmarked, [])
   assert.deepEqual(entriesFor('contactButton').map((entry) => shopperEnglish(entry)).filter((text) => text !== 'Contact'), [], 'the visible word stays Contact')
 })

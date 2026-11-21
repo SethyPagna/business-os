@@ -93,7 +93,7 @@ run('the wrapper is gone: flat surfaces on the page, no Contact button in the he
   assert.match(about, /flex items-start gap-3 pt-4 sm:gap-4/, 'the row holding the name has no negative margin, so the name sits below the banner')
   assert.match(about, /hasCover \? '' : '-mt-11 sm:-mt-14'/, 'only the round logo overlaps the gradient banner edge')
   assert.doesNotMatch(about.slice(0, about.indexOf('function FaqSkeleton')), /PortalContactButton|onOpenContact/, 'the header Contact is the one entry point on About')
-  assert.match(tabs, /copy\('contactButton', 'Contact', 'ទាក់ទង'\)/, 'the FAQ row keeps its Contact')
+  assert.match(tabs, /<PortalContactRows inline entries=\{contactEntries\}/, 'the FAQ shows the chat rows itself, where its Contact button was')
 })
 
 run('the story is its own full-width card, before the details row', () => {

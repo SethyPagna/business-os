@@ -7,7 +7,6 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
-import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
@@ -25,6 +24,8 @@ import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../.
 import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
+import { PortalContactRows } from './PortalSocialRow.tsx'
+import type { PortalContactEntry } from './portalSocialLinks.ts'
 import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
@@ -110,8 +111,8 @@ interface CatalogFaqSectionProps {
   publicFaqItems: FaqItem[]
   expandedFaqId: IdValue | null
   setExpandedFaqId: Dispatch<SetStateAction<IdValue | null>>
-  // Both optional: a surface without a contact sheet simply shows no button.
-  onOpenContact?: () => void
+  // The chat entries (Phone, Messenger, Telegram, WhatsApp): the FAQ shows them as rows where a Contact button used to be. None: nothing is drawn.
+  contactEntries?: readonly PortalContactEntry[]
   faqLoading?: boolean
 }
 
@@ -240,17 +241,6 @@ const ICON_BUTTON = 'flex h-11 w-11 shrink-0 items-center justify-center rounded
 // The field recipe (spec section 1). The line is stone-500 / neutral-500, not the stone-400 / neutral-600 the recipe first named: those reach
 // only 2.5:1 on a white card and 2.4:1 on the dark one, and a field line must reach 3:1 on the page and on the card.
 const FIELD = 'border border-stone-500 bg-white text-[#23201b] placeholder:text-stone-500 focus-visible:border-[#7a5c22] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400 dark:focus-visible:border-amber-300'
-
-// The one Contact entry point on this page: the page's own contact callback, icon and one word.
-function PortalContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
-  if (!onOpenContact) return null
-  return (
-    <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
-      <MessageCircle aria-hidden="true" className="h-4 w-4" />
-      <span translate="no" className="notranslate">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
-    </button>
-  )
-}
 
 // The owner's photo, laid out by its own shape (utils/aboutCoverLayout.ts) so no frame colour ever shows
 // beside it: a wide picture is a full-width banner, a square or tall one sits in a box of its own ratio
@@ -580,10 +570,10 @@ export function FaqList(props: {
   setExpandedFaqId: Dispatch<SetStateAction<IdValue | null>>
   query: string
   setQuery: (value: string) => void
-  onOpenContact?: () => void
+  contactEntries?: readonly PortalContactEntry[]
   loading?: boolean
 }) {
-  const { copy, items, expandedFaqId, setExpandedFaqId, query, setQuery, onOpenContact, loading } = props
+  const { copy, items, expandedFaqId, setExpandedFaqId, query, setQuery, contactEntries = [], loading } = props
   const entries = faqEntries(items)
   const searchable = faqSearchVisible(entries.length)
   const activeQuery = searchable ? query.trim() : ''
@@ -592,9 +582,9 @@ export function FaqList(props: {
   if (loading) return <FaqSkeleton />
   if (!entries.length) {
     return (
-      <div className={`mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ${SURFACE}`}>
+      <div className={`mx-auto w-full max-w-3xl space-y-3 rounded-2xl px-4 py-3 ${SURFACE}`}>
         <p className="min-w-0 text-sm font-semibold leading-7 text-[#23201b] dark:text-neutral-100">{copy('faqEmptyNone', 'No questions yet.', 'មិនទាន់មានសំណួរនៅឡើយទេ។')}</p>
-        <PortalContactButton copy={copy} onOpenContact={onOpenContact} />
+        <PortalContactRows inline entries={contactEntries} copy={copy} className="grid gap-2 sm:grid-cols-2" />
       </div>
     )
   }
@@ -674,10 +664,10 @@ export function FaqList(props: {
         </div>
       )}
 
-      {onOpenContact ? (
-        <div className={`mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ${SURFACE}`} data-portal-faq-contact="true">
+      {contactEntries.length > 0 ? (
+        <div className={`mt-4 space-y-3 rounded-2xl px-4 py-3 ${SURFACE}`} data-portal-faq-contact="true">
           <p className="min-w-0 text-base font-semibold leading-8 text-[#23201b] dark:text-neutral-100">{copy('faqStillHeading', 'Still have a question?', 'នៅមានសំណួរទៀតទេ?')}</p>
-          <PortalContactButton copy={copy} onOpenContact={onOpenContact} />
+          <PortalContactRows inline entries={contactEntries} copy={copy} className="grid gap-2 sm:grid-cols-2" />
         </div>
       ) : null}
     </div>
@@ -685,7 +675,7 @@ export function FaqList(props: {
 }
 
 function CatalogFaqSection(props: CatalogFaqSectionProps) {
-  const { copy, previewConfig, publicFaqItems, expandedFaqId, setExpandedFaqId, onOpenContact, faqLoading } = props
+  const { copy, previewConfig, publicFaqItems, expandedFaqId, setExpandedFaqId, contactEntries, faqLoading } = props
   const [query, setQuery] = useState('')
 
   return (
@@ -697,7 +687,7 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
         setExpandedFaqId={setExpandedFaqId}
         query={query}
         setQuery={setQuery}
-        onOpenContact={onOpenContact}
+        contactEntries={contactEntries}
         loading={faqLoading}
       />
     </SectionShell>

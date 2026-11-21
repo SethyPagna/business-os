@@ -255,7 +255,6 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
     assistantViewProduct: 'មើលផលិតផល',
     accountNameLabel: 'ឈ្មោះ',
     signupPausedLine: 'ការចុះឈ្មោះត្រូវបានផ្អាក។',
-    forgotPasswordLink: 'ភ្លេចពាក្យសម្ងាត់?',
     forgotPasswordAskShop: 'ភ្លេចពាក្យសម្ងាត់? សូមសុំហាងកំណត់ថ្មី។',
     signupMemberAsk: 'ធ្លាប់ទិញពីយើងហើយឬ? សូមសុំលេខសមាជិកពីយើង។',
     signupPasswordHint: '១០ តួអក្សរឡើងទៅ។',

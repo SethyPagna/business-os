@@ -7,14 +7,12 @@ import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Minus from 'lucide-react/dist/esm/icons/minus.js'
 import PlusIcon from 'lucide-react/dist/esm/icons/plus.js'
-import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import CatalogProductImage from './catalogImages'
-import PortalContactMenu from './PortalContactMenu.tsx'
-import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
+import { PortalContactRows } from './PortalSocialRow.tsx'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 
@@ -159,6 +157,12 @@ export default function PortalListPage({
       {segment === 'list' ? (
         <>
           <PortalNoPaymentNotice copy={copy} className="text-center" />
+          {/* Where the Contact button was: the chat rows themselves (Phone, Messenger, Telegram, WhatsApp), tappable, under the payment line. */}
+          {listItems.length > 0 && contactEntries.length > 0 ? (
+            <div data-portal-list-contact="">
+              <PortalContactRows inline entries={contactEntries} copy={copy} className="grid gap-2 sm:grid-cols-2" />
+            </div>
+          ) : null}
           {listItems.length === 0 ? emptyLine(copy('listEmptyLine', 'Your list is empty.', 'បញ្ជីរបស់អ្នកនៅទទេ។')) : (
             <ul className={`${SURFACE} divide-y divide-stone-200 dark:divide-neutral-700`}>
               {listItems.map((item) => (
@@ -183,19 +187,6 @@ export default function PortalListPage({
           )}
           {listItems.length > 0 ? (
             <div className="flex items-center gap-1">
-              {contactEntries.length > 0 ? (
-                <PortalContactMenu
-                  entries={contactEntries}
-                  copy={copy}
-                  align="left"
-                  trigger={(
-                    <button type="button" data-portal-list-contact="" className={`${PORTAL_PRIMARY_BUTTON} min-h-10 px-4`}>
-                      <MessageCircle className="h-[18px] w-[18px]" />
-                      <span translate="no" className="notranslate">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
-                    </button>
-                  )}
-                />
-              ) : null}
               <button type="button" className={ICON_BUTTON} onClick={onCopy} aria-label={copy('copyList', 'Copy the list')} title={copy('copyList', 'Copy the list')}>
                 {copyState === 'copied' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </button>
