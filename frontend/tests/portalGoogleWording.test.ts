@@ -115,6 +115,12 @@ check('the AI note is the same text in both places it is defined', () => {
   assert.equal(defaultConfigText('en', 'aiDisclaimer', earlier), AI_NOTE, 'the Worker may still send the earlier wording; it shows as the new default')
   assert.equal(defaultConfigText('en', 'aiDisclaimer', 'Our own note.'), 'Our own note.', 'a merchant note is kept')
 })
+check('the assistant maps a stored earlier default before deciding it is the owner\'s own note (the editor preview passes config unlocalized)', () => {
+  const source = read('components/catalog/CatalogSecondaryTabs.tsx')
+  const pinned = /const ownerDisclaimer = String\(defaultConfigText\(language, 'aiDisclaimer', previewConfig\.aiDisclaimer\) \|\| ''\)\.trim\(\)/
+  assert.ok(pinned.test(source), 'ownerDisclaimer goes through defaultConfigText')
+  assert.ok(!pinned.test(source.replace("defaultConfigText(language, 'aiDisclaimer', previewConfig.aiDisclaimer)", 'previewConfig.aiDisclaimer')), 'control: the raw config value fails the pin')
+})
 check('the storefront pager says Previous through its own key', () => {
   const entries = entriesFor('portalPagerPrevious')
   assert.ok(entries.length >= 1)

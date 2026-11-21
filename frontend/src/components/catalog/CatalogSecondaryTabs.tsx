@@ -29,6 +29,7 @@ import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
+import { defaultConfigText } from './portalLanguagePacks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { contactHref } from '../../utils/socialLinks.ts'
 import { aiConsentGiven, fillAiProviderTemplate, saveAiConsent } from './legal/aiProviderDisclosure.ts'
@@ -859,7 +860,8 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
   const title = previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')
   const tagline = previewConfig.aiIntro || copy('assistantTagline', 'AI suggestions, not medical advice.', 'ការណែនាំពី AI មិនមែនជាយោបល់វេជ្ជសាស្ត្រទេ។')
   const defaultDisclaimer = copy('aiDisclaimer', 'Written by AI, for reference only. For exact answers, please contact our shop on Instagram or Facebook.')
-  const ownerDisclaimer = String(previewConfig.aiDisclaimer || '').trim()
+  // The editor preview passes the config unlocalized, so a stored copy of an earlier default is mapped here too and never shows as the owner's own note.
+  const ownerDisclaimer = String(defaultConfigText(language, 'aiDisclaimer', previewConfig.aiDisclaimer) || '').trim()
   const infoLabel = copy('assistantInfo', 'About the assistant', 'អំពីជំនួយការ')
   const labelClass = 'block text-sm font-medium leading-6 text-stone-700 dark:text-neutral-200'
   const detailsLabel = copy('assistantAddDetails', 'Add details', 'បន្ថែមព័ត៌មាន')
@@ -1015,7 +1017,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
           >
             <RotateCcw aria-hidden="true" className="h-4 w-4" />
           </button>
-          <button type="button" className={`${CHARCOAL_BUTTON} ml-auto`} onClick={send} disabled={assistantLoading}>
+          <button type="button" className={`${CHARCOAL_BUTTON} ml-auto whitespace-nowrap`} onClick={send} disabled={assistantLoading}>
             <Send aria-hidden="true" className="h-4 w-4" />
             {/* Google rewrites text nodes, so a label that changes is remounted (keyed), never updated in place. */}
             <span key={assistantLoading ? 'wait' : 'send'}>{assistantLoading ? copy('assistantLoading', 'Please wait…') : copy('assistantSend', 'Send', 'ផ្ញើ')}</span>
