@@ -18,10 +18,7 @@ export const PORTAL_TRANSLATE_SCRIPT_ID = 'business-os-portal-translate-script'
 export const PORTAL_TRANSLATE_CALLBACK = 'businessOsPortalTranslateInit'
 export const PORTAL_TRANSLATE_TIMEOUT_MS = 10000
 
-type TranslateElementConstructor = {
-  new (options: unknown, elementId: string): unknown
-  InlineLayout?: { SIMPLE?: unknown }
-}
+type TranslateElementConstructor = new (options: unknown, elementId: string) => unknown
 
 type TranslateWindow = Window & {
   businessOsPortalTranslateInit?: () => void
@@ -49,6 +46,11 @@ export function hasPortalTranslatedMarker(): boolean {
   if (typeof document === 'undefined') return false
   const markerText = `${document.documentElement?.className || ''} ${document.body?.className || ''}`
   return /\btranslated-(ltr|rtl)\b/i.test(markerText)
+}
+
+/** True when Google has translated this page into `target`: its translated mark is on and it has set the document language to that pick. */
+function pageIsTranslatedInto(target: PortalTranslateTarget): boolean {
+  return hasPortalTranslatedMarker() && String(document.documentElement?.lang || '').toLowerCase() === target.toLowerCase()
 }
 
 /** Clears googtrans on the host, every parent domain and the current path, whatever wrote it. */
@@ -93,6 +95,9 @@ function ensureWidgetHost(): HTMLElement {
   host.id = PORTAL_TRANSLATE_WIDGET_HOST_ID
   host.className = 'notranslate'
   host.setAttribute('translate', 'no')
+  // Google's list is driven by this module only: it stays out of the tab order and out of a screen reader's reach.
+  host.setAttribute('inert', '')
+  host.setAttribute('aria-hidden', 'true')
   Object.assign(host.style, {
     position: 'fixed',
     left: '12px',
@@ -129,6 +134,7 @@ function findCombo(): HTMLSelectElement | null {
 }
 
 function setCombo(select: HTMLSelectElement, value: string): void {
+  select.tabIndex = -1
   select.value = value
   select.dispatchEvent(new Event('input', { bubbles: true }))
   select.dispatchEvent(new Event('change', { bubbles: true }))
@@ -158,12 +164,12 @@ function whenWidgetReady(): Promise<HTMLSelectElement | null> {
       const host = ensureWidgetHost()
       try {
         host.innerHTML = ''
+        // No layout option: only Google's default layout renders the .goog-te-combo list this module drives.
         new TranslateElement(
           {
             pageLanguage: PORTAL_TRANSLATE_SOURCE_LANGUAGE,
             includedLanguages: PORTAL_TRANSLATE_TARGETS.join(','),
             autoDisplay: false,
-            layout: TranslateElement.InlineLayout?.SIMPLE,
           },
           host.id,
         )
@@ -245,13 +251,15 @@ export async function applyPortalGoogleTranslateOrFallBack(target: unknown, fall
   return applied
 }
 
-/** Translate the page from English into `target`. Resolves false when refused or when Google never answered. */
+/** Translate the page from English into `target`. Resolves false when refused or when Google never translated the page. */
 export async function applyPortalGoogleTranslate(target: unknown): Promise<boolean> {
   if (!canRunPortalTranslate() || !isPortalTranslateTarget(target)) return false
   writeGoogleTranslateCookie(target)
   ensureWidgetHost()
   const combo = await whenWidgetReady()
-  if (!combo) return false
+  // Google also translates from the googtrans cookie alone. A page it has translated into this pick is the result the visitor asked for,
+  // with or without the list: calling that a failure would reload a working translation away.
+  if (!combo) return pageIsTranslatedInto(target)
   setCombo(combo, target)
   return true
 }
