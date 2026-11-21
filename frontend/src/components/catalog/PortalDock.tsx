@@ -21,19 +21,22 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 type IconComponent = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' }>
 
 /**
- * The storefront's one floating control (owner, 21 Nov 2026), fixed bottom-right. Wide screens (md, 768 px and up) show a stack of round
- * 48 px buttons, top to bottom: Language, Theme, Account, Shop (List and Saved), Contact. Below md one round 56 px button opens a compact
- * menu with the same five things as rows. Nothing else sits in the header row.
+ * The storefront's one floating control (owner, 21 Nov 2026), fixed bottom-right. From 1888 px up (WIDE_DOCK_FROM) there is room BESIDE the content
+ * for a stack of round 48 px buttons, top to bottom: Language, Theme, Account, Shop (List and Saved), Contact (a 128 px pill). Below that, at every
+ * width, ONE round 56 px button opens a compact menu with the same things as rows, so the dock never covers a control. Nothing else sits in the
+ * header row. The arithmetic: the page container is 1680 px wide with 56 px of padding, so beside the content there are (viewport - 1680) / 2 + 56 px;
+ * the stack needs its 16 px offset + 128 px + 16 px of air = 160 px, which is reached at 1888 px (tests/storefrontFooterClearance.test.ts holds it).
  *
  * The dock sits under every sheet and dialog (z-[55] against the sheets' 60 and the lightbox's 90) and goes away while one is open
  * (`hidden`). It is never rendered by the Website Editor preview, which scrolls inside the admin shell.
  */
-const ROUND = 'relative inline-flex shrink-0 items-center justify-center rounded-full border border-stone-300 bg-white text-[#23201b] shadow-md transition hover:bg-stone-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7a5c22] dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800 dark:focus-visible:outline-[#d6b56b]'
+const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7a5c22] dark:focus-visible:outline-[#d6b56b]'
+const ROUND = `relative inline-flex shrink-0 items-center justify-center rounded-full border border-stone-300 bg-white text-[#23201b] shadow-md transition hover:bg-stone-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800 ${FOCUS}`
 const ROUND_WIDE = `${ROUND} h-12 w-12`
 const ROUND_SMALL = `${ROUND} h-14 w-14`
-const CONTACT_BUTTON = `inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold shadow-md transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7a5c22] dark:focus-visible:outline-[#d6b56b] ${PORTAL_PRIMARY_COLORS}`
+const CONTACT_BUTTON = `inline-flex h-12 w-32 shrink-0 items-center justify-center gap-2 rounded-full text-sm font-semibold shadow-md transition ${FOCUS} ${PORTAL_PRIMARY_COLORS}`
 const COUNT_BADGE = 'notranslate absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-700 px-1 text-[11px] font-bold leading-none text-white'
-const ROW = 'flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm text-[#23201b] transition hover:bg-stone-100 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#7a5c22] dark:text-neutral-100 dark:hover:bg-neutral-800 dark:focus-visible:outline-[#d6b56b]'
+const ROW = `flex min-h-11 w-full items-center gap-3 px-4 text-left text-sm text-[#23201b] transition hover:bg-[#f6ece0] dark:text-neutral-100 dark:hover:bg-neutral-700 ${FOCUS}`
 const ROW_ICON = 'h-4 w-4 shrink-0 text-[#7a5c22] dark:text-amber-300'
 
 export type PortalDockProps = {
@@ -50,6 +53,8 @@ export type PortalDockProps = {
   onOpenWishlist?: () => void
   listCount?: number
   wishlistCount?: number
+  /** 'viewport' (the live page): fixed bottom-right. 'frame' (the Website Editor preview): pinned to the bottom-right of the preview frame, the phone button only. */
+  placement?: 'viewport' | 'frame'
   /** Off when the shop has switched the language tools off. */
   languageEnabled: boolean
   languageOptions: readonly PortalLanguageOption[]
@@ -167,17 +172,42 @@ export function DockMenuContent({ props, closeMenu }: { props: PortalDockProps; 
 
 export default function PortalDock(props: PortalDockProps) {
   const { copy, darkMode, hidden = false, contactEntries, onOpenAccount, accountSignedIn = false, onOpenList, listCount = 0, languageEnabled, languageOptions, activeLanguage, changePageLanguage, toggleTheme } = props
+  const frame = props.placement === 'frame'
   if (hidden) return null
 
   const themeLabel = darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')
+
+  const menuButton = (
+    <div data-portal-dock-small="" className={`pointer-events-auto ${frame ? '' : 'min-[1888px]:hidden'}`}>
+      <LazyPortalMenu
+        align="right"
+        trigger={(
+          <button type="button" data-portal-dock-button="menu" className={ROUND_SMALL} aria-label={copy('dockMenu', 'Menu', 'ម៉ឺនុយ')}>
+            <Menu aria-hidden="true" className="h-6 w-6" />
+            {listCount > 0 ? <span translate="no" className={COUNT_BADGE}>{listCount}</span> : null}
+          </button>
+        )}
+        content={({ closeMenu }) => <DockMenuContent props={props} closeMenu={closeMenu} />}
+      />
+    </div>
+  )
+  // The preview frame scrolls inside the admin shell, so there the dock is a zero-height sticky row at the end of the preview with the button
+  // pinned to its bottom-right: it follows the frame's own scroll, never the admin window.
+  if (frame) {
+    return (
+      <div data-portal-dock="frame" className="pointer-events-none sticky bottom-4 z-[55] h-0">
+        <div className="absolute bottom-0 right-4">{menuButton}</div>
+      </div>
+    )
+  }
 
   return (
     <div
       data-portal-dock=""
       className="pointer-events-none fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] right-[calc(1rem+env(safe-area-inset-right))] z-[55] max-[767px]:bottom-[max(calc(1rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))]"
     >
-      {/* Wide screens: the stack. The Contact button is the only filled one. */}
-      <div data-portal-dock-wide="" className="pointer-events-auto hidden flex-col items-end gap-2 md:flex">
+      {/* From 1888 px: the stack, beside the content. The Contact button is the only filled one. */}
+      <div data-portal-dock-wide="" className="pointer-events-auto hidden flex-col items-end gap-2 min-[1888px]:flex">
         {languageEnabled ? (
           <LazyPortalMenu
             align="right"
@@ -220,19 +250,8 @@ export default function PortalDock(props: PortalDockProps) {
         ) : null}
       </div>
 
-      {/* Phones: one round button; the count of the list rides on it. */}
-      <div data-portal-dock-small="" className="pointer-events-auto md:hidden">
-        <LazyPortalMenu
-          align="right"
-          trigger={(
-            <button type="button" data-portal-dock-button="menu" className={ROUND_SMALL} aria-label={copy('dockMenu', 'Menu', 'ម៉ឺនុយ')}>
-              <Menu aria-hidden="true" className="h-6 w-6" />
-              {listCount > 0 ? <span translate="no" className={COUNT_BADGE}>{listCount}</span> : null}
-            </button>
-          )}
-          content={({ closeMenu }) => <DockMenuContent props={props} closeMenu={closeMenu} />}
-        />
-      </div>
+      {/* Below 1888 px: one round button; the count of the list rides on it. */}
+      {menuButton}
     </div>
   )
 }

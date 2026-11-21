@@ -131,8 +131,8 @@ check('1c the header-icon exemption from the 44px floor is gone with the header 
 check('2 the dock stack never wraps and the phone dock is one button', () => {
   // CATCHES a dock that turns into a second row of buttons at 320-375px: below md there is exactly one round button.
   const dock = read('src/components/catalog/PortalDock.tsx')
-  assert.match(dock, /data-portal-dock-wide="" className="pointer-events-auto hidden flex-col items-end gap-2 md:flex"/, 'wide: one vertical stack, only from md')
-  assert.match(dock, /data-portal-dock-small="" className="pointer-events-auto md:hidden"/, 'phone: one button, hidden from md')
+  assert.match(dock, /data-portal-dock-wide="" className="pointer-events-auto hidden flex-col items-end gap-2 min-\[1888px\]:flex"/, 'wide: one vertical stack, only where there is room beside the content (1888 px)')
+  assert.match(dock, /data-portal-dock-small="" className=\{`pointer-events-auto \$\{frame \? '' : 'min-\[1888px\]:hidden'\}`\}/, 'below 1888 px: one button, at every width')
   assert.doesNotMatch(dock, /flex-wrap/, 'the dock must not wrap')
   assert.doesNotMatch(catalogPreviewSurface, /inline-flex h-8 w-8 shrink-0/, 'a 32px-tall header icon is back')
 })
