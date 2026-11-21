@@ -523,7 +523,15 @@ export type PlanLimits = {
   portalAiVisitorDailyMax: number
 }
 
-const PAID_LIMITS: PlanLimits = {
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const inner of Object.values(value)) deepFreeze(inner)
+    Object.freeze(value)
+  }
+  return value
+}
+
+const PAID_LIMITS: PlanLimits = deepFreeze({
   tier: 'paid',
   rowsPerImportChunk: 600,
   preflightMaxRows: 500,
@@ -602,9 +610,9 @@ const PAID_LIMITS: PlanLimits = {
   d1QueriesPerInvocation: 1000,
   portalAiDailyMax: 300,
   portalAiVisitorDailyMax: 30,
-}
+})
 
-const FREE_LIMITS: PlanLimits = {
+const FREE_LIMITS: PlanLimits = deepFreeze({
   tier: 'free',
   rowsPerImportChunk: 150,
   preflightMaxRows: 125,
@@ -683,7 +691,7 @@ const FREE_LIMITS: PlanLimits = {
   d1QueriesPerInvocation: 50,
   portalAiDailyMax: 100,
   portalAiVisitorDailyMax: 10,
-}
+})
 
 /**
  * Both tiers' complete tables.
@@ -694,10 +702,10 @@ const FREE_LIMITS: PlanLimits = {
  * getPlanLimits(env) so it respects the deployment it is actually running
  * in.
  */
-export const PLAN_LIMITS_BY_TIER: Record<PlanTier, PlanLimits> = {
+export const PLAN_LIMITS_BY_TIER: Record<PlanTier, PlanLimits> = deepFreeze({
   paid: PAID_LIMITS,
   free: FREE_LIMITS,
-}
+})
 
 // Isolate-local cache; see the module header for why this is safe.
 let cachedTier: PlanTier | null = null

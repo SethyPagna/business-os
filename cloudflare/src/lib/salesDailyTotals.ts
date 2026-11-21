@@ -23,7 +23,7 @@ import { ReportExactDecimal } from './reportMoneyPrecision'
 //   under the epoch it was computed in.
 export const SALES_DAILY_SWITCH = 'sales_daily'
 /** Bump when ANY step of the kernel that feeds a stored day changes meaning (scripts/test-sales-daily-kernel-fingerprint-pure.cjs ties it to the code). */
-export const SALES_DAILY_KERNEL_VERSION = 5
+export const SALES_DAILY_KERNEL_VERSION = 6
 export const SALES_DAILY_PAYLOAD_VERSION = 1
 export const SALES_DAILY_COVERAGE_KEY = 'sales_daily_coverage'
 export const SALES_DAILY_QUARANTINE_KEY = 'sales_daily_quarantine'

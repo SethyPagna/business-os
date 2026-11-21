@@ -7,7 +7,7 @@
 // move a hash, any other change does, including a single character inside a SQL template. Token texts come from the TypeScript parser, so the hash does
 // not depend on the printer of a TypeScript release.
 //
-// The plan-limit tables of src/lib/planTier.ts are the one place hashed per KEY, not whole: only the limit keys that kernel code reads (getPlanLimits(env).key) are hashed, so a limit the kernel does not read
+// The plan-limit tables of src/lib/planTier.ts are deep-frozen where they are declared (deepFreeze({ ... }), the only declaration form accepted), so nothing can write to a limit at run time, and they are the one place hashed per KEY, not whole: only the limit keys that kernel code reads (getPlanLimits(env).key) are hashed, so a limit the kernel does not read
 // can change without a version bump. The keys are DERIVED by a scan of every closure file, which refuses (red, and never pinnable) every use of a limit table other than that one read form.
 //
 // A pin file (scripts/sales-daily-kernel-pin.json) holds the per-statement hashes for the kernel version in force and an append-only history of
@@ -59,6 +59,9 @@ function shapeTokens(node, sf, obj, out) {
   for (const kid of kids) shapeTokens(kid, sf, obj, out)
 }
 
+/** The object literal of `deepFreeze({ ... })` (the one form a limit table is declared in: the tables are frozen at run time, see planTier.ts), or null for any other expression. */
+const frozenLiteral = (e) => (e && ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === 'deepFreeze' && !e.typeArguments && e.arguments.length === 1 && ts.isObjectLiteralExpression(e.arguments[0]) ? e.arguments[0] : null)
+
 /** A limit table statement as its shape plus one entry per kernel-read key, or null (not a table statement, or refused: the reason goes to `refusals`). */
 function limitTable(stmt, sf, keys, rel, refusals) {
   if (!ts.isVariableStatement(stmt)) return null
@@ -67,8 +70,8 @@ function limitTable(stmt, sf, keys, rel, refusals) {
   const table = first && ts.isIdentifier(first.name) ? LIMIT_TABLES.find((t) => t === first.name.text) : null
   if (!table) return null
   const refuse = (node, why) => refusals.push(`${rel}:${lineOf(node, sf)}: refused: ${why}`)
-  const obj = first.initializer
-  if (list.declarations.length !== 1 || !(list.flags & ts.NodeFlags.Const) || !obj || !ts.isObjectLiteralExpression(obj)) { refuse(stmt, `${table} is not a single const with an object literal initializer`); return null }
+  const obj = frozenLiteral(first.initializer)
+  if (list.declarations.length !== 1 || !(list.flags & ts.NodeFlags.Const) || !obj) { refuse(stmt, `${table} is not a single const initialised by deepFreeze({ ... })`); return null }
   const seen = new Set()
   let ok = true
   for (const p of obj.properties) {
@@ -160,7 +163,7 @@ function limitReads(text, rel) {
         else keys.push({ key: access.name.text, at: `${rel}:${lineOf(node, sf)}`, line: lines[lineOf(node, sf) - 1].trim() })
       } else if (rel === PLAN_TIER_FILE) {
         const decl = (ts.isVariableDeclaration(p) || ts.isFunctionDeclaration(p) || ts.isTypeAliasDeclaration(p)) && p.name === node
-        const inTable = LIMIT_TABLES.includes(node.text) && ts.isPropertyAssignment(p) && p.initializer === node && ts.isObjectLiteralExpression(p.parent) && ts.isVariableDeclaration(p.parent.parent) && p.parent.parent.name.getText(sf) === 'PLAN_LIMITS_BY_TIER'
+        const inTable = LIMIT_TABLES.includes(node.text) && ts.isPropertyAssignment(p) && p.initializer === node && ts.isObjectLiteralExpression(p.parent) && frozenLiteral(p.parent.parent) === p.parent && ts.isVariableDeclaration(p.parent.parent.parent) && p.parent.parent.parent.name.getText(sf) === 'PLAN_LIMITS_BY_TIER'
         let fn = node
         while (fn && !ts.isFunctionDeclaration(fn)) fn = fn.parent
         const inGetter = node.text === 'PLAN_LIMITS_BY_TIER' && fn && fn.name && fn.name.text === 'getPlanLimits' && ts.isElementAccessExpression(p) && p.expression === node && ts.isReturnStatement(p.parent) && fn.body && fn.body.statements.length === 1

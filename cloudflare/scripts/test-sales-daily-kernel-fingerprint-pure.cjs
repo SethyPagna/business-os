@@ -51,7 +51,8 @@ function tableObject(sf, table) {
 }
 function props(text, table) {
   const sf = ts.createSourceFile('planTier.ts', text, ts.ScriptTarget.ES2022, true)
-  return { sf, obj: tableObject(sf, table).initializer, list: tableObject(sf, table).initializer.properties.map((p) => ({ key: p.name.getText(sf), start: p.getStart(sf), end: p.getEnd(), initStart: p.initializer.getStart(sf), initEnd: p.initializer.getEnd() })) }
+  const literal = tableObject(sf, table).initializer.arguments[0]
+  return { sf, obj: literal, list: literal.properties.map((p) => ({ key: p.name.getText(sf), start: p.getStart(sf), end: p.getEnd(), initStart: p.initializer.getStart(sf), initEnd: p.initializer.getEnd() })) }
 }
 const splice = (text, start, end, insert) => text.slice(0, start) + insert + text.slice(end)
 function tableProp(text, table, key) {
@@ -225,7 +226,7 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
   const IMPORT_PLAN = "import { getPlanLimits } from './planTier'\n"
   const refusedLine = (problems, file, reason) => problems.some((p) => new RegExp(`^${file.replace(/\./g, '\\.')}:\\d+: refused: ${reason}`).test(p))
   const pinKeys = () => Object.keys(F.readPin().files[PLAN].decls).map((n) => /^const PAID_LIMITS\.(.+)$/.exec(n)).filter(Boolean).map((m) => m[1]).sort()
-  const MINI_PLAN = "export type PlanLimits = { tier: string }\nconst PAID_LIMITS: PlanLimits = { tier: 'paid' }\nconst FREE_LIMITS: PlanLimits = { tier: 'free' }\nexport const PLAN_LIMITS_BY_TIER: Record<PlanTier, PlanLimits> = { paid: PAID_LIMITS, free: FREE_LIMITS }\nexport function getPlanLimits(env: Env): PlanLimits { return PLAN_LIMITS_BY_TIER[resolvePlanTier(env)] }\n"
+  const MINI_PLAN = "export type PlanLimits = { tier: string }\nconst PAID_LIMITS: PlanLimits = deepFreeze({ tier: 'paid' })\nconst FREE_LIMITS: PlanLimits = deepFreeze({ tier: 'free' })\nexport const PLAN_LIMITS_BY_TIER: Record<PlanTier, PlanLimits> = deepFreeze({ paid: PAID_LIMITS, free: FREE_LIMITS })\nexport function getPlanLimits(env: Env): PlanLimits { return PLAN_LIMITS_BY_TIER[resolvePlanTier(env)] }\n"
 
   await check('K5 the limit-read scan on fixtures: getPlanLimits(env).key is the one counted read, every other use of a limit table is refused (a scan that refuses nothing, or a hand list, fails this)', () => {
     const scan = (body, rel = 'src/lib/fxRead.ts', head = IMPORT_PLAN) => F.limitReads(head + body, rel)
@@ -294,7 +295,7 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
     assert.ok(fp0.limitKeys.includes('readSwitchMemoSeconds'), 'positive control')
     assert.ok(fp0.limitReads.some((r) => r.key === 'readSwitchMemoSeconds' && r.line.includes('getPlanLimits(env).readSwitchMemoSeconds')), JSON.stringify(fp0.limitReads))
     const names = Object.keys(F.readPin().files[PLAN].decls).sort()
-    const want = ['const PAID_LIMITS', 'const FREE_LIMITS', ...fp0.limitKeys.flatMap((k) => [`const PAID_LIMITS.${k}`, `const FREE_LIMITS.${k}`]), 'const PLAN_LIMITS_BY_TIER', 'const cachedTier', 'function resolvePlanTier', 'function getPlanLimits', 'function freePlanRefusalSuffix', 'function __resetPlanTierCacheForTests'].sort()
+    const want = ['const PAID_LIMITS', 'const FREE_LIMITS', ...fp0.limitKeys.flatMap((k) => [`const PAID_LIMITS.${k}`, `const FREE_LIMITS.${k}`]), 'const PLAN_LIMITS_BY_TIER', 'const cachedTier', 'function resolvePlanTier', 'function getPlanLimits', 'function deepFreeze', 'function freePlanRefusalSuffix', 'function __resetPlanTierCacheForTests'].sort()
     assert.deepEqual(names, want)
     assert.ok(!names.some((n) => n.includes('notificationSectionCacheSeconds')), 'the bell lifetime is not hashed')
   })
@@ -376,15 +377,19 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
     const refusals = (edit) => F.fingerprint(planWith(edit)).refusals
     const cases = [
       ['new function reading PAID_LIMITS', (t) => `${t}\nexport function leak(): number { return PAID_LIMITS.readSwitchMemoSeconds }\n`, 'PAID_LIMITS used outside its place'],
-      ['FREE_LIMITS spreading PAID_LIMITS', (t) => t.replace(/(const FREE_LIMITS: PlanLimits = \{\r?\n)/, '$1  ...PAID_LIMITS,\n'), 'FREE_LIMITS: property .* is not a plain name: value'],
+      ['FREE_LIMITS spreading PAID_LIMITS', (t) => t.replace(/(const FREE_LIMITS: PlanLimits = deepFreeze\(\{\r?\n)/, '$1  ...PAID_LIMITS,\n'), 'FREE_LIMITS: property .* is not a plain name: value'],
       ['computed key', (t) => addProp(t, 'PAID_LIMITS', '[k]: 1'), 'PAID_LIMITS: property .* is not a plain name: value'],
       ['duplicate key', (t) => addProp(t, 'FREE_LIMITS', 'catalogListWindowPages: 9'), 'FREE_LIMITS\\.catalogListWindowPages appears twice'],
       ['unread value not a constant', (t) => setProp(t, 'FREE_LIMITS', 'catalogListWindowPages', 'Date.now()'), 'FREE_LIMITS\\.catalogListWindowPages is not a constant'],
       ['M1a getter returns a derived object', (t) => t.replace('return PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]', 'const t = PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]; return { ...t, readSwitchMemoSeconds: t.notificationSectionCacheSeconds }'), 'PLAN_LIMITS_BY_TIER used outside its place'],
       ['getter returns the table through a local variable', (t) => t.replace('return PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]', 'const t = PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]; return t'), 'PLAN_LIMITS_BY_TIER used outside its place'],
       ['getter stores the table elsewhere', (t) => t.replace('return PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]', '(globalThis as any).__l = PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]'), 'PLAN_LIMITS_BY_TIER used outside its place'],
-      ['const -> let', (t) => t.replace('const PAID_LIMITS:', 'let PAID_LIMITS:'), 'PAID_LIMITS is not a single const with an object literal'],
-      ['as-wrapper', (t) => { const sf = ts.createSourceFile('p.ts', t, ts.ScriptTarget.ES2022, true); const end = tableObject(sf, 'PAID_LIMITS').initializer.getEnd(); return splice(t, end, end, ' as PlanLimits') }, 'PAID_LIMITS is not a single const with an object literal'],
+      ['const -> let', (t) => t.replace('const PAID_LIMITS:', 'let PAID_LIMITS:'), 'PAID_LIMITS is not a single const initialised by deepFreeze'],
+      ['as-wrapper', (t) => { const sf = ts.createSourceFile('p.ts', t, ts.ScriptTarget.ES2022, true); const end = tableObject(sf, 'PAID_LIMITS').initializer.getEnd(); return splice(t, end, end, ' as PlanLimits') }, 'PAID_LIMITS is not a single const initialised by deepFreeze'],
+      ['freeze removed (a bare object literal)', (t) => t.replace('const PAID_LIMITS: PlanLimits = deepFreeze({', 'const PAID_LIMITS: PlanLimits = ({').replace(/\}\)\r?\n\r?\nconst FREE_LIMITS/, '})\n\nconst FREE_LIMITS'), 'PAID_LIMITS is not a single const initialised by deepFreeze'],
+      ['a shallow Object.freeze instead of deepFreeze', (t) => t.replace('const FREE_LIMITS: PlanLimits = deepFreeze({', 'const FREE_LIMITS: PlanLimits = Object.freeze({'), 'FREE_LIMITS is not a single const initialised by deepFreeze'],
+      ['deepFreeze with a second argument', (t) => t.replace('const FREE_LIMITS: PlanLimits = deepFreeze({', 'const FREE_LIMITS: PlanLimits = deepFreeze(extra, {'), 'FREE_LIMITS is not a single const initialised by deepFreeze'],
+      ['the table of tables not frozen', (t) => t.replace('Record<PlanTier, PlanLimits> = deepFreeze({', 'Record<PlanTier, PlanLimits> = ({'), 'PAID_LIMITS used outside its place'],
     ]
     for (const [name, edit, reason] of cases) {
       assert.ok(refusedLine(refusals(edit), PLAN, reason), `${name}: ${refusals(edit).join('\n')}`)
@@ -393,6 +398,8 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
     const counted = liveProblems(planWith((t) => `${t}\nexport function windowOf(env: Env): number { return getPlanLimits(env).catalogListWindowPages }\n`))
     for (const table of TABLES) assert.ok(counted.includes(`${PLAN}: const ${table}.catalogListWindowPages ADDED`), counted.join('\n'))
     assert.ok(!counted.some((p) => p.includes(': refused: ')))
+    const clean = F.limitReads(read(PLAN), PLAN)
+    assert.deepEqual([clean.keys, clean.refusals], [[], []], 'positive control: the real deepFreeze form of planTier is accepted as it is')
     const exported = liveProblems(planWith((t) => t.replace('const PAID_LIMITS:', 'export const PAID_LIMITS:')))
     assert.ok(exported.includes(`${PLAN}: const PAID_LIMITS CHANGED`), exported.join('\n'))
   })
