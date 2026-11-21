@@ -89,10 +89,14 @@ check('no platform account is on one screen twice (About, FAQ, List, other tabs)
     const cardDeduped = screen.inline === 'about' ? [...chat, ...accounts.filter((entry) => !chat.some((row) => identity(row) === identity(entry)))] : inline
     return [...cardDeduped, ...footer].map(identity)
   }
-  for (const screen of screens) assert.deepEqual(duplicates(onScreen(screen)), [], `${screen.tab}${screen.listOpen ? ' + list' : ''}`)
+  // Telegram is the one deliberate exception: the footer's legal takedown sentence reads its link from the footer list (LegalPages.tsx), so it stays.
+  const withoutLegalTelegram = (identities: string[]) => identities.filter((item, index) => !(item.startsWith('telegram|') && identities.indexOf(item) !== index))
+  for (const screen of screens) assert.deepEqual(duplicates(withoutLegalTelegram(onScreen(screen))), [], `${screen.tab}${screen.listOpen ? ' + list' : ''}`)
   // control: the same screens WITHOUT the footer rule do repeat an account
   const naive = (screen: (typeof screens)[number]) => [...(screen.inline === 'chat' ? chat : []), ...accounts].map(identity)
   assert.ok(duplicates(naive(screens[1])).length > 0, 'the FAQ screen repeats Telegram when the footer lists every account')
+  assert.ok(portalFooterAccounts(accounts, chat, screens[0]).some((entry) => entry.platform === 'telegram'), 'the footer keeps the Telegram link the legal sentence needs, even on About')
+  assert.equal(portalFooterAccounts(accounts, chat, screens[0]).some((entry) => entry.platform === 'facebook'), false, 'but not the accounts the About card already lists')
   assert.ok(portalContactFooterLinks(portalFooterAccounts(accounts, chat, screens[3])).some((link) => link.platform === 'telegram'), 'and a screen with no chat rows keeps the Telegram account in the footer')
 })
 

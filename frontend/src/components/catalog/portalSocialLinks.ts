@@ -302,12 +302,21 @@ export function portalAccountsNotShown(accounts: readonly PortalContactEntry[], 
 
 /**
  * The accounts the footer column lists on this screen. About prints every account in its details card, so the footer prints none there; the FAQ
- * and the List page print the chat rows inline, so the footer leaves out the same account; every other screen lists them all. One account is never
- * on a screen twice.
+ * and the List page print the chat rows inline, so the footer leaves out the same account; every other screen lists them all.
+ *
+ * One exception, kept on purpose: the footer's Telegram entry stays on every screen. The footer's takedown sentence ("if you or a picture of you is
+ * on this site, contact us via ...", legal/LegalPages.tsx) reads its link from this list, so dropping Telegram would leave that legal route with
+ * no link. The entry comes from the accounts, else from the chat rows.
  */
 export function portalFooterAccounts(accounts: readonly PortalContactEntry[], chat: readonly PortalContactEntry[], screen: { tab: string; listOpen: boolean }): PortalContactEntry[] {
-  if (screen.tab === 'about' && !screen.listOpen) return []
-  return screen.listOpen || screen.tab === 'faq' ? portalAccountsNotShown(accounts, chat) : [...accounts]
+  const aboutCovers = screen.tab === 'about' && !screen.listOpen
+  const shown = aboutCovers ? [] : screen.listOpen || screen.tab === 'faq' ? portalAccountsNotShown(accounts, chat) : [...accounts]
+  const telegram = accounts.find((entry) => entry.platform === 'telegram') ?? chat.find((entry) => entry.platform === 'telegram')
+  if (telegram && !shown.some((entry) => entry.platform === 'telegram')) shown.push(telegram)
+  return shown
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => PORTAL_ACCOUNT_ORDER.indexOf(a.entry.platform as PortalAccountPlatform) - PORTAL_ACCOUNT_ORDER.indexOf(b.entry.platform as PortalAccountPlatform) || a.index - b.index)
+    .map(({ entry }) => entry)
 }
 
 /** The footer's column lists the account entries. */

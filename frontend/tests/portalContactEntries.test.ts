@@ -144,14 +144,16 @@ runCase('the one Telegram account is in both lists, and a screen shows it once',
   assert.equal(portalAccountsNotShown(other.accounts, other.chat).some((entry) => entry.platform === 'telegram'), true, 'a channel that is not the chat account stays')
 })
 
-runCase('footer accounts: About prints them in its card (footer none), FAQ and List print chat inline (footer drops the same account), other tabs all', () => {
+runCase('footer accounts: About prints them in its card, FAQ and List print chat inline (the footer drops the same account), other tabs all; Telegram stays for the legal takedown sentence', () => {
   const { chat, accounts } = splitFor(LIVE_CONFIG)
   const names = (screen: { tab: string; listOpen: boolean }) => portalFooterAccounts(accounts, chat, screen).map((entry) => entry.platform)
-  assert.deepEqual(names({ tab: 'about', listOpen: false }), [])
-  assert.deepEqual(names({ tab: 'faq', listOpen: false }), ['facebook', 'instagram'])
-  assert.deepEqual(names({ tab: 'products', listOpen: true }), ['facebook', 'instagram'])
+  assert.deepEqual(names({ tab: 'about', listOpen: false }), ['telegram'], 'About prints the rest in its card; Telegram stays for the footer sentence')
+  assert.deepEqual(names({ tab: 'faq', listOpen: false }), ['facebook', 'instagram', 'telegram'])
+  assert.deepEqual(names({ tab: 'products', listOpen: true }), ['facebook', 'instagram', 'telegram'])
   assert.deepEqual(names({ tab: 'products', listOpen: false }), ['facebook', 'instagram', 'telegram'])
-  assert.deepEqual(names({ tab: 'about', listOpen: true }), ['facebook', 'instagram'], 'the List page covers About')
+  // control: with no Telegram anywhere there is nothing to keep, and a chat-only Telegram is kept too
+  assert.deepEqual(portalFooterAccounts([], [], { tab: 'about', listOpen: false }), [])
+  assert.deepEqual(portalFooterAccounts([], chat, { tab: 'faq', listOpen: false }).map((entry) => entry.platform), ['telegram'])
 })
 
 runCase('a platform with two accounts gets two rows; a phone typed twice is one row', () => {
