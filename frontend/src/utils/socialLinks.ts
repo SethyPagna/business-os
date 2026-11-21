@@ -90,7 +90,9 @@ const MAILTO_UNSAFE = '\\s\\u0000-\\u001f\\u007f@?&,;%<>"\'\\\\'
 const SAFE_EMAIL = new RegExp(`^[^${MAILTO_UNSAFE}]+@[^${MAILTO_UNSAFE}]+\\.[^${MAILTO_UNSAFE}]+$`)
 
 /** The one rule for a public tel:/mailto: href: a link only when the value can safely make one, else ''. */
-export function contactHref(kind: 'tel' | 'mailto', value?: string | null): string {
+export function contactHref(kind: 'tel' | 'mailto', rawValue?: string | null): string {
+  // A saved value with a leading or trailing space still makes a link (the Contact menu already trimmed; About did not).
+  const value = String(rawValue ?? '').trim()
   if (!value) return ''
   if (kind === 'tel') {
     const digits = value.replace(/[^\d+]/g, '')

@@ -35,6 +35,13 @@ runCase('tel: the Contact menu row and the About link agree on a short or tel:-p
   assert.equal(rows('tel:+85512345678')[0]?.href, 'tel:+85512345678')
 })
 
+runCase('contactHref trims the value first for both kinds', () => {
+  assert.equal(contactHref('mailto', ' shop@example.com '), 'mailto:shop@example.com')
+  assert.equal(contactHref('tel', '  012 345 678 '), 'tel:012345678')
+  assert.equal(contactHref('mailto', 'shop @example.com'), '', 'a space inside still makes no link')
+  assert.equal(contactHref('mailto', '   '), '')
+})
+
 runCase('mailto: ordinary addresses keep a link', () => {
   assert.equal(contactHref('mailto', 'shop@example.com'), 'mailto:shop@example.com')
   assert.equal(contactHref('mailto', 'first.last+tag@sub-domain.example.co'), 'mailto:first.last+tag@sub-domain.example.co')
