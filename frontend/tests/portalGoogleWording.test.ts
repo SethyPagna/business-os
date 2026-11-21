@@ -256,8 +256,8 @@ const classIdentifier = (name: string) => (node: ts.JsxElement | ts.JsxSelfClosi
 check('the count next to a word is its own notranslate element: list segment, header badge, filter badge, Add quantity', () => {
   const segment = unmarkedCountElements('components/catalog/PortalListPage.tsx', childIdentifier(['count']))
   assert.equal(segment.found.length, 1, 'one list-segment count')
-  const header = unmarkedCountElements('components/catalog/CatalogPreviewSurface.tsx', classIdentifier('HEADER_COUNT_CLASS'))
-  assert.equal(header.found.length, 2, 'saved and list header counts')
+  const header = unmarkedCountElements('components/catalog/PortalDock.tsx', classIdentifier('COUNT_BADGE'))
+  assert.equal(header.found.length, 2, 'the dock list badge on the wide stack and on the phone menu button')
   const filters = unmarkedCountElements('components/catalog/CatalogProductsSection.tsx', childIdentifier(['portalActiveFilterCount']))
   assert.equal(filters.found.length, 2, 'phone and desktop Filters counts')
   const addQty = unmarkedCountElements('components/catalog/CatalogProductsSection.tsx', childIdentifier(['qty']))

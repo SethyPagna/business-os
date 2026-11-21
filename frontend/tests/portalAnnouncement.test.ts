@@ -210,7 +210,7 @@ run('structure: the surface draws the bar above the padded page, drops the dupli
   assert.doesNotMatch(page, /announcementHeight|onAnnouncementHeight/, 'the page does not track the bar height for the install notice any more')
   assert.match(page, /data-portal-install-notice=""\s+className="pointer-events-none fixed inset-x-2 bottom-\[calc\(0\.75rem\+env\(safe-area-inset-bottom\)\)\] z-40 flex justify-center sm:inset-x-auto sm:left-4 sm:w-\[22rem\] sm:justify-start"/, 'the install notice is pinned to the bottom, left corner from sm')
   assert.match(page, /className="relative pb-\[var\(--install-band-clearance,0px\)\]"/, 'the page pads by what the notice covers, so the footer links scroll clear of it')
-  assert.match(page, /max-\[639px\]:bottom-\[max\(calc\(1\.25rem\+env\(safe-area-inset-bottom\)\),calc\(var\(--install-band-clearance,0px\)\+0\.5rem\)\)\]/, 'on a phone the List button rides above the notice')
+  assert.match(read('src/components/catalog/PortalDock.tsx'), /max-\[767px\]:bottom-\[max\(calc\(1rem\+env\(safe-area-inset-bottom\)\),calc\(var\(--install-band-clearance,0px\)\+0\.5rem\)\)\]/, 'on a phone the dock rides above the notice')
   const editorPage = read('src/components/catalog/CatalogPage.tsx')
   assert.match(editorPage, /announcement=\{resolvePortalAnnouncement\(displayConfig, language, '', \{ ignoreDays: true \}\)\}/)
   assert.doesNotMatch(editorPage, /onDismissAnnouncement/, 'the preview is not closable')

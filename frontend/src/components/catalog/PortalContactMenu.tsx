@@ -15,6 +15,35 @@ const ICONS: Record<PortalContactPlatform, IconComponent> = { ...PORTAL_SOCIAL_I
 /** A screen rectangle to open at, for callers that have no trigger of their own (the FAQ and About buttons call the page's `openContactSheet`). */
 export type PortalContactAnchor = { top: number; left: number; width: number; height: number; opener: HTMLElement | null }
 
+/** The rows themselves: one tappable 44 px row per entry (brand icon, then the account name, number or address). Used in the Contact menu and wherever a page shows them inline. */
+export function PortalContactRows({ entries, copy, onNavigate, className = '' }: { entries: readonly PortalContactEntry[]; copy: CopyFn; onNavigate?: () => void; className?: string }) {
+  if (!entries.length) return null
+  return (
+    <ul className={className} aria-label={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')} data-portal-contact-menu="true">
+      {entries.map((entry) => {
+        const Icon = ICONS[entry.platform]
+        const external = !/^(?:tel|mailto):/i.test(entry.href)
+        return (
+          <li key={entry.key}>
+            <a
+              href={entry.href}
+              target={external ? '_blank' : undefined}
+              rel={external ? 'noreferrer noopener' : undefined}
+              onClick={onNavigate}
+              aria-label={entry.accessibleName}
+              data-portal-contact-platform={entry.platform}
+              className="flex min-h-11 items-center gap-3 px-4 py-2 text-sm text-[#23201b] transition hover:bg-stone-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
+            >
+              <Icon className="h-4 w-4 shrink-0 text-[#9c7a3c] dark:text-amber-300" />
+              <PortalSocialText text={entry.label} latin={entry.latin} />
+            </a>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 /**
  * The one Contact menu (spec section 3): no title row, one row per way to reach the shop in the order Phone, Messenger, Telegram, Instagram,
  * Facebook, TikTok, WhatsApp, Website, Email, Map. A row is the brand icon and the account name, number or address; the platform word is
@@ -61,31 +90,9 @@ export default function PortalContactMenu({ entries, copy, trigger, align = 'aut
   }, [anchor, onClose])
 
   if (!entries.length) return null
-  const label = copy('contactUs', 'Contact us', 'ទាក់ទងយើង')
 
   const content = ({ closeMenu }: { closeMenu: () => void }) => (
-    <ul className="w-72 max-w-[85vw] py-1" aria-label={label} data-portal-contact-menu="true">
-      {entries.map((entry) => {
-        const Icon = ICONS[entry.platform]
-        const external = !/^(?:tel|mailto):/i.test(entry.href)
-        return (
-          <li key={entry.key}>
-            <a
-              href={entry.href}
-              target={external ? '_blank' : undefined}
-              rel={external ? 'noreferrer noopener' : undefined}
-              onClick={closeMenu}
-              aria-label={entry.accessibleName}
-              data-portal-contact-platform={entry.platform}
-              className="flex min-h-11 items-center gap-3 px-4 py-2 text-sm text-[#23201b] transition hover:bg-stone-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
-            >
-              <Icon className="h-4 w-4 shrink-0 text-[#9c7a3c] dark:text-amber-300" />
-              <PortalSocialText text={entry.label} latin={entry.latin} />
-            </a>
-          </li>
-        )
-      })}
-    </ul>
+    <PortalContactRows entries={entries} copy={copy} onNavigate={closeMenu} className="w-72 max-w-[85vw] py-1" />
   )
 
   if (anchor) {

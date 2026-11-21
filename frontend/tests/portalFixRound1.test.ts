@@ -50,7 +50,7 @@ run('the primary recipe is ink with ivory text, swapped in dark, and both pairs 
 
 run('every storefront primary button takes the recipe', () => {
   const files: Record<string, RegExp> = {
-    'components/catalog/CatalogPreviewSurface.tsx': /HEADER_CONTACT_CLASS = `[^`]*\$\{PORTAL_PRIMARY_COLORS\}`/,
+    'components/catalog/PortalDock.tsx': /CONTACT_BUTTON = `[^`]*\$\{PORTAL_PRIMARY_COLORS\}`/,
     'components/catalog/CatalogProductsSection.tsx': /: PORTAL_PRIMARY_COLORS\}/,
     'components/catalog/ProductDetailFlyout.tsx': /\$\{PORTAL_PRIMARY_BUTTON\} flex-1/,
     'components/catalog/CatalogAccountSection.tsx': /submitClass = `\$\{PORTAL_PRIMARY_BUTTON\}/,

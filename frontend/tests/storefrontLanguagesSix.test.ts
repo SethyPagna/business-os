@@ -66,10 +66,12 @@ const catalog = (file: string) => read(`src/components/catalog/${file}`)
 
 check('the shared menu renders the options it is given, with a Google tag and no-translate labels', () => {
   const surface = catalog('CatalogPreviewSurface.tsx')
-  assert.match(surface, /\{languageOptions\.map\(/)
+  const dock = catalog('PortalDock.tsx')
+  assert.match(dock, /\{options\.map\(/)
   assert.match(surface, /languageOptions = PUBLIC_STOREFRONT_LANGUAGE_OPTIONS/)
-  assert.match(surface, /option\.google \?[\s\S]{0,260}>Google</)
-  assert.match(surface, /<span translate="no" className="notranslate">\{option\.label\}<\/span>/)
+  assert.match(surface, /languageOptions=\{languageOptions\}/, 'the surface hands its options to the dock')
+  assert.match(dock, /option\.google \?[\s\S]{0,260}>Google</)
+  assert.match(dock, /<span translate="no" className="notranslate">\{option\.label\}<\/span>/)
 })
 
 check('the editor preview offers only the hand-written two', () => {

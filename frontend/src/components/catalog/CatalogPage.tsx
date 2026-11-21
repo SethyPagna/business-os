@@ -1299,8 +1299,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
   const [publicSecondaryTabsPrimed, setPublicSecondaryTabsPrimed] = useState(false)
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
-  const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
-  const [publicPortalNavMetrics, setPublicPortalNavMetrics] = useState({ left: 0, width: 0, height: 0 })
   const [portalLanguagePacksModule, setPortalLanguagePacksModule] = useState<PortalLanguagePacksModule | null>(null)
   const [portalContentI18nModule, setPortalContentI18nModule] = useState<PortalContentI18nModule | null>(null)
   const [categories, setCategories] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.categories))
@@ -2061,29 +2059,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   useEffect(() => {
     if (!publicView || typeof window === 'undefined') return undefined
     let frameRequested = false
-    const topOffset = window.innerWidth >= 640 ? 8 : 0
 
     const updateVisibility = () => {
       frameRequested = false
       const scrollTop = Math.max(window.scrollY || 0, document.documentElement?.scrollTop || 0, document.body?.scrollTop || 0)
       setPublicScrollButtonsVisible(scrollTop > 220)
-      if (publicPortalNavRef.current) {
-        const rect = publicPortalNavRef.current.getBoundingClientRect()
-        const shouldPin = rect.top <= topOffset
-        setPublicPortalNavPinned((current) => (current === shouldPin ? current : shouldPin))
-        setPublicPortalNavMetrics((current) => {
-          const next = {
-            left: Math.max(0, rect.left),
-            width: Math.max(0, rect.width),
-            height: Math.max(0, rect.height),
-          }
-          return (
-            current.left === next.left
-            && current.width === next.width
-            && current.height === next.height
-          ) ? current : next
-        })
-      }
     }
 
     const handleScroll = () => {
@@ -3539,8 +3519,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         activeTab={activeTab}
         setActiveTab={handlePortalTabChange}
         publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
-        publicPortalNavPinned={publicPortalNavPinned}
-        publicPortalNavMetrics={publicPortalNavMetrics}
         contactEntries={contactEntries}
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}

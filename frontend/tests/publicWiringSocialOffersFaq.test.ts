@@ -37,8 +37,11 @@ runCase('the header has no chip row and the page has no floating chat buttons: C
     assert.doesNotMatch(read(file), /PortalSocialRow|PortalContactFloat|contactFab|contactPopover|data-portal-social|data-portal-contact-float/, `${file} still mounts a chip row or a float`)
   }
   const surface = read('CatalogPreviewSurface.tsx')
-  assert.match(surface, /<PortalContactMenu[\s\S]*?entries=\{contactEntries\}/, 'the header Contact button opens the menu')
-  assert.match(surface, /data-portal-contact-trigger=""/)
+  const dock = read('PortalDock.tsx')
+  assert.match(surface, /<PortalDock[\s\S]*?contactEntries=\{contactEntries\}/, 'the surface hands the entries to the dock')
+  assert.match(dock, /<PortalContactMenu[\s\S]*?entries=\{contactEntries\}/, 'the dock Contact button opens the menu')
+  assert.match(dock, /data-portal-contact-trigger=""/)
+  assert.doesNotMatch(surface, /data-portal-contact-trigger=""|<PortalContactMenu/, 'the header holds no Contact button')
 })
 
 runCase('every page and sheet builds its contact data through the one builder', () => {

@@ -13,7 +13,6 @@ import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
-import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import type { LucideIcon } from 'lucide-react'
 import { useApp } from '../../app/AppContextCore.tsx'
@@ -1490,10 +1489,10 @@ export default function PublicCatalogPage() {
     pullToRefreshEnabled,
   )
 
-  // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason). It is pinned to the bottom: the
-  // header is one row that holds Contact, List, Account and Language, and a notice over the top hid all of them on an iPhone until it was
-  // closed. The band publishes how much of the bottom it covers (--install-band-clearance); the page root pads by that much so the footer
-  // links scroll clear of it, and the List button rides above it on a phone. From sm it takes the left corner, opposite the List button.
+  // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason). It is pinned to the bottom, never the
+  // top: a notice over the top hid the header on an iPhone until it was closed. The band publishes how much of the bottom it covers
+  // (--install-band-clearance); the page root pads by that much so the footer links scroll clear of it, and the dock rides above it on a
+  // phone. From sm it takes the left corner, opposite the dock.
   const installBand = offersShopInstall ? (
     <div
       data-portal-install-notice=""
@@ -1501,22 +1500,6 @@ export default function PublicCatalogPage() {
     >
       <InstallPromptBand translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} />
     </div>
-  ) : null
-
-  // The floating List button: only on the Products tab, and only once the list has something in it.
-  const bucketFab = activeTab === 'products' && bucket.count > 0 && !listView ? (
-    <button
-      type="button"
-      className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] max-[639px]:bottom-[max(calc(1.25rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-2 rounded-full bg-[#23201b] px-4 py-3 text-[#f4f1ea] shadow-xl transition hover:bg-stone-700 dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-neutral-300"
-      onClick={() => openListView('list')}
-      aria-label={copy('bucketTitle', 'My List')}
-      title={copy('bucketTitle', 'My List')}
-    >
-      <ClipboardList className="h-5 w-5" />
-      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-700 px-1 text-[11px] font-bold text-white">
-        {bucket.count}
-      </span>
-    </button>
   ) : null
 
   return (
@@ -1538,7 +1521,6 @@ export default function PublicCatalogPage() {
       }}
     >
     {installBand}
-    {bucketFab}
     {contactAnchor ? <PortalContactMenu entries={contactEntries} copy={copy} anchor={contactAnchor} onClose={closeContactSheet} /> : null}
     {accountDrawer}
     {portalAccount.consentRenewal ? (
@@ -1581,10 +1563,10 @@ export default function PublicCatalogPage() {
       listCount={bucket.count}
       listPage={listPage}
       accountSignedIn={!!portalAccount.account}
+      accountName={portalAccount.account?.name}
+      dockHidden={accountOpen || !!portalAccount.consentRenewal}
       contactEntries={contactEntries}
       publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
-      publicPortalNavPinned={false}
-      publicPortalNavMetrics={{ left: 0, width: 0, height: 0 }}
       catalogSection={!loadFailed && activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={loadFailed ? loadFailedPanel : secondaryTabSection}
       footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}

@@ -1,19 +1,9 @@
 import { Suspense, cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
+import type { ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
-import Check from 'lucide-react/dist/esm/icons/check.js'
-import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
-import Globe from 'lucide-react/dist/esm/icons/globe.js'
-import Heart from 'lucide-react/dist/esm/icons/heart.js'
-import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
-import Moon from 'lucide-react/dist/esm/icons/moon.js'
-import Sun from 'lucide-react/dist/esm/icons/sun.js'
-import User from 'lucide-react/dist/esm/icons/user.js'
-import LazyPortalMenu from '../shared/LazyPortalMenu'
-import PortalContactMenu from './PortalContactMenu.tsx'
-import { PORTAL_PRIMARY_COLORS } from './portalButtons.ts'
+import PortalDock from './PortalDock.tsx'
 import CatalogProductImage from './catalogImages'
 import { PortalNavSearchSlotContext } from './portalNavSearchSlot.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
@@ -48,12 +38,6 @@ type PortalTab = {
   key: string
   label: string
   icon: ComponentType<{ className?: string }>
-}
-
-type PortalNavMetrics = {
-  left?: number
-  width?: number
-  height?: number
 }
 
 type GalleryViewState = {
@@ -99,20 +83,21 @@ type CatalogPreviewSurfaceProps = {
   activeTab: string
   setActiveTab: (key: string) => void
   publicPortalNavRef: RefObject<HTMLElement>
-  publicPortalNavPinned: boolean
-  publicPortalNavMetrics: PortalNavMetrics
-  // Top-bar Account + Wishlist icons (public storefront only). Wired by
-  // PublicCatalogPage; the admin editor preview (CatalogPage.tsx) omits them,
-  // so the icons simply don't render there.
+  // The bottom-right dock's Account, Saved and List (public storefront only). Wired by PublicCatalogPage; the admin editor preview
+  // (CatalogPage.tsx) renders no dock, so it omits them.
   onOpenAccount?: () => void
   onOpenWishlist?: () => void
   wishlistCount?: number
-  // The header list icon opens the List page. `listPage` is the full Saved/List page: while it is set it replaces the tab content and no tab is current.
+  // The dock's Shop button opens the List page. `listPage` is the full Saved/List page: while it is set it replaces the tab content and no tab is current.
   onOpenList?: () => void
   listCount?: number
   listPage?: ReactNode
   accountSignedIn?: boolean
-  // Every way to reach the shop (buildPortalContactEntries): the header's Contact menu. None: no Contact button.
+  /** The signed-in name: the Account row of the phone menu shows it. */
+  accountName?: string
+  /** A sheet that lives outside this surface (the account sheet, the consent prompt) is open: the dock steps out of the way. */
+  dockHidden?: boolean
+  // Every way to reach the shop (buildPortalContactEntries): the dock's Contact panel. None: no Contact button.
   contactEntries?: readonly PortalContactEntry[]
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
@@ -155,19 +140,13 @@ type CatalogPreviewSurfaceProps = {
   pageLanguage: string
   /** The menu's active row: one of the six values. Defaults to pageLanguage (the editor preview only knows km and en). */
   pageLanguageChoice?: string
-  /** One short line under the header icons (a failed Google translation); it clears itself after about 6 seconds. */
+  /** One short line under the shop name (a failed Google translation); it clears itself after about 6 seconds. */
   languageNotice?: string
   /** The editor preview passes only the hand-written two; the live storefront gets all six. */
   languageOptions?: readonly PortalLanguageOption[]
   changePageLanguage: (language: string) => void
 }
 
-// Header buttons: 44 x 44 px below 640 px with no gap between them; 40 px from sm up. Six fit beside the shop name from 400 px; below that Saved is reached from the List page.
-const HEADER_ICON_CLASS = 'inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full text-[#23201b] transition hover:bg-stone-200 dark:text-neutral-200 dark:hover:bg-neutral-800'
-// The main action of the header: icon + the word "Contact" from sm up, the icon alone on a phone.
-const HEADER_CONTACT_CLASS = `inline-flex h-11 w-11 sm:h-10 shrink-0 items-center justify-center gap-2 rounded-full transition sm:w-auto sm:px-4 sm:text-sm sm:font-semibold ${PORTAL_PRIMARY_COLORS}`
-const HEADER_ICON_GLYPH = 'h-[18px] w-[18px]'
-const HEADER_COUNT_CLASS = 'notranslate absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-700 px-1 text-[10px] font-bold leading-none text-white'
 // The surface recipe (spec section 1) for the floating scroll buttons.
 const SCROLL_BUTTON_CLASS = 'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-stone-300 bg-white text-[#23201b] shadow-sm transition hover:bg-stone-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
 // The strip runs under the page gutters (the page container's own px-4 / sm:px-6 / lg:px-10 / xl:px-14).
@@ -193,8 +172,6 @@ export default function CatalogPreviewSurface({
   activeTab,
   setActiveTab,
   publicPortalNavRef,
-  publicPortalNavPinned,
-  publicPortalNavMetrics,
   onOpenAccount,
   onOpenWishlist,
   wishlistCount = 0,
@@ -202,6 +179,8 @@ export default function CatalogPreviewSurface({
   listCount = 0,
   listPage = null,
   accountSignedIn = false,
+  accountName,
+  dockHidden = false,
   contactEntries = [],
   catalogSection,
   secondaryTabSection,
@@ -296,7 +275,6 @@ export default function CatalogPreviewSurface({
     if (key === activeTab) return
     setActiveTab(key)
     if (!publicView || typeof window === 'undefined') return
-    if (window.innerWidth >= 640 && publicPortalNavPinned) return
     window.requestAnimationFrame(() => {
       const target = publicPortalNavRef?.current || previewSectionRef?.current
       if (!target) return
@@ -312,23 +290,6 @@ export default function CatalogPreviewSurface({
       window.scrollTo({ top, behavior: 'auto' })
     })
   }
-
-  // Same top-safe-area gap as the header padding above -- this is a
-  // `position: fixed` inline style (the nav's "pinned while scrolling"
-  // state, separate from its default `sticky top-0` CSS), so the browser
-  // doesn't apply any safe-area handling automatically the way it can for
-  // a plain top-0; it has to be added into the calc'd offset itself.
-  const pinnedNavStyle: CSSProperties | undefined = publicView && publicPortalNavPinned ? {
-    position: 'fixed',
-    top: typeof window !== 'undefined' && window.innerWidth >= 640
-      ? 'calc(8px + env(safe-area-inset-top, 0px))'
-      : 'env(safe-area-inset-top, 0px)',
-    left: `${typeof window !== 'undefined' ? Math.max(8, publicPortalNavMetrics.left || 0) : publicPortalNavMetrics.left}px`,
-    width: `${typeof window !== 'undefined'
-      ? Math.max(0, Math.min(publicPortalNavMetrics.width || window.innerWidth, window.innerWidth - 16))
-      : publicPortalNavMetrics.width}px`,
-    zIndex: 40,
-  } : undefined
 
   return (
     <div
@@ -348,8 +309,7 @@ export default function CatalogPreviewSurface({
       // scroller INSIDE it -- somewhere html/body's own `overflow-x: hidden`
       // could never reach. `clip` is the one value that contains the
       // horizontal axis without making the shell a scrollport; `hidden` would
-      // make it one and break every sticky descendant, and the pinned section
-      // nav lives in here.
+      // make it one and break the page scroll (the dock's fixed position is unaffected).
       //
       // The VERTICAL axis then had to follow, and this is the fix for
       // "scrollability in public website". `overflowY: 'auto'` was kept here
@@ -358,14 +318,9 @@ export default function CatalogPreviewSurface({
       // its scrollHeight never exceeds its clientHeight: it is a scrollport
       // that can never scroll, and `-webkit-overflow-scrolling: touch` on a
       // scrollport with nothing to scroll buys no momentum -- the DOCUMENT
-      // was always the thing actually moving. What that dead scrollport DID
-      // do is become the nearest scrollport ancestor for every `position:
-      // sticky` descendant, and a sticky element resolves against its
-      // scrollport, not the page. So the section nav (`sticky top-0`) and the
-      // products search/filter row (`sticky top-16`) were pinned to a box
-      // that never moves -- i.e. they simply scrolled away -- on the live
-      // storefront, where the JS pinning fallback is also switched off
-      // (PublicCatalogPage passes publicPortalNavPinned={false}).
+      // was always the thing actually moving. Nothing on the storefront is
+      // sticky at the top any more (owner A60: the header and the tab strip
+      // scroll away), so no descendant resolves against this box.
       //
       // `overflow-x: clip` is deliberately the only overflow left: `clip`
       // paired with `visible` is the ONE pair CSS does not rewrite to `auto`,
@@ -398,9 +353,9 @@ export default function CatalogPreviewSurface({
           column) actually uses the space instead of floating in a wide
           gutter on ordinary desktop widths. */}
       {announcement ? <PortalAnnouncementStrip announcement={announcement} copy={copy} onDismiss={onDismissAnnouncement} onHeight={publicView ? onAnnouncementHeight : undefined} /> : null}
-      {/* The bottom padding clears the floating buttons (My List, and the scroll buttons on the other side), so at the page end none covers the footer. */}
+      {/* The bottom padding clears the floating buttons (the dock on the right, the scroll buttons on the left), so at the page end none covers the footer. */}
       <div
-        className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''} data-[portal-announcement-shown=true]:pt-3 sm:data-[portal-announcement-shown=true]:pt-4`}
+        className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))] md:pb-[calc(19rem+env(safe-area-inset-bottom))]' : ''} data-[portal-announcement-shown=true]:pt-3 sm:data-[portal-announcement-shown=true]:pt-4`}
         data-portal-announcement-shown={announcement ? 'true' : undefined}
       >
         <div className="space-y-0">
@@ -425,11 +380,10 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            {/* One row at every width: the shop name on the left, the actions on the right. The row has no surface of its own (it sits on the ivory page);
-                the sticky tab strip under it is the solid one. The name wraps to two lines on a phone rather than being cut, and the name
-                column keeps room for those two lines (at the Khmer line height) from the first paint, so the tabs under the header do not
-                move when the shop's name arrives. Below 400 px the Saved button leaves the row (the List page carries the Saved tab), which
-                gives the name the width it needs beside five 44 px buttons. */}
+            {/* The header is the shop name and nothing else (owner, 21 Nov 2026): Contact, List, Saved, Account, Language and Theme live in the
+                bottom-right dock. It has no surface of its own and, like the tab strip under it, scrolls away with the page. The name wraps to
+                two lines on a phone rather than being cut, and its column keeps room for those two lines (at the Khmer line height) from the
+                first paint, so the tabs under the header do not move when the shop's name arrives. */}
             <header className="portal-header-shell">
               <div className="flex items-center gap-2 px-1 py-2 sm:py-3">
                 <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center sm:block sm:min-h-0">
@@ -458,135 +412,19 @@ export default function CatalogPreviewSurface({
                     </div>
                   ) : null}
                 </div>
-                {/* `data-portal-header-icons` is the hook public-portal.css's pointer:coarse floor exempts: the targets here are 44 px on a phone and stay on the one row. */}
-                <div data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0 sm:gap-1">
-                  {contactEntries.length > 0 ? (
-                    <PortalContactMenu
-                      entries={contactEntries}
-                      copy={copy}
-                      align="right"
-                      trigger={(
-                        <button
-                          type="button"
-                          data-portal-contact-trigger=""
-                          className={HEADER_CONTACT_CLASS}
-                          aria-label={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
-                          title={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
-                        >
-                          <MessageCircle className={HEADER_ICON_GLYPH} />
-                          <span translate="no" className="notranslate hidden sm:inline">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
-                        </button>
-                      )}
-                    />
-                  ) : null}
-                  {onOpenWishlist ? (
-                    <span data-portal-header-saved="" className="hidden min-[400px]:contents">
-                    <button
-                      type="button"
-                      className={`relative ${HEADER_ICON_CLASS}`}
-                      onClick={onOpenWishlist}
-                      aria-label={copy('saved', 'Saved')}
-                      title={copy('saved', 'Saved')}
-                    >
-                      <Heart className={HEADER_ICON_GLYPH} />
-                      {wishlistCount > 0 ? <span translate="no" className={HEADER_COUNT_CLASS}>{wishlistCount}</span> : null}
-                    </button>
-                    </span>
-                  ) : null}
-                  {onOpenList ? (
-                    <button
-                      type="button"
-                      className={`relative ${HEADER_ICON_CLASS}`}
-                      onClick={onOpenList}
-                      aria-label={copy('bucketTitle', 'My List')}
-                      title={copy('bucketTitle', 'My List')}
-                    >
-                      <ClipboardList className={HEADER_ICON_GLYPH} />
-                      {listCount > 0 ? <span translate="no" className={HEADER_COUNT_CLASS}>{listCount}</span> : null}
-                    </button>
-                  ) : null}
-                  {onOpenAccount ? (
-                    <button
-                      type="button"
-                      className={`${HEADER_ICON_CLASS} ${accountSignedIn ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
-                      onClick={onOpenAccount}
-                      aria-label={copy('account', 'Account')}
-                      title={copy('account', 'Account')}
-                    >
-                      <User className={HEADER_ICON_GLYPH} />
-                    </button>
-                  ) : null}
-                  {displayConfig.translateWidgetEnabled ? (
-                    <LazyPortalMenu
-                      align="right"
-                      trigger={(
-                        <button
-                          type="button"
-                          className={HEADER_ICON_CLASS}
-                          aria-label={copy('publicTranslation', 'Language tools')}
-                          title={copy('publicTranslation', 'Language tools')}
-                        >
-                          <Globe className={HEADER_ICON_GLYPH} />
-                        </button>
-                      )}
-                      content={({ closeMenu }) => (
-                        // No title row: just the options, the active one marked with a check.
-                        <div className="w-60 max-w-[85vw] py-1" role="group" aria-label={copy('publicTranslation', 'Language tools')}>
-                          {languageOptions.map((option) => {
-                            const active = (pageLanguageChoice ?? pageLanguage) === option.value
-                            return (
-                              <button
-                                key={option.value}
-                                type="button"
-                                aria-current={active ? 'true' : undefined}
-                                className={`flex min-h-11 w-full items-center justify-between gap-3 px-4 text-left text-sm transition hover:bg-stone-100 dark:hover:bg-neutral-800 ${active ? 'font-semibold text-[#7a5c22] dark:text-amber-300' : 'text-[#23201b] dark:text-neutral-200'}`}
-                                onClick={() => {
-                                  changePageLanguage(option.value)
-                                  closeMenu()
-                                }}
-                              >
-                                {/* Each label stays in its own script: a page translator must never rewrite it. */}
-                                <span translate="no" className="notranslate">{option.label}</span>
-                                <span className="flex items-center gap-2">
-                                  {option.google ? (
-                                    <span translate="no" className="notranslate rounded border border-stone-300 px-1 text-[10px] font-medium uppercase leading-4 tracking-wide text-stone-500 dark:border-neutral-600 dark:text-neutral-400">Google</span>
-                                  ) : null}
-                                  {active ? <Check aria-hidden="true" className="h-4 w-4 shrink-0" /> : null}
-                                </span>
-                              </button>
-                            )
-                          })}
-                        </div>
-                      )}
-                    />
-                  ) : null}
-                  <button
-                    type="button"
-                    className={HEADER_ICON_CLASS}
-                    onClick={toggleTheme}
-                    aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
-                    title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
-                  >
-                    {darkMode ? <Sun className={HEADER_ICON_GLYPH} /> : <Moon className={HEADER_ICON_GLYPH} />}
-                  </button>
-                </div>
               </div>
               {/* The live region is always there so its text is announced when it appears; empty, it takes no room. */}
               <p role="status" className={languageNotice ? 'px-1 pb-2 text-right text-xs leading-6 text-stone-700 dark:text-neutral-300' : 'sr-only'}>{languageNotice || ''}</p>
             </header>
 
-            {/* The tab strip is solid page ground with one line under it, and runs edge to edge so nothing scrolls past it in the page gutters.
+            {/* The tab strip is solid page ground with one line under it and scrolls away with the page (owner A60: nothing is fixed at the top).
+                It runs edge to edge.
                 The tabs scroll sideways without a scrollbar; an edge that hides more tabs fades instead of cutting a label. */}
             <nav
               aria-label={copy('publicNavigation', 'Section navigation')}
               ref={publicPortalNavRef}
-              className={publicView ? 'sticky top-0 z-40' : ''}
-              style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
             >
-              <div
-                className={`portal-nav-shell border-b border-stone-300 bg-[#f4f1ea] dark:border-neutral-800 dark:bg-[#0b0b0c] ${publicView && !publicPortalNavPinned ? NAV_FULL_BLEED_CLASS : ''}`}
-                style={pinnedNavStyle}
-              >
+              <div className={`portal-nav-shell border-b border-stone-300 bg-[#f4f1ea] dark:border-neutral-800 dark:bg-[#0b0b0c] ${publicView ? NAV_FULL_BLEED_CLASS : ''}`}>
                 {/* The search joins the tabs: tabs on their own line on a phone with the search directly under them, one row from lg up. */}
                 <div className="flex flex-wrap items-center gap-x-4 lg:flex-nowrap">
                   <div
@@ -677,6 +515,26 @@ export default function CatalogPreviewSurface({
             <ArrowDown className="h-4 w-4" />
           </button>
         </div>
+      ) : null}
+      {publicView ? (
+        <PortalDock
+          copy={copy}
+          darkMode={darkMode}
+          hidden={dockHidden || Boolean(productGalleryView.open || portalImageView.open || productDetailView?.open)}
+          contactEntries={contactEntries}
+          onOpenAccount={onOpenAccount}
+          accountSignedIn={accountSignedIn}
+          accountName={accountName}
+          onOpenList={onOpenList}
+          onOpenWishlist={onOpenWishlist}
+          listCount={listCount}
+          wishlistCount={wishlistCount}
+          languageEnabled={Boolean(displayConfig.translateWidgetEnabled)}
+          languageOptions={languageOptions}
+          activeLanguage={pageLanguageChoice ?? pageLanguage}
+          changePageLanguage={changePageLanguage}
+          toggleTheme={toggleTheme}
+        />
       ) : null}
       <Suspense fallback={null}>
         {productGalleryView.open && productGalleryView.items.length ? (
