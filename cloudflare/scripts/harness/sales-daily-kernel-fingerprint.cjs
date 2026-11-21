@@ -11,7 +11,8 @@
 // can change without a version bump. The keys are DERIVED by a scan of every closure file, which refuses (red, and never pinnable) every use of a limit table other than that one read form.
 //
 // The switch list of src/lib/readSwitches.ts (KNOWN_READ_SWITCHES) is hashed the same way: its shape (the array's string elements left out) plus one entry per switch name the kernel reads, derived by a scan of every other closure file that refuses every other way of naming a switch.
-// A switch name may also arrive as a parameter, only when its declared type is a same-file alias of a union of typeof <top-level const literal> (default one of them); calls of such a function pass a literal, a const of the union, a typed property or nothing, and a type assertion to the union is refused.
+// A switch name must be a string literal or a same-file top-level const bound to one; a parameter, a local (destructured ones included), a property, a template or any other expression is refused, and a closure file may import from readSwitches.ts only the switch readers the scan checks (type-only imports aside).
+// The harness does not read types or type assertions (as any and as never pass through it): reportAtomicMode clamps whatever value arrives to report_atomic or report_atomic_long, so the derived names are all the kernel can read.
 // A pin file (scripts/sales-daily-kernel-pin.json) holds the per-statement hashes for the kernel version in force and an append-only history of
 // { version, aggregate }. node scripts/harness/sales-daily-kernel-fingerprint.cjs --write-pin refuses to write a changed aggregate under a version that
 // already has one, so a kernel change cannot be re-pinned without bumping SALES_DAILY_KERNEL_VERSION (which re-covers and re-computes every stored day).
@@ -191,77 +192,41 @@ function topLiteralConsts(sf) {
   for (const st of sf.statements) if (ts.isVariableStatement(st) && (st.declarationList.flags & ts.NodeFlags.Const)) for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name) && d.initializer && ts.isStringLiteral(d.initializer)) out.set(d.name.text, d.initializer.text)
   return out
 }
-const topAliases = (sf) => new Map(sf.statements.filter((s) => ts.isTypeAliasDeclaration(s)).map((s) => [s.name.text, s.type]))
-
-/** The names of a type that is a union of `typeof X` (X a top-level const bound to a literal) or of string literals, through same-file type aliases: { names, vias, aliases } or null (anything else, `string` included). */
-function resolveUnion(type, sf, consts, aliases, seen = new Set()) {
-  if (!type) return null
-  if (ts.isParenthesizedTypeNode(type)) return resolveUnion(type.type, sf, consts, aliases, seen)
-  if (ts.isUnionTypeNode(type)) {
-    const out = { names: [], vias: [], aliases: [] }
-    for (const member of type.types) {
-      const r = resolveUnion(member, sf, consts, aliases, seen)
-      if (!r) return null
-      out.names.push(...r.names); out.vias.push(...r.vias); out.aliases.push(...r.aliases)
-    }
-    return out
-  }
-  if (ts.isTypeQueryNode(type) && ts.isIdentifier(type.exprName) && consts.has(type.exprName.text)) return { names: [consts.get(type.exprName.text)], vias: [type.exprName.text], aliases: [] }
-  if (ts.isLiteralTypeNode(type) && ts.isStringLiteral(type.literal)) return { names: [type.literal.text], vias: [], aliases: [] }
-  if (ts.isTypeReferenceNode(type) && ts.isIdentifier(type.typeName) && !type.typeArguments && aliases.has(type.typeName.text) && !seen.has(type.typeName.text)) {
-    const r = resolveUnion(aliases.get(type.typeName.text), sf, consts, aliases, new Set([...seen, type.typeName.text]))
-    return r ? { ...r, aliases: [...r.aliases, type.typeName.text] } : null
-  }
-  return null
-}
-
-/** What `name` means at `node`: { kind: 'param', param, fn } | { kind: 'local' } | null (not bound inside a function). */
+/**
+ * What `name` means at `node`: { kind: 'param' } | { kind: 'local' } | null (not bound by a function, block, loop or catch around it). A name inside a binding pattern (a destructured parameter or local) is bound;
+ * a destructured parameter counts as a local. A top-level const is bound by none of these, so a binding of the same name anywhere around the use means it is not that const.
+ */
 function bindingOf(node, name) {
+  const binds = (b) => (ts.isIdentifier(b) ? b.text === name : (ts.isObjectBindingPattern(b) || ts.isArrayBindingPattern(b)) ? b.elements.some((e) => !ts.isOmittedExpression(e) && binds(e.name)) : false)
+  const scope = (n) => ts.isFunctionLike(n) || ts.isBlock(n) || ts.isCaseBlock(n) || ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) || ts.isCatchClause(n)
+  const declares = (x) => (ts.isVariableDeclaration(x) && binds(x.name)) || ((ts.isFunctionDeclaration(x) || ts.isClassDeclaration(x)) && !!x.name && x.name.text === name)
   for (let n = node.parent; n; n = n.parent) {
-    if (!ts.isFunctionLike(n)) continue
-    const param = n.parameters.find((p) => ts.isIdentifier(p.name) && p.name.text === name)
-    if (param) return { kind: 'param', param, fn: n }
+    if (!scope(n)) continue
+    const param = ts.isFunctionLike(n) ? n.parameters.find((p) => binds(p.name)) : null
+    if (param) return { kind: ts.isIdentifier(param.name) ? 'param' : 'local' }
     let local = false
-    const scan = (x) => { if (ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === name) local = true; if (!local) ts.forEachChild(x, scan) }
-    if (n.body) scan(n.body)
+    const scan = (x) => { if (declares(x)) local = true; if (!local) ts.forEachChild(x, scan) }
+    const root = ts.isFunctionLike(n) ? n.body : n
+    if (root) scan(root)
     if (local) return { kind: 'local' }
   }
   return null
 }
 
-const fnNameOf = (fn) => (fn.name && ts.isIdentifier(fn.name) ? fn.name.text : fn.parent && ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name) ? fn.parent.name.text : null)
-
 /**
- * The switch names one argument stands for: { names: [...], param?: { fnName, index } } or { why } (a refusal). Accepted forms: a string literal; an identifier bound to a top-level const literal in the same file;
- * (only `allowParam`) a parameter whose declared type is a union of such consts (its default must be one of them); a property of a parameter whose type literal declares that property with such a union. Nothing else.
+ * The switch names one argument stands for: { names: [...] } or { why } (a refusal). Accepted forms: a string literal; an identifier bound to a top-level const literal in the same file. Nothing else:
+ * the kernel's read must name its switches itself (reportAtomicMode clamps whatever value arrives to report_atomic or report_atomic_long).
  */
-function switchArg(arg, sf, allowParam) {
-  const consts = topLiteralConsts(sf)
-  const aliases = topAliases(sf)
+function switchArg(arg, sf) {
   if (ts.isStringLiteral(arg)) return { names: [arg.text] }
   if (ts.isIdentifier(arg)) {
     const bound = bindingOf(arg, arg.text)
-    if (!bound) return consts.has(arg.text) ? { names: [consts.get(arg.text)] } : { why: `switch name ${arg.text} is not a top-level const bound to a string literal` }
-    if (bound.kind !== 'param') return { why: `switch name ${arg.text} is a local, not a top-level const bound to a string literal` }
-    if (!allowParam) return { why: `switch name ${arg.text} is a parameter` }
-    const union = resolveUnion(bound.param.type, sf, consts, aliases)
-    if (!union || !union.aliases.length) return { why: `switch name parameter ${arg.text} is not typed as a same-file alias of a union of typeof <top-level const literal>` }
-    const d = bound.param.initializer
-    if (d && !((ts.isIdentifier(d) && union.vias.includes(d.text)) || (ts.isStringLiteral(d) && union.names.includes(d.text)))) return { why: `the default of switch name parameter ${arg.text} is not one of the union's consts` }
-    const fnName = fnNameOf(bound.fn)
-    if (!fnName) return { why: `switch name parameter ${arg.text} belongs to an unnamed function` }
-    return { names: union.names, aliases: union.aliases, param: { fnName, index: bound.fn.parameters.indexOf(bound.param) } }
-  }
-  if (ts.isPropertyAccessExpression(arg) && ts.isIdentifier(arg.expression) && ts.isIdentifier(arg.name)) {
-    const bound = bindingOf(arg, arg.expression.text)
-    const type = bound && bound.kind === 'param' ? bound.param.type : null
-    const member = type && ts.isTypeLiteralNode(type) ? type.members.find((m) => ts.isPropertySignature(m) && ts.isIdentifier(m.name) && m.name.text === arg.name.text) : null
-    const union = member ? resolveUnion(member.type, sf, consts, aliases) : null
-    if (!union) return { why: `switch name ${arg.getText(sf)} is not a property declared as a union of typeof <top-level const literal> on a typed parameter` }
-    return { names: union.names, aliases: union.aliases }
+    if (bound) return { why: bound.kind === 'param' ? `switch name ${arg.text} is a parameter` : `switch name ${arg.text} is a local, not a top-level const bound to a string literal` }
+    const consts = topLiteralConsts(sf)
+    return consts.has(arg.text) ? { names: [consts.get(arg.text)] } : { why: `switch name ${arg.text} is not a top-level const bound to a string literal` }
   }
   if (ts.isTemplateLiteral(arg)) return { why: 'switch name is a template literal' }
-  return { why: `switch name is ${ts.SyntaxKind[arg.kind]}, not a string literal, a top-level const bound to one, or a typed parameter` }
+  return { why: `switch name is ${ts.SyntaxKind[arg.kind]}, not a string literal or a top-level const bound to one` }
 }
 
 /** The functions exported by readSwitches.ts that take a switch name: Map name -> argument index (a parameter called ...name..., or typed ReadSwitchName). */
@@ -279,15 +244,13 @@ function switchTakers(text) {
 }
 
 /**
- * The kernel-read switch names of one closure file other than readSwitches.ts: { names: [{ name, at, line }], accepted: Map fnName -> arg index, aliases, refusals }.
+ * The kernel-read switch names of one closure file other than readSwitches.ts: { names: [{ name, at, line }], refusals }.
  * Every call to a function of readSwitches.ts that takes a switch name must pass it in an accepted form (switchArg); every other route to the list or the functions is a refusal.
  */
 function switchReads(text, rel, takers) {
   const sf = ts.createSourceFile(rel, norm(text), ts.ScriptTarget.ES2022, true)
   const lines = sf.text.split('\n')
   const names = []
-  const accepted = new Map()
-  const aliases = new Set()
   const refusals = []
   const refuse = (node, why) => refusals.push(`${rel}:${lineOf(node, sf)}: refused: ${why}`)
   const locals = new Set()
@@ -299,8 +262,11 @@ function switchReads(text, rel, takers) {
         const clause = node.importClause
         if (clause && (clause.name || (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)))) refuse(node, 'default or namespace import of readSwitches')
         if (clause && clause.namedBindings && ts.isNamedImports(clause.namedBindings)) for (const el of clause.namedBindings.elements) {
-          if (el.propertyName && (takers.has(el.propertyName.text) || el.propertyName.text === SWITCH_LIST)) refuse(el, `aliased import ${el.propertyName.text}`)
-          else if (!el.propertyName && takers.has(el.name.text)) locals.add(el.name.text)
+          const imported = (el.propertyName || el.name).text
+          if (el.isTypeOnly || clause.isTypeOnly) continue
+          if (el.propertyName && (takers.has(imported) || imported === SWITCH_LIST)) refuse(el, `aliased import ${imported}`)
+          else if (!takers.has(imported)) refuse(el, `imports ${imported} from readSwitches, which is not a switch reader the scan checks`)
+          else locals.add(el.name.text)
         }
       }
     }
@@ -317,39 +283,12 @@ function switchReads(text, rel, takers) {
         const arg = p.arguments[takers.get(node.text)]
         if (!arg) refuse(node, `${node.text} called without its switch name argument`)
         else {
-          const r = switchArg(arg, sf, true)
+          const r = switchArg(arg, sf)
           if (r.why) refuse(arg, r.why)
           else {
             for (const name of r.names) names.push({ name, at: `${rel}:${lineOf(arg, sf)}`, line: lines[lineOf(arg, sf) - 1].trim() })
-            if (r.param) accepted.set(r.param.fnName, { index: r.param.index, names: r.names })
-            for (const a of r.aliases || []) aliases.add(a)
           }
         }
-      }
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(sf)
-  return { names, accepted, aliases, refusals }
-}
-
-/** The calls, in one closure file, of functions whose switch-name parameter was accepted as a typed union: the argument is omitted, a string literal, a top-level const or the typed property form; a type assertion naming the union is refused anywhere. */
-function acceptedCalls(text, rel, accepted, aliases) {
-  const sf = ts.createSourceFile(rel, norm(text), ts.ScriptTarget.ES2022, true)
-  const lines = sf.text.split('\n')
-  const names = []
-  const refusals = []
-  const refuse = (node, why) => refusals.push(`${rel}:${lineOf(node, sf)}: refused: ${why}`)
-  const visit = (node) => {
-    if ((ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)) && [...aliases].some((a) => new RegExp(`\\b${a}\\b`).test(node.type.getText(sf)))) refuse(node, 'type assertion to a switch-name union')
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && accepted.has(node.expression.text)) {
-      const rule = accepted.get(node.expression.text)
-      const arg = node.arguments[rule.index]
-      if (arg) {
-        const r = switchArg(arg, sf, false)
-        if (r.why) refuse(arg, `call of ${node.expression.text}: ${r.why}`)
-        else if (r.names.some((n) => !rule.names.includes(n))) refuse(arg, `call of ${node.expression.text} passes a switch outside its union`)
-        else for (const name of r.names) names.push({ name, at: `${rel}:${lineOf(arg, sf)}`, line: lines[lineOf(arg, sf) - 1].trim() })
       }
     }
     ts.forEachChild(node, visit)
@@ -440,19 +379,9 @@ function fingerprint(overrides, walkOpts) {
   const limitKeys = [...new Set(limitReadList.map((r) => r.key))].sort()
   const takers = SWITCH_FILE in texts ? switchTakers(texts[SWITCH_FILE]) : new Map()
   const switchReadList = []
-  const acceptedFns = new Map()
-  const unionAliases = new Set()
   for (const rel of Object.keys(texts)) {
     if (rel === SWITCH_FILE) continue
     const scan = switchReads(texts[rel], rel, takers)
-    switchReadList.push(...scan.names.map((n) => ({ ...n, file: rel })))
-    for (const [k, v] of scan.accepted) acceptedFns.set(k, v)
-    for (const a of scan.aliases) unionAliases.add(a)
-    refusals.push(...scan.refusals)
-  }
-  for (const rel of Object.keys(texts)) {
-    if (rel === SWITCH_FILE) continue
-    const scan = acceptedCalls(texts[rel], rel, acceptedFns, unionAliases)
     switchReadList.push(...scan.names.map((n) => ({ ...n, file: rel })))
     refusals.push(...scan.refusals)
   }
@@ -520,4 +449,4 @@ if (require.main === module) {
   console.log(`pinned version ${version}, aggregate ${now.aggregate}, ${Object.keys(now.files).length} files`)
 }
 
-module.exports = { historyGap, fingerprint, diff, fileHashes, limitReads, switchReads, switchTakers, acceptedCalls, pinWrite, relativeImports, readPin, currentVersion, kernelVersionOf, ENTRY, VERSION_FILE, ROOT, PIN_FILE }
+module.exports = { historyGap, fingerprint, diff, fileHashes, limitReads, switchReads, switchTakers, pinWrite, relativeImports, readPin, currentVersion, kernelVersionOf, ENTRY, VERSION_FILE, ROOT, PIN_FILE }

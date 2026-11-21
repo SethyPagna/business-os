@@ -1,6 +1,6 @@
 {
- "version": 7,
- "aggregate": "8618a56c3a1817692182",
+ "version": 8,
+ "aggregate": "0924ce2f785e8a5fe0cf",
  "history": [
   {
    "version": 1,
@@ -29,6 +29,10 @@
   {
    "version": 7,
    "aggregate": "8618a56c3a1817692182"
+  },
+  {
+   "version": 8,
+   "aggregate": "0924ce2f785e8a5fe0cf"
   }
  ],
  "files": {
@@ -300,7 +304,7 @@
     "const REPORT_ATOMIC_LONG_SWITCH": "0e37ac6c20c7d2110c05",
     "const sampler": "6449c59b93d675d35123",
     "function setReportShadowSamplerForTests": "e940f692bc952f77589f",
-    "function reportAtomicMode": "0c4e1eed6f03de536af8",
+    "function reportAtomicMode": "ddef2b28f0f5066c66ff",
     "function reportCanonicalJson": "3af3e9d996ab9218dcf5",
     "function differingPaths": "0e1fbd538e085aace3d2",
     "function shadowCompare": "d768415ab11a00b01408",
