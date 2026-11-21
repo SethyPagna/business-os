@@ -80,6 +80,10 @@
 --   Stop after the rename (portal_accounts is the new table, some or all indexes missing): run the five
 --   CREATE INDEX IF NOT EXISTS statements at the end of this file, then
 --       DROP TABLE IF EXISTS portal_members_guard_0321;
+--   DELETE FROM sqlite_sequence (before the DROP): removes only the zero-valued row of portal_accounts_0321_new, which
+--   the copy INSERT leaves on an empty table. It is the first write to sqlite_sequence in this project's migrations.
+--   If a database refuses it, the file stops before DROP TABLE portal_accounts: the old table is intact and the file
+--   can be applied again. Dropping the statement and accepting the zero row is a lead decision.
 --   After a complete apply: roll the Worker back first if needed. The previous Worker reads only columns that
 --   still exist, but it would INSERT accounts with a NULL member_code and fail on NULL phone rows, so restore the
 --   old shape with a forward file (append-only: never edit this one):

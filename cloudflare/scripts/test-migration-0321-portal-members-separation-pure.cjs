@@ -368,4 +368,67 @@ check('a real account named like the placeholder survives; the mutant that delet
   assert.ok(columnsOf(mutant).length === 15, 'and the live table stays whole')
 })
 
+const SEQUENCE_DELETE = "DELETE FROM sqlite_sequence WHERE name = 'portal_accounts_0321_new' AND seq = 0;"
+const withoutSeqFilter = SQL.replace(SEQUENCE_DELETE, "DELETE FROM sqlite_sequence WHERE name = 'portal_accounts_0321_new';")
+const withoutNameFilter = SQL.replace(SEQUENCE_DELETE, 'DELETE FROM sqlite_sequence WHERE seq = 0;')
+const withoutSequenceDelete = SQL.replace(SEQUENCE_DELETE, '')
+check('fixture: the three sequence mutants differ from the file', () => {
+  assert.ok(SQL.includes(SEQUENCE_DELETE), 'the statement is exactly this text')
+  assert.equal(SQL.replace(/--.*$/gm, '').split('DELETE FROM sqlite_sequence').length - 1, 1, 'the file removes sequence rows in one statement only')
+  for (const mutant of [withoutSeqFilter, withoutNameFilter, withoutSequenceDelete]) assert.notEqual(mutant, SQL)
+})
+
+const sequenceRows = (raw) => raw.prepare('SELECT rowid AS r, name, seq FROM sqlite_sequence ORDER BY rowid').all().map((r) => ({ ...r }))
+const memberSequence = (raw) => raw.prepare("SELECT name, seq FROM sqlite_sequence WHERE name LIKE 'portal_accounts%'").all().map((r) => ({ ...r }))
+function freshWithOtherZeroRow() {
+  const raw = openDb(loadAll({ through: 320 })).db
+  raw.exec('CREATE TABLE zz_other_autoinc (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)')
+  raw.exec('INSERT INTO zz_other_autoinc (v) SELECT 1 WHERE 0')
+  return raw
+}
+const nextMemberId = (raw) => Number(raw.prepare("INSERT INTO portal_accounts (name) VALUES ('Next')").run().lastInsertRowid)
+
+function caseNeverUsed(sql) {
+  const raw = freshWithOtherZeroRow()
+  assert.deepEqual(memberSequence(raw), [], 'fixture: the member table has no sequence row')
+  assert.ok(sequenceRows(raw).some((r) => r.name === 'zz_other_autoinc' && r.seq === 0), 'fixture: another table holds a zero sequence row')
+  const before = sequenceRows(raw)
+  applyAtomically(raw, sql)
+  assert.deepEqual(memberSequence(raw), [], 'no sequence row for the member table')
+  assert.deepEqual(sequenceRows(raw), before, 'every other sequence row is identical (name, seq, order)')
+  assert.equal(nextMemberId(raw), 1)
+}
+function caseUsedThenEmptied(sql) {
+  const raw = freshWithOtherZeroRow()
+  raw.exec("INSERT INTO portal_accounts (id, membership_id, name, phone, password_hash) VALUES (7, 'LC-00070', 'Gone', '012700700', 'h'); DELETE FROM portal_accounts WHERE id = 7")
+  assert.deepEqual(memberSequence(raw), [{ name: 'portal_accounts', seq: 7 }], 'fixture: mark 7, no rows')
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM portal_accounts').get().n, 0)
+  applyAtomically(raw, sql)
+  assert.deepEqual(memberSequence(raw), [{ name: 'portal_accounts', seq: 7 }], 'the mark survives')
+  assert.equal(nextMemberId(raw), 8, 'the next account gets id 8')
+}
+function caseWithRows(sql) {
+  const raw = freshWithOtherZeroRow()
+  raw.exec("INSERT INTO portal_accounts (membership_id, name, phone, password_hash) VALUES ('LC-00001', 'A', '012000001', 'h'), ('LC-00002', 'B', '012000002', 'h'), ('LC-00003', 'C', '012000003', 'h')")
+  assert.deepEqual(memberSequence(raw), [{ name: 'portal_accounts', seq: 3 }])
+  applyAtomically(raw, sql)
+  assert.deepEqual(memberSequence(raw), [{ name: 'portal_accounts', seq: 3 }], 'the mark is unchanged')
+  assert.equal(nextMemberId(raw), 4)
+}
+
+check('sequence row, case 1: a member table never used and empty ends with no sequence row; every other sequence row is identical; mutants without the name filter or without the statement go red', () => {
+  caseNeverUsed(SQL)
+  assert.throws(() => caseNeverUsed(withoutNameFilter), /every other sequence row is identical/, 'without the name filter the other zero row is removed')
+  assert.throws(() => caseNeverUsed(withoutSequenceDelete), /no sequence row for the member table/, 'without the statement a zero row is left')
+})
+
+check('sequence row, case 2: a table used and then emptied (mark 7) keeps the mark and issues 8; the mutant without AND seq = 0 loses the mark', () => {
+  caseUsedThenEmptied(SQL)
+  assert.throws(() => caseUsedThenEmptied(withoutSeqFilter), /the mark survives/)
+})
+
+check('sequence row, case 3: a table with rows keeps its mark unchanged', () => {
+  caseWithRows(SQL)
+})
+
 console.log(`\n${passed} passed${failed ? `, ${failed} FAILED` : ''}`)
