@@ -192,14 +192,22 @@ function topLiteralConsts(sf) {
   for (const st of sf.statements) if (ts.isVariableStatement(st) && (st.declarationList.flags & ts.NodeFlags.Const)) for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name) && d.initializer && ts.isStringLiteral(d.initializer)) out.set(d.name.text, d.initializer.text)
   return out
 }
-/** What `name` means at `node`: { kind: 'param' } | { kind: 'local' } | null (not bound by a function, block, loop or catch around it). */
+/**
+ * What `name` means at `node`: { kind: 'param' } | { kind: 'local' } | null (not bound by a function, block, loop or catch around it). A name inside a binding pattern (a destructured parameter or local) is bound;
+ * a destructured parameter counts as a local. A top-level const is bound by none of these, so a binding of the same name anywhere around the use means it is not that const.
+ */
 function bindingOf(node, name) {
+  const binds = (b) => (ts.isIdentifier(b) ? b.text === name : (ts.isObjectBindingPattern(b) || ts.isArrayBindingPattern(b)) ? b.elements.some((e) => !ts.isOmittedExpression(e) && binds(e.name)) : false)
+  const scope = (n) => ts.isFunctionLike(n) || ts.isBlock(n) || ts.isCaseBlock(n) || ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) || ts.isCatchClause(n)
+  const declares = (x) => (ts.isVariableDeclaration(x) && binds(x.name)) || ((ts.isFunctionDeclaration(x) || ts.isClassDeclaration(x)) && !!x.name && x.name.text === name)
   for (let n = node.parent; n; n = n.parent) {
-    if (!ts.isFunctionLike(n)) continue
-    if (n.parameters.some((p) => ts.isIdentifier(p.name) && p.name.text === name)) return { kind: 'param' }
+    if (!scope(n)) continue
+    const param = ts.isFunctionLike(n) ? n.parameters.find((p) => binds(p.name)) : null
+    if (param) return { kind: ts.isIdentifier(param.name) ? 'param' : 'local' }
     let local = false
-    const scan = (x) => { if (ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === name) local = true; if (!local) ts.forEachChild(x, scan) }
-    if (n.body) scan(n.body)
+    const scan = (x) => { if (declares(x)) local = true; if (!local) ts.forEachChild(x, scan) }
+    const root = ts.isFunctionLike(n) ? n.body : n
+    if (root) scan(root)
     if (local) return { kind: 'local' }
   }
   return null
