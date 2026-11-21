@@ -18,10 +18,7 @@ export const PORTAL_TRANSLATE_SCRIPT_ID = 'business-os-portal-translate-script'
 export const PORTAL_TRANSLATE_CALLBACK = 'businessOsPortalTranslateInit'
 export const PORTAL_TRANSLATE_TIMEOUT_MS = 10000
 
-type TranslateElementConstructor = {
-  new (options: unknown, elementId: string): unknown
-  InlineLayout?: { SIMPLE?: unknown }
-}
+type TranslateElementConstructor = new (options: unknown, elementId: string) => unknown
 
 type TranslateWindow = Window & {
   businessOsPortalTranslateInit?: () => void
@@ -49,6 +46,11 @@ export function hasPortalTranslatedMarker(): boolean {
   if (typeof document === 'undefined') return false
   const markerText = `${document.documentElement?.className || ''} ${document.body?.className || ''}`
   return /\btranslated-(ltr|rtl)\b/i.test(markerText)
+}
+
+/** True when Google has translated this page into `target`: its translated mark is on and it has set the document language to that pick. */
+function pageIsTranslatedInto(target: PortalTranslateTarget): boolean {
+  return hasPortalTranslatedMarker() && String(document.documentElement?.lang || '').toLowerCase() === target.toLowerCase()
 }
 
 /** Clears googtrans on the host, every parent domain and the current path, whatever wrote it. */
@@ -93,6 +95,9 @@ function ensureWidgetHost(): HTMLElement {
   host.id = PORTAL_TRANSLATE_WIDGET_HOST_ID
   host.className = 'notranslate'
   host.setAttribute('translate', 'no')
+  // Google's list is driven by this module only: it stays out of the tab order and out of a screen reader's reach.
+  host.setAttribute('inert', '')
+  host.setAttribute('aria-hidden', 'true')
   Object.assign(host.style, {
     position: 'fixed',
     left: '12px',
@@ -129,6 +134,7 @@ function findCombo(): HTMLSelectElement | null {
 }
 
 function setCombo(select: HTMLSelectElement, value: string): void {
+  select.tabIndex = -1
   select.value = value
   select.dispatchEvent(new Event('input', { bubbles: true }))
   select.dispatchEvent(new Event('change', { bubbles: true }))
@@ -158,12 +164,12 @@ function whenWidgetReady(): Promise<HTMLSelectElement | null> {
       const host = ensureWidgetHost()
       try {
         host.innerHTML = ''
+        // No layout option: only Google's default layout renders the .goog-te-combo list this module drives.
         new TranslateElement(
           {
             pageLanguage: PORTAL_TRANSLATE_SOURCE_LANGUAGE,
             includedLanguages: PORTAL_TRANSLATE_TARGETS.join(','),
             autoDisplay: false,
-            layout: TranslateElement.InlineLayout?.SIMPLE,
           },
           host.id,
         )
@@ -194,10 +200,25 @@ function whenWidgetReady(): Promise<HTMLSelectElement | null> {
   })
 }
 
+/** True when the script this module loads, its widget or its code is in this document, whether or not its tag is still there. */
+function thisModulesGoogleIsHere(): boolean {
+  if (document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID) || findCombo()) return true
+  return Boolean((typeof window !== 'undefined' && (window as TranslateWindow).google?.translate) || documentsWithGoogleScript.has(document))
+}
+
 /** True when Google's script, widget, translated marker or code is in this document, whether or not its tag is still there. */
 function googleIsOnThisPage(): boolean {
-  if (document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID) || findCombo() || hasPortalTranslatedMarker()) return true
-  return Boolean((typeof window !== 'undefined' && (window as TranslateWindow).google?.translate) || documentsWithGoogleScript.has(document))
+  return thisModulesGoogleIsHere() || hasPortalTranslatedMarker()
+}
+
+/** True when this document is itself the result of a reload. */
+function thisPageIsAReload(): boolean {
+  try {
+    const [entry] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
+    return entry?.type === 'reload'
+  } catch {
+    return false
+  }
 }
 
 /** Takes away what a failed attempt left behind (cookie, script, widget host, init callback) without reloading: nothing was rewritten. */
@@ -245,13 +266,15 @@ export async function applyPortalGoogleTranslateOrFallBack(target: unknown, fall
   return applied
 }
 
-/** Translate the page from English into `target`. Resolves false when refused or when Google never answered. */
+/** Translate the page from English into `target`. Resolves false when refused or when Google never translated the page. */
 export async function applyPortalGoogleTranslate(target: unknown): Promise<boolean> {
   if (!canRunPortalTranslate() || !isPortalTranslateTarget(target)) return false
   writeGoogleTranslateCookie(target)
   ensureWidgetHost()
   const combo = await whenWidgetReady()
-  if (!combo) return false
+  // Google also translates from the googtrans cookie alone. A page it has translated into this pick is the result the visitor asked for,
+  // with or without the list: calling that a failure would reload a working translation away.
+  if (!combo) return pageIsTranslatedInto(target)
   setCombo(combo, target)
   return true
 }
@@ -260,11 +283,20 @@ export async function applyPortalGoogleTranslate(target: unknown): Promise<boole
  * Take the translation off: clear googtrans everywhere and, when Google already rewrote this
  * page, reload so the hand-written text comes back (React cannot patch text nodes Google moved).
  * A pure clean-up: it never loads anything, so it is safe on any hostname.
+ * 'clean': nothing of this module's is on the page (a translated mark alone, on a reloaded page or with no reload left, is not this module's).
+ * 'present': this module's Google is here and the caller passed `reload: false`; nothing was removed.
  */
-export function removePortalGoogleTranslate(): 'clean' | 'reloading' {
+export function removePortalGoogleTranslate(options?: { reload?: boolean }): 'clean' | 'reloading' | 'present' {
   if (typeof document === 'undefined') return 'clean'
   clearGoogleTranslateCookies()
   if (!googleIsOnThisPage()) return 'clean'
+  const mayReload = options?.reload !== false
+  // Only the translated mark, on a page this module never put Google on: when the page is already the result of a reload (or the caller has
+  // none left) the mark is another translator's (a browser's own sets the same class). One more reload cannot take it off; it would only
+  // come back and reload again.
+  if (!thisModulesGoogleIsHere() && (!mayReload || thisPageIsAReload())) return 'clean'
+  // The caller has no reload left and this module's Google is here: it is left as it is, and the caller keeps its promise another way.
+  if (!mayReload) return 'present'
   // Before the reload, so a delayed navigation still leaves no script tag or widget host on the page and a late load finds no callback.
   // Code that is already running can only be ended by the reload itself.
   abandonPortalGoogleTranslate()

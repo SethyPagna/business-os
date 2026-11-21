@@ -50,7 +50,7 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGal
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import InstallAppButton from '../install/InstallAppButton.tsx'
 import { installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
-import { clearPortalReopenAccount, consumePortalReopenAccount, isGoogleLanguageChoice, markPortalReopenAccount, markPortalGoogleAsked, normalizePortalChoice, portalCopyLanguage, portalTranslateAllowed, portalGoogleWasAsked, readPublicStorefrontChoice, storePortalLanguage } from './portalLanguageOptions.ts'
+import { clearPortalReopenAccount, consumePortalReopenAccount, isGoogleLanguageChoice, markPortalReopenAccount, markPortalGoogleAsked, normalizePortalChoice, portalCopyLanguage, portalTranslateAllowed, portalGoogleWasAsked, readPublicStorefrontChoice, settlePortalReopenAccount, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
 import { aiProviderState } from './legal/aiProviderDisclosure.ts'
 import { PORTAL_DARK_SURFACE, PORTAL_LIGHT_SURFACE } from './portalContrast.ts'
@@ -544,8 +544,15 @@ export default function PublicCatalogPage() {
   // cart bucket drawer below.
   // G38 P0 (owner 27 Sep): on the shop host /login is the customer sign-in,
   // never the staff app, so arriving there opens this drawer.
-  // consumePortalReopenAccount is read-and-delete: a sheet that was open when Google's translation was taken off by a reload comes back once.
+  // A sheet that was open when Google's translation was taken off by a reload comes back once: the flag is deleted at the first read and the
+  // answer is kept for this page until it is on screen (React may run this initializer again before the first commit).
   const [accountOpen, setAccountOpen] = useState(() => typeof window !== 'undefined' && (isStorefrontSignInPath(window.location?.pathname) || consumePortalReopenAccount()))
+  // The page that reopened the sheet is the product of the guard's own reload: that was the one reload this opening of the sheet gets (see the
+  // guard effect). Closing the sheet ends it; the next opening gets its own.
+  const guardReloadSpentRef = useRef<boolean | null>(null)
+  if (guardReloadSpentRef.current === null) guardReloadSpentRef.current = typeof window !== 'undefined' && consumePortalReopenAccount()
+  useEffect(() => { settlePortalReopenAccount() }, [])
+  useEffect(() => { if (!accountOpen) guardReloadSpentRef.current = false }, [accountOpen])
   // Saved and List are one full page inside the storefront (spec section 4), not drawers. Opening it pushes one history entry, so the browser's
   // Back returns the visitor to where they were (the tab, and how far down the page they had scrolled). Tabs themselves are plain state.
   const [listView, setListView] = useState<PortalListSegment | null>(null)
@@ -694,14 +701,20 @@ export default function PublicCatalogPage() {
       // Still waiting for the first session check and nothing is against Google yet: nothing is loaded and nothing is said. A marker, a
       // signed-in shopper or an open sheet is blocked even before the check ends (a page restored from the cache may already run Google).
       if (!sessionChecked && !accountOpen && signInMarker === 'absent') return undefined
-      // Blocked: the pick is kept, the hand-written English shows, and Google is taken off the page (one clean reload when it is already there).
-      if (accountOpen) markPortalReopenAccount()
+      // Blocked: the pick is kept, the hand-written English shows, and Google is taken off the page by one clean reload when it is there. A
+      // sheet that has already had its reload gets no second one: it closes if Google's script is still on the page.
+      // At most one guard reload per opening of the sheet, whatever is found on the page: a second one could only repeat.
+      const reloadSpent = accountOpen && guardReloadSpentRef.current === true
+      if (accountOpen && !reloadSpent) markPortalReopenAccount()
       let removalStarted = false
       import('./portalTranslateController.ts')
         .then((controller) => {
           if (cancelled) return
           removalStarted = true
-          if (controller.removePortalGoogleTranslate() === 'clean') {
+          const removal = controller.removePortalGoogleTranslate({ reload: !reloadSpent })
+          // Google's script is on a page that has already had its reload: sign-in fields never share a page with it, so the sheet closes.
+          if (removal === 'present') { setAccountOpen(false); return }
+          if (removal === 'clean') {
             clearPortalReopenAccount()
             // An account in use (or a marker from another tab) pauses translation; a guest whose marker is unreadable or whose first check failed is told it is unavailable.
             if (!pickedGoogle) return

@@ -104,29 +104,56 @@ await check('blocked with the script present: exactly one reload; allowed again 
   void again
 })
 
-await check('the reopen flag is written, read once and gone after', () => {
+// 21 Nov 2026 (second translate defect): React ran the account-sheet state initializer twice before the first commit, and the old plain
+// read-and-delete answered true to the render that was thrown away and false to the one that reached the screen, so the sheet never came back
+// after the reload. The contract now: the flag is deleted from storage at the first read, and the page (the document) keeps that one answer
+// until settlePortalReopenAccount. Each installFakeBrowser call installs a NEW fake document, which is a new page load.
+await check('the reopen flag: deleted at the first read, the same answer on this page until settled, gone on any later page', () => {
   const store = new Map<string, string>()
+
+  // a. nothing flagged
   installFakeBrowser({ sessionStore: store })
-  assert.equal(options.consumePortalReopenAccount(), false, 'nothing flagged yet')
+  assert.equal(options.consumePortalReopenAccount(), false, 'a: nothing flagged yet')
+
+  // b. a new page loaded after the flag was written
   options.markPortalReopenAccount()
-  assert.equal(store.get(options.PORTAL_REOPEN_ACCOUNT_KEY), '1')
-  assert.equal(options.consumePortalReopenAccount(), true, 'read once')
-  assert.equal(store.has(options.PORTAL_REOPEN_ACCOUNT_KEY), false, 'deleted by the read')
-  assert.equal(options.consumePortalReopenAccount(), false, 'never twice')
+  assert.equal(store.get(options.PORTAL_REOPEN_ACCOUNT_KEY), '1', 'the flag is written')
+  installFakeBrowser({ sessionStore: store })
+  assert.equal(options.consumePortalReopenAccount(), true, 'b: the first read on the new page is true')
+  assert.equal(store.has(options.PORTAL_REOPEN_ACCOUNT_KEY), false, 'b: the first read deleted the flag from storage')
+
+  // c. the defect: a second call on the same page before it settles used to be false
+  assert.equal(options.consumePortalReopenAccount(), true, 'c: a second read on the same page, before settle, is also true')
+  assert.equal(options.consumePortalReopenAccount(), true, 'c: and a third')
+
+  // d. once the page is on screen
+  options.settlePortalReopenAccount()
+  assert.equal(options.consumePortalReopenAccount(), false, 'd: after settle the same page answers false')
+
+  // e. the flag was deleted at the first read, so a later reload does not reopen the sheet
+  installFakeBrowser({ sessionStore: store })
+  assert.equal(options.consumePortalReopenAccount(), false, 'e: another new page after that is false')
+
+  // f. a clean removal clears a flag that no reload will read
   options.markPortalReopenAccount()
   options.clearPortalReopenAccount()
-  assert.equal(options.consumePortalReopenAccount(), false, 'a clean removal clears a flag that no reload will read')
+  installFakeBrowser({ sessionStore: store })
+  assert.equal(options.consumePortalReopenAccount(), false, 'f: mark then clear then a new page is false')
 })
 
 await check('storage that throws or is missing never breaks the page', () => {
   installFakeBrowser()
-  assert.equal(options.consumePortalReopenAccount(), false)
-  assert.doesNotThrow(() => options.markPortalReopenAccount())
-  const win = globals.window as { sessionStorage: unknown }
-  win.sessionStorage = { getItem() { throw new Error('denied') }, setItem() { throw new Error('denied') }, removeItem() { throw new Error('denied') } }
-  assert.equal(options.consumePortalReopenAccount(), false)
+  assert.equal(options.consumePortalReopenAccount(), false, 'g: no storage at all')
   assert.doesNotThrow(() => options.markPortalReopenAccount())
   assert.doesNotThrow(() => options.clearPortalReopenAccount())
+  assert.doesNotThrow(() => options.settlePortalReopenAccount())
+  installFakeBrowser()
+  const win = globals.window as { sessionStorage: unknown }
+  win.sessionStorage = { getItem() { throw new Error('denied') }, setItem() { throw new Error('denied') }, removeItem() { throw new Error('denied') } }
+  assert.equal(options.consumePortalReopenAccount(), false, 'g: storage that throws')
+  assert.doesNotThrow(() => options.markPortalReopenAccount())
+  assert.doesNotThrow(() => options.clearPortalReopenAccount())
+  assert.doesNotThrow(() => options.settlePortalReopenAccount())
 })
 
 globals.window = savedWindow
@@ -150,7 +177,8 @@ await check('the translate effect applies only when the rule allows, and lists a
   const blocked = effect.slice(blockedAt, applyAt)
   assert.match(blocked, /return \(\) => \{ cancelled = true; if \(accountOpen && !removalStarted\) clearPortalReopenAccount\(\) \}\n    \}/, 'the blocked branch ends in a return')
   assert.doesNotMatch(blocked, /applyPortalGoogleTranslate/, 'the blocked branch never applies')
-  assert.match(blocked, /removePortalGoogleTranslate\(\) === 'clean'/)
+  assert.match(blocked, /controller\.removePortalGoogleTranslate\(\{ reload: !reloadSpent \}\)/)
+  assert.match(blocked, /if \(removal === 'clean'\)/)
   assert.match(blocked, /if \(!sessionChecked && !accountOpen && signInMarker === 'absent'\) return undefined/, 'only a guest with nothing against Google waits: a marker or an open sheet removes Google even before the check ends')
   assert.doesNotMatch(blocked, /visibilityState|document\.hidden/, 'a hidden background tab removes Google too')
   assert.match(effect, /cancelled \? false : controller\.applyPortalGoogleTranslateOrFallBack/, 'a cancelled attempt never loads Google')
@@ -174,9 +202,9 @@ await check('every import of the controller sits behind the rule or is a removal
   assert.deepEqual(loaders, ['applyPortalGoogleTranslateOrFallBack('], 'one place can load Google')
 })
 
-await check('the account sheet starts open from the reopen flag, read through the one-shot helper', () => {
+await check('the account sheet starts open from the reopen flag, read through the helper that keeps one answer per page', () => {
   assert.match(page, /isStorefrontSignInPath\(window\.location\?\.pathname\) \|\| consumePortalReopenAccount\(\)/)
-  assert.match(page, /if \(accountOpen\) markPortalReopenAccount\(\)/)
+  assert.match(page, /if \(accountOpen && !reloadSpent\) markPortalReopenAccount\(\)/)
   assert.match(page, /clearPortalReopenAccount\(\)/)
 })
 
@@ -193,7 +221,7 @@ await check('a guest whose marker is unreadable or whose first check failed sees
 
 await check('a flag whose removal never ran is cleared in the cleanup, so a later reload cannot reopen the sheet', () => {
   assert.match(page, /let removalStarted = false/)
-  assert.match(page, /removalStarted = true\n\s+if \(controller\.removePortalGoogleTranslate\(\) === 'clean'\)/, 'set just before the removal runs')
+  assert.match(page, /removalStarted = true\n\s+const removal = controller\.removePortalGoogleTranslate\(\{ reload: !reloadSpent \}\)/, 'set just before the removal runs')
   assert.match(page, /return \(\) => \{ cancelled = true; if \(accountOpen && !removalStarted\) clearPortalReopenAccount\(\) \}/)
 })
 
@@ -203,6 +231,7 @@ await check('opening the sheet over Google writes the flag and reloads WITHOUT s
   assert.match(open, /if \(accountOpen \|\| !\(isGoogleLanguageChoice\(pageChoice\) \|\| portalGoogleWasAsked\(\)\)\) \{ setAccountOpen\(true\); return \}/, 'no Google pick and no Google requested in this document: opens at once')
   assert.ok(open.indexOf('markPortalReopenAccount()') < open.indexOf('removePortalGoogleTranslate()'), 'flag first, then the removal')
   assert.match(open, /removePortalGoogleTranslate\(\) === 'clean'\) show\(\)/, 'the sheet opens only when nothing had to reload')
+  assert.doesNotMatch(open, /removePortalGoogleTranslate\(\{/, 'the first reload of an opening is untouched: no argument, so a reload is allowed')
   assert.equal((page.match(/setAccountOpen\(true\)/g) || []).length, 2, 'only the wrapper opens the sheet')
   assert.match(page, /onOpenAccount=\{openAccount\}/)
 })
@@ -210,6 +239,21 @@ await check('opening the sheet over Google writes the flag and reloads WITHOUT s
 await check('the Website Editor preview never meets the rule', () => {
   const editor = read('src/components/catalog/CatalogPage.tsx')
   assert.doesNotMatch(editor, /portalTranslate|portalTranslateAllowed|PortalReopenAccount/)
+})
+
+await check('the account sheet starts from the kept answer and settles it from an effect that runs once, on mount', () => {
+  assert.match(page, /const \[accountOpen, setAccountOpen\] = useState\(\(\) => [^\n]*consumePortalReopenAccount\(\)\)\)/, 'h: the initializer still reads consumePortalReopenAccount')
+  assert.match(page, /useEffect\(\(\) => \{\s*settlePortalReopenAccount\(\)\s*\}, \[\]\)/, 'h: an effect with an empty dependency list settles it')
+})
+
+// At most one guard reload per opening of the sheet (breaker, 21 Nov 2026). The page cannot be rendered here, so its wiring is pinned as text;
+// the behaviour of the two stand-in loops is driven through the real controller in portalTranslateRealWidget.test.ts.
+await check('breaker: the spent flag comes from the one-shot answer, is reset when the sheet closes, and bounds the guard to one reload', () => {
+  assert.match(page, /const guardReloadSpentRef = useRef<boolean \| null>\(null\)\n\s+if \(guardReloadSpentRef\.current === null\) guardReloadSpentRef\.current = typeof window !== 'undefined' && consumePortalReopenAccount\(\)/, 'the ref starts from consumePortalReopenAccount()')
+  assert.match(page, /useEffect\(\(\) => \{ if \(!accountOpen\) guardReloadSpentRef\.current = false \}, \[accountOpen\]\)/, 'closing the sheet resets it')
+  assert.match(page, /const reloadSpent = accountOpen && guardReloadSpentRef\.current === true\n\s+if \(accountOpen && !reloadSpent\) markPortalReopenAccount\(\)/, 'the reopen flag is written only for a reload that is still left')
+  assert.match(page, /const removal = controller\.removePortalGoogleTranslate\(\{ reload: !reloadSpent \}\)/, 'the removal is told whether a reload is left')
+  assert.match(page, /if \(removal === 'present'\) \{ setAccountOpen\(false\); return \}\n\s+if \(removal === 'clean'\)/, 'present closes the sheet and returns before the clean branch')
 })
 
 assert.deepEqual(failures, [], `translate guard:\n  ${failures.join('\n  ')}`)

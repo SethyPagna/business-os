@@ -93,17 +93,40 @@ export function clearPortalReopenAccount(): void {
   try { sessionStore()?.removeItem(PORTAL_REOPEN_ACCOUNT_KEY) } catch {}
 }
 
-/** True once after markPortalReopenAccount: the flag is read and deleted in the same call, so it can never reopen the sheet twice. */
+// One answer per document. React can run a state initializer again before the first commit (a first render it throws away), so a plain
+// read-and-delete answered true to the render that was thrown away and false to the one that reached the screen: the sheet never came back.
+const reopenAccountAnswers = new WeakMap<object, boolean>()
+
+function thisDocument(): object | null {
+  return typeof document !== 'undefined' && document ? document : null
+}
+
+/**
+ * True on the page loaded right after markPortalReopenAccount. The flag is deleted at the first read, so no later reload reopens the sheet;
+ * this page keeps the answer until settlePortalReopenAccount.
+ */
 export function consumePortalReopenAccount(): boolean {
+  const page = thisDocument()
+  const known = page ? reopenAccountAnswers.get(page) : undefined
+  if (known !== undefined) return known
+  let flagged = false
   try {
     const store = sessionStore()
-    if (!store) return false
-    const flagged = store.getItem(PORTAL_REOPEN_ACCOUNT_KEY) === '1'
-    store.removeItem(PORTAL_REOPEN_ACCOUNT_KEY)
-    return flagged
+    if (store) {
+      flagged = store.getItem(PORTAL_REOPEN_ACCOUNT_KEY) === '1'
+      store.removeItem(PORTAL_REOPEN_ACCOUNT_KEY)
+    }
   } catch {
-    return false
+    flagged = false
   }
+  if (page) reopenAccountAnswers.set(page, flagged)
+  return flagged
+}
+
+/** Called once the page is on screen: a later mount on the same page starts with the sheet closed. */
+export function settlePortalReopenAccount(): void {
+  const page = thisDocument()
+  if (page) reopenAccountAnswers.set(page, false)
 }
 
 function readStoredValue(): string {
