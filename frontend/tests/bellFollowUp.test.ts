@@ -246,6 +246,31 @@ for (const lifetime of [null, 0, -5, Number.NaN]) {
     assert.equal(h.timers(), 0, label + ': and it ends')
   }
 }
+// 9c. The edge of "covered", measured from the moment the read STARTS: an event at exactly read start - K is dropped; one millisecond later it is kept.
+{
+  const edge = (offsetFromEdgeMs: number) => {
+    const h = harness(300, { hidden: true })
+    h.followUp.armAfterEvent()
+    const readStart = 330_000
+    const eventAt = readStart - K(300) + offsetFromEdgeMs
+    h.advanceTo(eventAt)
+    h.followUp.armAfterEvent()
+    h.advanceTo(readStart)
+    assert.equal(h.followUp.isPending(), true, 'the first event is due and owed while hidden')
+    h.state.hidden = false
+    h.followUp.onVisible()
+    return h
+  }
+  const dropped = edge(0)
+  assert.deepEqual(dropped.state.reloads, [330_000])
+  assert.equal(dropped.timers(), 0, 'an event at read start - K is covered: no re-arm')
+  assert.equal(dropped.followUp.isPending(), false)
+  const kept = edge(1)
+  assert.deepEqual(kept.state.reloads, [330_000])
+  assert.equal(kept.timers(), 1, 'an event 1 ms later than read start - K is NOT covered: it re-arms')
+  kept.advance(3_600_000)
+  assert.deepEqual(kept.state.reloads, [330_000, 330_000 + BELL_FOLLOW_UP_MIN_DELAY_MS], 'and gets its own read')
+}
 // 10. The lifetime is the answer's, not a constant (the Free lifetime may differ).
 {
   const h = harness(45, { random: 0.25 })

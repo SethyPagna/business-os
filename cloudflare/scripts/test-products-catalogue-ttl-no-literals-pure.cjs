@@ -46,7 +46,7 @@ for (const [field, value] of [['catalogVocabularyCacheSeconds', '300'], ['produc
   const hits = PLAN.match(new RegExp(`^\\s*${field}: ${value},`, 'gm')) || []
   assert.equal(hits.length, 2, `${field} is ${value} on both tiers`)
 }
-// The bell's lifetime is 255 on both tiers (owner 11 Nov: up to 5 minutes).
-assert.equal((PLAN.match(/^\s*notificationSectionCacheSeconds: 255,/gm) || []).length, 2, 'notificationSectionCacheSeconds is 255 on both tiers')
+// The bell's lifetime is 245 on both tiers (owner 11 Nov: up to 5 minutes).
+assert.equal((PLAN.match(/^\s*notificationSectionCacheSeconds: 245,/gm) || []).length, 2, 'notificationSectionCacheSeconds is 245 on both tiers')
 
-console.log('PASS the three catalogue lifetimes and the filters facet entry come from getPlanLimits; no numeric lifetime on those paths; the bell is 255 on both tiers')
+console.log('PASS the three catalogue lifetimes and the filters facet entry come from getPlanLimits; no numeric lifetime on those paths; the bell is 245 on both tiers')
