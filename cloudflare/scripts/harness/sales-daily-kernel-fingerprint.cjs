@@ -254,8 +254,11 @@ function switchReads(text, rel, takers) {
         const clause = node.importClause
         if (clause && (clause.name || (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)))) refuse(node, 'default or namespace import of readSwitches')
         if (clause && clause.namedBindings && ts.isNamedImports(clause.namedBindings)) for (const el of clause.namedBindings.elements) {
-          if (el.propertyName && (takers.has(el.propertyName.text) || el.propertyName.text === SWITCH_LIST)) refuse(el, `aliased import ${el.propertyName.text}`)
-          else if (!el.propertyName && takers.has(el.name.text)) locals.add(el.name.text)
+          const imported = (el.propertyName || el.name).text
+          if (el.isTypeOnly || clause.isTypeOnly) continue
+          if (el.propertyName && (takers.has(imported) || imported === SWITCH_LIST)) refuse(el, `aliased import ${imported}`)
+          else if (!takers.has(imported)) refuse(el, `imports ${imported} from readSwitches, which is not a switch reader the scan checks`)
+          else locals.add(el.name.text)
         }
       }
     }
