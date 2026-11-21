@@ -809,6 +809,9 @@ export function buildSqlite(outDir, dumpTables, manifest, { log = console, openD
   // verification effort exists to find. Disable enforcement for the rebuild,
   // then check (informationally) after all rows are in.
   db.exec('PRAGMA foreign_keys = OFF')
+  // The redacted values (a masked Telegram id, a dropped ticket hash) are refused by the table CHECKs that
+  // the captured DDL carries, so CHECKs are off for this local reconstruction too.
+  db.exec('PRAGMA ignore_check_constraints = ON')
 
   for (const t of dumpTables) {
     if (!t.sql) continue

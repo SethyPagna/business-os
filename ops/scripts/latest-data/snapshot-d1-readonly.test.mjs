@@ -450,9 +450,27 @@ check('end-to-end --include-pii run: names kept, secrets still absent, manifest 
   assert.ok(containsAnywhere(bytes, 'Sok Dara'))
   for (const v of SECRET_VALUES) assert.ok(!containsAnywhere(bytes, v), `include-pii output leaked secret ${v}`)
 })
+check('rebuild: a Telegram member and a pending start come out masked and dropped despite the 0322 CHECKs', () => {
+  const TG_ID = 123456789
+  const TICKET = `tg1:${'b'.repeat(64)}`
+  const { db, runner } = fakeProduction()
+  db.prepare("INSERT INTO portal_accounts (id, name, member_code, status, telegram_user_id, telegram_verified_at) VALUES (901, 'Tg Member', 'W-7KQ4-TGAA', 'active', ?, '2026-11-21T01:02:03.456Z')").run(TG_ID)
+  const T = '2026-11-21T01:02:03.456Z'
+  db.prepare('INSERT INTO portal_telegram_pending (id, ticket_hash, flags, attempts, window_started_at, created_at, expires_at) VALUES (?, ?, 0, 1, ?, ?, ?)').run(TG_ID, TICKET, T, T, T)
+  const outDir = path.join(TMP_ROOT, 'd1-snapshot-telegram')
+  assert.equal(main([outDir], { runner, wranglerVersion: 'test', log: quietLog() }), 0)
+  const snap = new DatabaseSync(path.join(outDir, 'snapshot.sqlite'), { readOnly: true })
+  const member = snap.prepare('SELECT telegram_user_id FROM portal_accounts WHERE id = 901').get()
+  assert.match(String(member.telegram_user_id), /^pii_/)
+  assert.notEqual(member.telegram_user_id, TG_ID)
+  const pending = snap.prepare('SELECT ticket_hash FROM portal_telegram_pending').get()
+  assert.match(pending.ticket_hash, /^\[dropped\]#\d+$/)
+  snap.close()
+  assert.ok(!containsAnywhere(allOutputBytes(outDir), TICKET), 'ticket hash leaked')
+})
 
 // snapshot.sqlite is made read-only by the tool; make it writable so cleanup works on Windows too.
-for (const dir of ['d1-snapshot-redacted', 'd1-snapshot-included']) {
+for (const dir of ['d1-snapshot-redacted', 'd1-snapshot-included', 'd1-snapshot-telegram']) {
   const f = path.join(TMP_ROOT, dir, 'snapshot.sqlite')
   if (fs.existsSync(f)) fs.chmodSync(f, 0o644)
 }
