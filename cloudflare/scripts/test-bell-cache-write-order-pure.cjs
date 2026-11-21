@@ -14,6 +14,8 @@
 //   `>=` instead of `>`                      -> case 5
 //   skip the put when the versions moved     -> B5
 //   match before the producer, not the put   -> case 2
+//   the header is ignored (always write)     -> 9a
+//   an entry without the header counts as newer (never write) -> 9c, 9d
 //
 // Run: node scripts/test-bell-cache-write-order-pure.cjs
 const assert = require('node:assert/strict')
@@ -79,12 +81,18 @@ function load(rel) {
 // ---- Cache API (a Map) whose write-path match of the inventory entry can be parked; KV (a Map) ---------
 const cacheStore = new Map()
 let parkNextInventoryMatch = null
+let matchSpy = null
 let knownKey = null
 globalThis.caches = {
   default: {
     async match(request) {
       const hit = cacheStore.get(request.url)
       const result = hit ? hit.clone() : undefined
+      if (matchSpy && result) {
+        for (const method of ['json', 'text', 'arrayBuffer', 'blob', 'formData']) {
+          result[method] = (...args) => { matchSpy.push(method); return Response.prototype[method].apply(result, args) }
+        }
+      }
       if (parkNextInventoryMatch && request.url === knownKey) {
         const park = parkNextInventoryMatch
         parkNextInventoryMatch = null
@@ -166,7 +174,7 @@ function parkProducer(whileParked) {
   afterInventoryRows = async () => { reached.resolve(); if (whileParked) whileParked(); await release.promise }
   return { reached: reached.promise, release: release.resolve }
 }
-const reset = () => { cacheStore.clear(); afterInventoryRows = null; parkNextInventoryMatch = null }
+const reset = () => { cacheStore.clear(); afterInventoryRows = null; parkNextInventoryMatch = null; matchSpy = null }
 
 let passed = 0
 async function check(name, fn) {
@@ -330,6 +338,62 @@ async function main() {
     at(T + ttlSeconds * 1000 + 1)
     const later = await plain()
     assert.equal(inventoryCount(later), stale + 1, 'a read at or after the lifetime recomputes and shows the write')
+  })
+
+  // 9. The write path dates the stored entry by its x-bell-at header and never parses the body (up to 5,000 rows). A planted entry's body carries a marker count.
+  const AT_HEADER = 'x-bell-at'
+  const planted = (headerValue, bodyAt) => new Response(JSON.stringify({ at: bodyAt, value: { id: 'inventory', count: 999 } }), { headers: headerValue === null ? {} : { [AT_HEADER]: headerValue } })
+  const plantDuringProducer = async (entry) => {
+    at(T)
+    const key = knownKey
+    const park = parkProducer()
+    const p = plain()
+    await park.reached
+    assert.equal(inventoryKey(), undefined, 'control: the slot was empty when P started')
+    cacheStore.set(key, entry)
+    matchSpy = []
+    park.release()
+    await p
+    const calls = matchSpy
+    matchSpy = null
+    return { calls, entry: await stored() }
+  }
+
+  await check('9a. header present and later than the start: the put is skipped, whatever the body says', async () => {
+    const { entry } = await plantDuringProducer(planted(String(T + 5000), T - 1))
+    assert.equal(entry.value.count, 999, 'the planted entry stayed')
+  })
+  await check('9b. header present and earlier than the start: the put writes', async () => {
+    const { entry } = await plantDuringProducer(planted(String(T - 1), T + 5000))
+    assert.equal(entry.at, T)
+    assert.equal(entry.value.count, baseCount())
+  })
+  await check('9c. header absent (an entry of the build before this one, or of a rolled-back Worker): older than any computation, so it is overwritten and its body is not trusted', async () => {
+    const { entry } = await plantDuringProducer(planted(null, T + 5000))
+    assert.equal(entry.at, T)
+    assert.equal(entry.value.count, baseCount())
+  })
+  await check('9d. header malformed (not a number, empty, negative): the put writes', async () => {
+    for (const bad of ['abc', '', '-5', 'NaN', '1e999x']) {
+      reset()
+      const { entry } = await plantDuringProducer(planted(bad, T + 5000))
+      assert.equal(entry.at, T, 'header ' + JSON.stringify(bad) + ': rewritten')
+      assert.equal(entry.value.count, baseCount())
+    }
+  })
+  await check('9e. the write path does not call json(), text() or any body reader on the matched response (runtime spy and source shape)', async () => {
+    for (const entry of [planted(String(T + 5000), T), planted(String(T - 1), T), planted(null, T)]) {
+      reset()
+      const { calls } = await plantDuringProducer(entry)
+      assert.deepEqual(calls, [], 'no body reader was called on the matched response')
+    }
+    const source = fs.readFileSync(path.join(SRC, 'routes', 'notifications.ts'), 'utf8').replace(/\r/g, '')
+    const start = source.indexOf('c.executionCtx.waitUntil((async () => {\n          const held = await store.match(key)')
+    assert.ok(start > 0, 'the write path is found')
+    const writePath = source.slice(start, source.indexOf('})().catch(() => {}))', start))
+    assert.ok(/held\.headers\.get\(TTL_ONLY_AT_HEADER\)/.test(writePath), 'it reads the header')
+    assert.ok(!/\.(json|text|arrayBuffer|blob|formData)\s*(<[^>]*>)?\(/.test(writePath), 'no body reader appears in the write path')
+    assert.ok(/TTL_ONLY_AT_HEADER\]: String\(at\)/.test(source), 'the header is written with the entry')
   })
 
   await check('B5. a busy shop (a data version moves during every producer, 20 rounds): the slot holds an entry after each round', async () => {

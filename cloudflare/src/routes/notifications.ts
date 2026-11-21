@@ -228,6 +228,8 @@ type SectionCache = (<T>(name: string, namespaces: string[], inputs: string, pro
 const BELL_VERSION_NAMESPACES = ['products', 'stock', 'sales', 'customers']
 // A fixed token in the place a data version takes in the key: the entry must not move when a version does.
 const TTL_ONLY_KEY_VERSION = 'bell-ttl'
+// The start time of a stored section entry, also kept as a header so the write rule can date the entry without parsing its body (up to 5,000 rows). An entry without it is older than any computation.
+const TTL_ONLY_AT_HEADER = 'x-bell-at'
 
 // One per request: each data version is read once however many sections key on it
 // (products, settings and the rest are shared by two or three of them).
@@ -295,12 +297,9 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
         // A computation that started later has already stored: this older one must not overwrite it (it could bring back a resolved alert).
         c.executionCtx.waitUntil((async () => {
           const held = await store.match(key)
-          if (held) {
-            const stored = await held.json<{ at?: number }>().catch(() => null)
-            if (Number(stored?.at) > startedAt) return
-          }
+          if (held && Number(held.headers.get(TTL_ONLY_AT_HEADER)) > startedAt) return
           await store.put(key, new Response(JSON.stringify({ at, v, value }), {
-            headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
+            headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}`, [TTL_ONLY_AT_HEADER]: String(at) },
           }))
         })().catch(() => {}))
       }
