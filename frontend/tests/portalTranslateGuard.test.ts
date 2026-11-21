@@ -177,7 +177,8 @@ await check('the translate effect applies only when the rule allows, and lists a
   const blocked = effect.slice(blockedAt, applyAt)
   assert.match(blocked, /return \(\) => \{ cancelled = true; if \(accountOpen && !removalStarted\) clearPortalReopenAccount\(\) \}\n    \}/, 'the blocked branch ends in a return')
   assert.doesNotMatch(blocked, /applyPortalGoogleTranslate/, 'the blocked branch never applies')
-  assert.match(blocked, /removePortalGoogleTranslate\(\) === 'clean'/)
+  assert.match(blocked, /controller\.removePortalGoogleTranslate\(\{ reload: !reloadSpent \}\)/)
+  assert.match(blocked, /if \(removal === 'clean'\)/)
   assert.match(blocked, /if \(!sessionChecked && !accountOpen && signInMarker === 'absent'\) return undefined/, 'only a guest with nothing against Google waits: a marker or an open sheet removes Google even before the check ends')
   assert.doesNotMatch(blocked, /visibilityState|document\.hidden/, 'a hidden background tab removes Google too')
   assert.match(effect, /cancelled \? false : controller\.applyPortalGoogleTranslateOrFallBack/, 'a cancelled attempt never loads Google')
@@ -203,7 +204,7 @@ await check('every import of the controller sits behind the rule or is a removal
 
 await check('the account sheet starts open from the reopen flag, read through the one-shot helper', () => {
   assert.match(page, /isStorefrontSignInPath\(window\.location\?\.pathname\) \|\| consumePortalReopenAccount\(\)/)
-  assert.match(page, /if \(accountOpen\) markPortalReopenAccount\(\)/)
+  assert.match(page, /if \(accountOpen && !reloadSpent\) markPortalReopenAccount\(\)/)
   assert.match(page, /clearPortalReopenAccount\(\)/)
 })
 
@@ -220,7 +221,7 @@ await check('a guest whose marker is unreadable or whose first check failed sees
 
 await check('a flag whose removal never ran is cleared in the cleanup, so a later reload cannot reopen the sheet', () => {
   assert.match(page, /let removalStarted = false/)
-  assert.match(page, /removalStarted = true\n\s+if \(controller\.removePortalGoogleTranslate\(\) === 'clean'\)/, 'set just before the removal runs')
+  assert.match(page, /removalStarted = true\n\s+const removal = controller\.removePortalGoogleTranslate\(\{ reload: !reloadSpent \}\)/, 'set just before the removal runs')
   assert.match(page, /return \(\) => \{ cancelled = true; if \(accountOpen && !removalStarted\) clearPortalReopenAccount\(\) \}/)
 })
 
@@ -230,6 +231,7 @@ await check('opening the sheet over Google writes the flag and reloads WITHOUT s
   assert.match(open, /if \(accountOpen \|\| !\(isGoogleLanguageChoice\(pageChoice\) \|\| portalGoogleWasAsked\(\)\)\) \{ setAccountOpen\(true\); return \}/, 'no Google pick and no Google requested in this document: opens at once')
   assert.ok(open.indexOf('markPortalReopenAccount()') < open.indexOf('removePortalGoogleTranslate()'), 'flag first, then the removal')
   assert.match(open, /removePortalGoogleTranslate\(\) === 'clean'\) show\(\)/, 'the sheet opens only when nothing had to reload')
+  assert.doesNotMatch(open, /removePortalGoogleTranslate\(\{/, 'the first reload of an opening is untouched: no argument, so a reload is allowed')
   assert.equal((page.match(/setAccountOpen\(true\)/g) || []).length, 2, 'only the wrapper opens the sheet')
   assert.match(page, /onOpenAccount=\{openAccount\}/)
 })
@@ -242,6 +244,16 @@ await check('the Website Editor preview never meets the rule', () => {
 await check('the account sheet starts from the kept answer and settles it from an effect that runs once, on mount', () => {
   assert.match(page, /const \[accountOpen, setAccountOpen\] = useState\(\(\) => [^\n]*consumePortalReopenAccount\(\)\)\)/, 'h: the initializer still reads consumePortalReopenAccount')
   assert.match(page, /useEffect\(\(\) => \{\s*settlePortalReopenAccount\(\)\s*\}, \[\]\)/, 'h: an effect with an empty dependency list settles it')
+})
+
+// At most one guard reload per opening of the sheet (breaker, 21 Nov 2026). The page cannot be rendered here, so its wiring is pinned as text;
+// the behaviour of the two stand-in loops is driven through the real controller in portalTranslateRealWidget.test.ts.
+await check('breaker: the spent flag comes from the one-shot answer, is reset when the sheet closes, and bounds the guard to one reload', () => {
+  assert.match(page, /const guardReloadSpentRef = useRef<boolean \| null>\(null\)\n\s+if \(guardReloadSpentRef\.current === null\) guardReloadSpentRef\.current = typeof window !== 'undefined' && consumePortalReopenAccount\(\)/, 'the ref starts from consumePortalReopenAccount()')
+  assert.match(page, /useEffect\(\(\) => \{ if \(!accountOpen\) guardReloadSpentRef\.current = false \}, \[accountOpen\]\)/, 'closing the sheet resets it')
+  assert.match(page, /const reloadSpent = accountOpen && guardReloadSpentRef\.current === true\n\s+if \(accountOpen && !reloadSpent\) markPortalReopenAccount\(\)/, 'the reopen flag is written only for a reload that is still left')
+  assert.match(page, /const removal = controller\.removePortalGoogleTranslate\(\{ reload: !reloadSpent \}\)/, 'the removal is told whether a reload is left')
+  assert.match(page, /if \(removal === 'present'\) \{ setAccountOpen\(false\); return \}\n\s+if \(removal === 'clean'\)/, 'present closes the sheet and returns before the clean branch')
 })
 
 assert.deepEqual(failures, [], `translate guard:\n  ${failures.join('\n  ')}`)

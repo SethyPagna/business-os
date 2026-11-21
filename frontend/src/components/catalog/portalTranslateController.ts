@@ -200,10 +200,25 @@ function whenWidgetReady(): Promise<HTMLSelectElement | null> {
   })
 }
 
+/** True when the script this module loads, its widget or its code is in this document, whether or not its tag is still there. */
+function thisModulesGoogleIsHere(): boolean {
+  if (document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID) || findCombo()) return true
+  return Boolean((typeof window !== 'undefined' && (window as TranslateWindow).google?.translate) || documentsWithGoogleScript.has(document))
+}
+
 /** True when Google's script, widget, translated marker or code is in this document, whether or not its tag is still there. */
 function googleIsOnThisPage(): boolean {
-  if (document.getElementById(PORTAL_TRANSLATE_SCRIPT_ID) || findCombo() || hasPortalTranslatedMarker()) return true
-  return Boolean((typeof window !== 'undefined' && (window as TranslateWindow).google?.translate) || documentsWithGoogleScript.has(document))
+  return thisModulesGoogleIsHere() || hasPortalTranslatedMarker()
+}
+
+/** True when this document is itself the result of a reload. */
+function thisPageIsAReload(): boolean {
+  try {
+    const [entry] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[]
+    return entry?.type === 'reload'
+  } catch {
+    return false
+  }
 }
 
 /** Takes away what a failed attempt left behind (cookie, script, widget host, init callback) without reloading: nothing was rewritten. */
@@ -269,10 +284,17 @@ export async function applyPortalGoogleTranslate(target: unknown): Promise<boole
  * page, reload so the hand-written text comes back (React cannot patch text nodes Google moved).
  * A pure clean-up: it never loads anything, so it is safe on any hostname.
  */
-export function removePortalGoogleTranslate(): 'clean' | 'reloading' {
+export function removePortalGoogleTranslate(options?: { reload?: boolean }): 'clean' | 'reloading' | 'present' {
   if (typeof document === 'undefined') return 'clean'
   clearGoogleTranslateCookies()
   if (!googleIsOnThisPage()) return 'clean'
+  const mayReload = options?.reload !== false
+  // Only the translated mark, on a page this module never put Google on: when the page is already the result of a reload (or the caller has
+  // none left) the mark is another translator's (a browser's own sets the same class). One more reload cannot take it off; it would only
+  // come back and reload again.
+  if (!thisModulesGoogleIsHere() && (!mayReload || thisPageIsAReload())) return 'clean'
+  // The caller has no reload left and this module's Google is here: it is left as it is, and the caller keeps its promise another way.
+  if (!mayReload) return 'present'
   // Before the reload, so a delayed navigation still leaves no script tag or widget host on the page and a late load finds no callback.
   // Code that is already running can only be ended by the reload itself.
   abandonPortalGoogleTranslate()

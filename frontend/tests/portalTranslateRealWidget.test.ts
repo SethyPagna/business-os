@@ -18,6 +18,20 @@ import assert from 'node:assert/strict'
 const globals = globalThis as unknown as { window?: unknown; document?: unknown }
 const savedWindow = globals.window
 const savedDocument = globals.document
+const perfDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'performance')
+
+// What the browser says about how this page was loaded. 'throws' and 'empty' model a missing or broken lookup.
+type Navigation = 'navigate' | 'reload' | 'throws' | 'empty'
+function installPerformance(navigation: Navigation) {
+  const fake = {
+    getEntriesByType(kind: string) {
+      if (navigation === 'throws') throw new Error('no navigation timing')
+      if (navigation === 'empty' || kind !== 'navigation') return []
+      return [{ type: navigation }]
+    },
+  }
+  Object.defineProperty(globalThis, 'performance', { value: fake, configurable: true, writable: true })
+}
 
 // ---- fake DOM --------------------------------------------------------------------------------
 
@@ -75,7 +89,7 @@ type GoogleMode = {
 }
 type ScriptMode = 'loads' | 'refused' | 'silent'
 
-function installFakeBrowser(options: { google: GoogleMode; script: ScriptMode; html?: { className?: string; lang?: string } }) {
+function installFakeBrowser(options: { google: GoogleMode; script: ScriptMode; html?: { className?: string; lang?: string }; navigation?: Navigation }) {
   let now = 0
   let nextTimer = 1
   const timers: Array<{ id: number; at: number; fn: () => void }> = []
@@ -172,6 +186,7 @@ function installFakeBrowser(options: { google: GoogleMode; script: ScriptMode; h
 
   globals.window = win
   globals.document = doc
+  installPerformance(options.navigation ?? 'navigate')
 
   // Run timers up to `ms` of fake time, letting promise callbacks settle between them.
   const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
@@ -334,8 +349,184 @@ await runTest('F: the language match ignores case: lang zh-cn with the mark coun
   assert.equal(pending.value, true)
 })
 
+// ---- the reload guard: removePortalGoogleTranslate ------------------------------------------------
+// Live loop (fce147c29, real browser): Chrome's own page translator puts the same translated-ltr class on <html> as Google's widget does.
+// With a Google language picked and Account opened, the guard reloaded, the mark came back, and it reloaded again (1 -> 13 page loads in
+// 20 s). Rule now: a mark alone, on a page that is already a reload and that this module never put Google on, is not ours: no more reload.
+// Our own Google (tag, list, window.google.translate, or a script this module inserted in this document) always gets its reload.
+const MARK = { className: 'translated-ltr', lang: 'fr' }
+const markOnly = (navigation: Navigation) => installFakeBrowser({ google: NO_SELECT_NO_TRANSLATION, script: 'silent', html: MARK, navigation })
+
+// This module's own Google on the page, four ways (the mark is there too, as it is after a real translation).
+function oursPresentSetups(navigation: Navigation) {
+  const setups: Record<string, () => ReturnType<typeof installFakeBrowser>> = {
+    'a: our script tag is in the document': () => {
+      const fake = markOnly(navigation)
+      const tag = new FakeElement('script')
+      tag.id = controller.PORTAL_TRANSLATE_SCRIPT_ID
+      fake.doc.body.appendChild(tag)
+      return fake
+    },
+    'b: a .goog-te-combo list exists': () => {
+      const fake = markOnly(navigation)
+      const select = new FakeElement('select')
+      select.className = 'goog-te-combo'
+      fake.doc.body.appendChild(select)
+      return fake
+    },
+    'c: window.google.translate exists': () => {
+      const fake = markOnly(navigation)
+      fake.win.google = { translate: {} }
+      return fake
+    },
+    'd: only the memory of an inserted script is left': () => {
+      const fake = markOnly(navigation)
+      void controller.applyPortalGoogleTranslate('fr')
+      assert.ok(fake.byId(controller.PORTAL_TRANSLATE_SCRIPT_ID), 'the module inserted its script')
+      controller.abandonPortalGoogleTranslate()
+      assert.equal(fake.byId(controller.PORTAL_TRANSLATE_SCRIPT_ID), null, 'the tag is gone again')
+      assert.equal(fake.byId(controller.PORTAL_TRANSLATE_WIDGET_HOST_ID), null, 'the host is gone again')
+      assert.equal(fake.doc.querySelector('.goog-te-combo'), null, 'no list')
+      assert.equal(fake.win.google, undefined, 'no window.google')
+      return fake
+    },
+  }
+  return setups
+}
+
+await runTest('R1: a mark alone on a page that is already a reload: clean, no reload, googtrans cleared', async () => {
+  const fake = markOnly('reload')
+  fake.doc.cookie = 'googtrans=/en/fr; path=/'
+  assert.equal(fake.jar.has('googtrans'), true, 'the cookie was set beforehand')
+  assert.equal(controller.removePortalGoogleTranslate(), 'clean')
+  assert.equal(fake.calls.reload, 0, 'no reload')
+  assert.equal(fake.jar.has('googtrans'), false, 'the cookie is cleared')
+})
+
+await runTest('R2: a mark alone on a first load (navigate): one reload is still tried', async () => {
+  const fake = markOnly('navigate')
+  assert.equal(controller.removePortalGoogleTranslate(), 'reloading')
+  assert.equal(fake.calls.reload, 1, 'one reload')
+})
+
+await runTest('R3: a mark alone and no usable navigation answer (throws, or empty): unknown is not a reload', async () => {
+  for (const navigation of ['throws', 'empty'] as const) {
+    const fake = markOnly(navigation)
+    assert.equal(controller.removePortalGoogleTranslate(), 'reloading', navigation)
+    assert.equal(fake.calls.reload, 1, `${navigation}: one reload`)
+  }
+})
+
+await runTest('R4: our own Google on a page that is a reload still gets its reload (a: tag, b: list, c: window.google.translate, d: script inserted earlier)', async () => {
+  const setups = oursPresentSetups('reload')
+  for (const [name, setup] of Object.entries(setups)) {
+    const fake = setup()
+    assert.equal(controller.removePortalGoogleTranslate(), 'reloading', name)
+    assert.equal(fake.calls.reload, 1, `${name}: reload count`)
+  }
+})
+
+await runTest('R5: no mark and nothing of ours: clean, no reload', async () => {
+  const fake = installFakeBrowser({ google: NO_SELECT_NO_TRANSLATION, script: 'silent', navigation: 'navigate' })
+  assert.equal(controller.removePortalGoogleTranslate(), 'clean')
+  assert.equal(fake.calls.reload, 0)
+})
+
+await runTest('R6: the loop as a sequence: reload for ours on page 1, then no more reloads on page 2 where only a mark is left', async () => {
+  const first = markOnly('navigate')
+  const tag = new FakeElement('script')
+  tag.id = controller.PORTAL_TRANSLATE_SCRIPT_ID
+  first.doc.body.appendChild(tag)
+  assert.equal(controller.removePortalGoogleTranslate(), 'reloading', 'document 1: ours is there')
+  assert.equal(first.calls.reload, 1)
+  const second = markOnly('reload')
+  assert.equal(controller.removePortalGoogleTranslate(), 'clean', 'document 2: only a mark')
+  assert.equal(controller.removePortalGoogleTranslate(), 'clean', 'document 2, again')
+  assert.equal(second.calls.reload, 0, 'document 2 never reloads')
+})
+
+// ---- the breaker: at most one guard reload per opening of the sheet ----------------------------------
+// removePortalGoogleTranslate({ reload: false }) is what the page calls once the reload of this opening has been spent.
+const withCookie = (fake: ReturnType<typeof installFakeBrowser>) => {
+  fake.doc.cookie = 'googtrans=/en/fr; path=/'
+  assert.equal(fake.jar.has('googtrans'), true, 'the cookie was set beforehand')
+}
+
+await runTest('B1: no reload left, a mark alone, even on a first load: clean, no reload, googtrans cleared (B5)', async () => {
+  const fake = markOnly('navigate')
+  withCookie(fake)
+  assert.equal(controller.removePortalGoogleTranslate({ reload: false }), 'clean')
+  assert.equal(fake.calls.reload, 0, 'no reload')
+  assert.equal(fake.jar.has('googtrans'), false, 'the cookie is cleared')
+})
+
+await runTest('B2: no reload left, our Google here (tag, list, window.google.translate, remembered insert): present, no reload, nothing of ours removed, googtrans cleared (B5)', async () => {
+  for (const navigation of ['navigate', 'reload'] as const) {
+    for (const [name, setup] of Object.entries(oursPresentSetups(navigation))) {
+      const fake = setup()
+      withCookie(fake)
+      assert.equal(controller.removePortalGoogleTranslate({ reload: false }), 'present', `${navigation} ${name}`)
+      assert.equal(fake.calls.reload, 0, `${navigation} ${name}: no reload`)
+      assert.equal(fake.jar.has('googtrans'), false, `${navigation} ${name}: the cookie is cleared`)
+      if (name.startsWith('a')) assert.ok(fake.byId(controller.PORTAL_TRANSLATE_SCRIPT_ID), `${navigation} ${name}: the tag is still there`)
+      if (name.startsWith('b')) assert.ok(fake.doc.querySelector('.goog-te-combo'), `${navigation} ${name}: the list is still there`)
+      if (name.startsWith('c')) assert.ok(fake.win.google, `${navigation} ${name}: window.google is still there`)
+    }
+  }
+})
+
+await runTest('B3: no reload left and nothing on the page: clean, no reload, googtrans cleared (B5)', async () => {
+  const fake = installFakeBrowser({ google: NO_SELECT_NO_TRANSLATION, script: 'silent', navigation: 'navigate' })
+  withCookie(fake)
+  assert.equal(controller.removePortalGoogleTranslate({ reload: false }), 'clean')
+  assert.equal(fake.calls.reload, 0)
+  assert.equal(fake.jar.has('googtrans'), false, 'the cookie is cleared')
+})
+
+await runTest('B4: a reload is left ({ reload: true }, {} or no argument) and our Google is here: reloading, one reload each', async () => {
+  const calls: Array<[string, (() => 'clean' | 'reloading' | 'present')]> = [
+    ['{ reload: true }', () => controller.removePortalGoogleTranslate({ reload: true })],
+    ['{}', () => controller.removePortalGoogleTranslate({})],
+    ['no argument', () => controller.removePortalGoogleTranslate()],
+  ]
+  for (const [argument, call] of calls) {
+    for (const [name, setup] of Object.entries(oursPresentSetups('navigate'))) {
+      const fake = setup()
+      assert.equal(call(), 'reloading', `${argument} ${name}`)
+      assert.equal(fake.calls.reload, 1, `${argument} ${name}: one reload`)
+    }
+  }
+})
+
+// The two stand-in loops, as the page runs them: the first opening of the sheet gets a reload (nothing spent); the page that reload
+// produces has it spent, so it asks for { reload: false }. This models only the page's rule, the wiring is pinned in portalTranslateGuard.
+await runTest('S1: our script comes back after every reload: one reload in all, then the sheet closes over it', async () => {
+  const pageOne = oursPresentSetups('navigate')['a: our script tag is in the document']()
+  assert.equal(controller.removePortalGoogleTranslate({ reload: true }), 'reloading', 'page 1: the one reload')
+  const pageTwo = oursPresentSetups('reload')['a: our script tag is in the document']()
+  let sheetOpen = true
+  if (controller.removePortalGoogleTranslate({ reload: false }) === 'present') sheetOpen = false
+  assert.equal(pageOne.calls.reload + pageTwo.calls.reload, 1, 'one reload in all')
+  assert.equal(sheetOpen, false, 'the sheet is closed: sign-in fields never share a page with our script')
+})
+
+await runTest('S2: another translator re-marks every page: one reload in all, the sheet stays open, however often it is asked', async () => {
+  const pageOne = oursPresentSetups('navigate')['a: our script tag is in the document']()
+  assert.equal(controller.removePortalGoogleTranslate({ reload: true }), 'reloading', 'page 1: the one reload')
+  const pageTwo = markOnly('reload')
+  let sheetOpen = true
+  for (let ask = 0; ask < 4; ask += 1) {
+    const answer = controller.removePortalGoogleTranslate({ reload: false })
+    assert.equal(answer, 'clean', `ask ${ask + 1} on page 2`)
+    if ((answer as string) === 'present') sheetOpen = false
+  }
+  assert.equal(pageOne.calls.reload + pageTwo.calls.reload, 1, 'one reload in all')
+  assert.equal(sheetOpen, true, 'the sheet stays open')
+})
+
 globals.window = savedWindow
 globals.document = savedDocument
+if (perfDescriptor) Object.defineProperty(globalThis, 'performance', perfDescriptor)
 
 if (failed) {
   console.log(`FAIL ${failed} case(s) red`)
