@@ -10,7 +10,8 @@
 -- ops:min-rows 1
 -- ops:max-rows 1
 -- ops:expect-zero age_column_missing,duplicate_contact_links,g38_columns_present
--- ops:max-rows-read 20000
+-- Ceiling: 1,626 rows read on the seed (0 accounts: nearly all of it is the schema text read from sqlite_master) plus 4 reads per account (the duplicate-link, count, max and age scans) for up to 2,500 accounts, rounded up. Leang has 0 accounts.
+-- ops:max-rows-read 12000
 WITH shape AS (SELECT sql AS table_sql FROM sqlite_master WHERE type = 'table' AND name = 'portal_accounts')
 SELECT
   (SELECT CASE WHEN instr(table_sql, 'age_confirmed_at') > 0 THEN 0 ELSE 1 END FROM shape) AS age_column_missing,
