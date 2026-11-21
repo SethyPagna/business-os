@@ -36,15 +36,19 @@ export const MARKS_BY_IDS_SQL = `SELECT CAST(w.value AS INTEGER) AS id, ${T('i.u
   FROM json_each(@ids) w LEFT JOIN inventory_check_items i ON i.rowid = ${markOf('w.value')}`
 export const TOP_SQL = 'SELECT id, actor_id, request_id, created_at FROM inventory_check_events ORDER BY id DESC LIMIT 1'
 export const AT_SQL = 'SELECT id, actor_id, request_id, created_at FROM inventory_check_events WHERE id = @since'
-export const EVENTS_SQL = 'SELECT id, session_id, product_id, actor_id, request_id, created_at FROM inventory_check_events WHERE id > @since ORDER BY id LIMIT @pageEvents'
+// `decides` marks the events that can change a pending session's waiting set: every writer of an approval's line set, status, applied lines, superseded lines or line decisions records an event whose after_json carries `approval`
+// (the registry test of test-inventory-check-marks-pure.cjs keeps that true). A malformed after_json counts as deciding, so the read over-walks and never under-walks. Both columns come from the row the page already reads.
+export const EVENTS_SQL = `SELECT id, session_id, product_id, actor_id, request_id, created_at, action,
+  CASE WHEN json_valid(after_json) THEN json_extract(after_json,'$.approval') IS NOT NULL ELSE 1 END AS decides
+  FROM inventory_check_events WHERE id > @since ORDER BY id LIMIT @pageEvents`
 // The sessions the events name: which are in the viewer's scope, whether each holds an approval, and the lines of that approval that wait. A waiting line is decided by its approval row alone (the keys of the stored line set, the rule of waitingKeySql), so the
-// rows read follow the sessions the events name, never the waiting backlog. `legacy` is a pending approval with no stored line set (a Worker older than the column wrote it): its list comes from LEGACY_WAITING_SQL, and `items` (its member count, from its create event) is what the walk charges for it.
+// rows read follow the sessions the events name, never the waiting backlog. The line set is walked only for the first @walk sessions of the list (those with an event that can change it, see setChanging); the others are named for scope and nothing else. `legacy` is a pending approval with no stored line set (a Worker older than the column wrote it): its list comes from LEGACY_WAITING_SQL, and `items` (its member count, from its create event) is what the walk charges for it.
 export const SCOPE_WAITING_SQL = `SELECT s.id AS id, a.session_id IS NOT NULL AS approval, a.status AS status, a.lines AS lines,
        a.line_set_json IS NULL AND a.session_id IS NOT NULL AND a.status = 'pending' AS legacy,
        CASE WHEN a.line_set_json IS NULL AND a.session_id IS NOT NULL AND a.status = 'pending' THEN
          (SELECT CAST(json_extract(e.after_json,'$.members') AS INTEGER) FROM inventory_check_events e WHERE e.session_id = s.id ORDER BY e.id LIMIT 1)
        END AS items,
-       CASE WHEN a.status = 'pending' AND a.line_set_json IS NOT NULL THEN
+       CASE WHEN a.status = 'pending' AND a.line_set_json IS NOT NULL AND w.key < @walk THEN
          (SELECT json_group_array(CAST(j.key AS INTEGER)) FROM json_each(a.line_set_json) j WHERE ${waitingKeySql('a', 'j.key')})
        ELSE '[]' END AS waiting
 FROM json_each(@sessions) w CROSS JOIN inventory_check_sessions s ON s.id = w.value
@@ -94,6 +98,9 @@ export async function readTopAndAt(db: Db, since: number): Promise<{ top: number
 }
 
 export type Limits = { pageEvents: number; touchedMax: number }
+// An event can change a pending session's waiting set only when it is the submission (`create`) or records an approval write (`decides`). A plain observe (a submission line, a count) cannot; close and resume change the session row, never its approval
+// (a submission is created closed and refused both, tasks and issues hold no approval), so they are not listed.
+const setChanging = (row: Row): boolean => row.action === 'create' || Number(row.decides) === 1
 export type WaitingEntry = [sessionId: string, productIds: number[]]
 export type ChangesAnswer = { rebuild: true; top: number } | { cursor: number; tag: string; top: number; more: boolean; exact: boolean; marks: Mark[]; waiting: WaitingEntry[] }
 /**
@@ -108,20 +115,22 @@ export async function readChanges(db: Db, scope: MarksScope, since: number, tag:
   const list = rowsOf(events)
   if (!list.length) return { cursor: since, tag, top: topId, more: false, exact: true, marks: [], waiting: [] }
   const named = list.some((row) => row.product_id != null)
-  const second = await db.batch([{ sql: SCOPE_WAITING_SQL, params: { ...scope, sessions: JSON.stringify([...new Set(list.map((row) => String(row.session_id)))]) } }, ...(named ? [] : [{ sql: TOP_SQL }])])
+  const changing = new Set(list.filter(setChanging).map((row) => String(row.session_id)))
+  const sessionIds = [...new Set(list.map((row) => String(row.session_id)))]
+  const second = await db.batch([{ sql: SCOPE_WAITING_SQL, params: { ...scope, sessions: JSON.stringify([...sessionIds.filter((sid) => changing.has(sid)), ...sessionIds.filter((sid) => !changing.has(sid))]), walk: changing.size } }, ...(named ? [] : [{ sql: TOP_SQL }])])
   const scoped = new Map(rowsOf(second[0]).map((row): [string, Row] => [String(row.id), row]))
   const touched = new Set<number>(), charged = new Set<string>(), walked = new Set<string>()
   let last: Row | null = null, stopped = false, legacyCost = 0
   for (const row of list) {
     const sid = String(row.session_id), known = scoped.get(sid)
     const productId = known && row.product_id != null ? Number(row.product_id) : null
-    const freshSession = known !== undefined && Number(known.legacy) === 1 && !charged.has(sid)
+    const freshSession = known !== undefined && Number(known.legacy) === 1 && changing.has(sid) && !charged.has(sid)
     const items = freshSession ? known.items == null ? limits.touchedMax : Number(known.items) : 0
     const freshProduct = productId !== null && !touched.has(productId) ? 1 : 0
     if (touched.size + legacyCost + freshProduct + items > limits.touchedMax && last !== null) { stopped = true; break }
     if (productId !== null) touched.add(productId)
     if (freshSession) { charged.add(sid); legacyCost += items }
-    walked.add(sid)
+    if (setChanging(row)) walked.add(sid)
     last = row
   }
   const cursorRow = last as Row
