@@ -18,8 +18,9 @@ const MAP_CONSENT_LINE_EN = /copy\('mapConsentLine', '([^']*)'/.exec(embedSource
 const MAP_CONSENT_LINE_KM = /copy\('mapConsentLine', '[^']*', '([^']*)'/.exec(embedSource)?.[1] ?? ''
 
 const EN_HEDGE = /\b(?:may|might|perhaps|possibly|approximately|roughly|generally|around \d)\b|\babout (?:an? (?:hour|day|week|month|year)|one|two|thirty|ninety|\d+)\b/i
-const KM_HEDGE = /ប្រហែល/
+const KM_HEDGE = /ប្រហែល|អាចនឹង|ភាគច្រើន|ជាទូទៅ|ប្រមាណ|ពេលខ្លះ|ជួនកាល|ស្ទើរតែ/
 // Khmer "may also" (retired: ក៏អាចសរសេរវាដែរ). A bare អាច is plain "can" in about ten strings, so only the can-also shape is banned.
+// A plain sentence with អាច and a later ដែរ also matches this; the fix is to split the sentence.
 const KM_CAN_ALSO = /អាច[^។]*ដែរ/
 
 const rendered = new Set<string>(['portal_legal_footer_content_concerns'])
@@ -68,6 +69,11 @@ check('control: the retired 30 Sep wording fails the same scan', () => {
     portal_legal_cookies_third_b: 'ស្គ្រីបរបស់ Google ក៏អាចសរសេរវាដែរ។' }
   assert.ok(rendered.has('portal_legal_store_session_l') && rendered.has('portal_legal_cookies_third_b'), 'the retired strings sit on rendered keys')
   assert.equal(scan(retiredEn, retiredKm).length, 4)
+})
+
+check('control: each added Khmer hedge word alone is caught, and ទំនាក់ទំនង (contact) is not', () => {
+  for (const word of ['ប្រហែល', 'អាចនឹង', 'ភាគច្រើន', 'ជាទូទៅ', 'ប្រមាណ', 'ពេលខ្លះ', 'ជួនកាល', 'ស្ទើរតែ']) assert.match(word, KM_HEDGE, word)
+  assert.doesNotMatch('ទំនាក់ទំនង', KM_HEDGE)
 })
 
 check('control: a plain Khmer "you can" sentence is not a hedge', () => {

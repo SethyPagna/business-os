@@ -34,7 +34,7 @@ for (const fact of [/ចិនសាមញ្ញ/, /ចិនប្រពៃណ�
 assert.equal(PORTAL_LEGAL_EN.portal_legal_privacy_translate_h, 'Translation')
 // Nobody has verified in a browser who writes googtrans: this site does, and Google's widget sets it too. The text must say both and neither alone.
 const EN_POLICY_WRITERS = /This site and Google's translation script set the googtrans cookie to remember that choice; this site clears it when you go back to Khmer or English or when translation is paused\./
-const KM_POLICY_WRITERS = /គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី googtrans[^។]*ហើយគេហទំព័រនេះលុបវា[^។]*ពេលការបកប្រែផ្អាក។/
+const KM_POLICY_WRITERS = /គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី googtrans ដើម្បីចងចាំជម្រើសនោះ ហើយគេហទំព័រនេះលុបវាពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។/
 assert.match(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, EN_POLICY_WRITERS)
 assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /Google's script reads it/, 'nobody verified that Google only reads it')
 assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /which sets the googtrans cookie/, 'Google alone does not set googtrans')
@@ -43,13 +43,19 @@ assert.match(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, KM_POLICY_WRITERS)
 assert.doesNotMatch(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /ដែលកំណត់ខូឃី googtrans/)
 assert.doesNotMatch(PORTAL_LEGAL_KM.portal_legal_cookies_third_b, /គេហទំព័រនេះ(?:ផ្ទាល់)?សរសេរខូឃី googtrans/, 'the site is not the only writer')
 // The writers sentence is one sentence of the paragraph: exactly one sentence may mention googtrans, so a second one cannot be added unnoticed.
-const EN_SENTENCES = (text: string) => text.split(/\.\s+|\.$/).filter(Boolean)
-const KM_SENTENCES = (text: string) => text.split('។').map((part) => part.trim()).filter(Boolean)
+const EN_SENTENCES = (text: string) => text.split(/\.\s+|\.$|;/).filter(Boolean)
+const KM_SENTENCES = (text: string) => text.split(/។|;/).map((part) => part.trim()).filter(Boolean)
 const googtransSentences = (sentences: string[]) => sentences.filter((sentence) => sentence.includes('googtrans')).length
 assert.ok(EN_SENTENCES(PORTAL_LEGAL_EN.portal_legal_cookies_third_b).length >= 5, 'the English paragraph splits into its sentences')
 assert.ok(KM_SENTENCES(PORTAL_LEGAL_KM.portal_legal_cookies_third_b).length >= 5, 'the Khmer paragraph splits into its sentences')
 assert.equal(googtransSentences(EN_SENTENCES(PORTAL_LEGAL_EN.portal_legal_cookies_third_b)), 1, 'exactly one English sentence mentions googtrans')
 assert.equal(googtransSentences(KM_SENTENCES(PORTAL_LEGAL_KM.portal_legal_cookies_third_b)), 1, 'exactly one Khmer sentence mentions googtrans')
+const semicolonEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace('or when translation is paused.', "or when translation is paused; Google's script alone also sets googtrans.")
+const semicolonKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('ឬពេលការបកប្រែផ្អាក។', "ឬពេលការបកប្រែផ្អាក; Google's script alone also sets googtrans។")
+assert.notEqual(semicolonEn, PORTAL_LEGAL_EN.portal_legal_cookies_third_b, 'control: the semicolon EN mutation changed the text')
+assert.notEqual(semicolonKm, PORTAL_LEGAL_KM.portal_legal_cookies_third_b, 'control: the semicolon KM mutation changed the text')
+assert.equal(googtransSentences(EN_SENTENCES(semicolonEn)), 2, 'control: a claim joined by a semicolon is counted (EN)')
+assert.equal(googtransSentences(KM_SENTENCES(semicolonKm)), 2, 'control: a claim joined by a semicolon is counted (KM)')
 const policyExtraEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b + ' The googtrans cookie is also written by Google alone.'
 const policyExtraKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b + ' ស្គ្រីបរបស់ Google ក៏សរសេរ googtrans ផងដែរ។'
 assert.notEqual(policyExtraEn, PORTAL_LEGAL_EN.portal_legal_cookies_third_b, 'control: the extra-sentence EN mutation changed the text')
@@ -57,6 +63,9 @@ assert.notEqual(policyExtraKm, PORTAL_LEGAL_KM.portal_legal_cookies_third_b, 'co
 assert.equal(googtransSentences(EN_SENTENCES(policyExtraEn)), 2, 'control: a second English googtrans sentence is counted')
 assert.equal(googtransSentences(KM_SENTENCES(policyExtraKm)), 2, 'control: a second Khmer googtrans sentence is counted')
 // Controls: a text that says the site alone writes it, or Google alone does, must fail these patterns.
+const policyClauseKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('ដើម្បីចងចាំជម្រើសនោះ ហើយ', 'ដើម្បីចងចាំជម្រើសនោះ ហើយស្គ្រីបរបស់ Google តែមួយគត់កំណត់វាផងដែរ ហើយ')
+assert.notEqual(policyClauseKm, PORTAL_LEGAL_KM.portal_legal_cookies_third_b, 'control: the inserted-clause KM policy mutation changed the text')
+assert.doesNotMatch(policyClauseKm, KM_POLICY_WRITERS, 'control: a contradicting clause inside the Khmer policy sentence is rejected')
 const siteAloneEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace("This site and Google's translation script set the googtrans cookie", 'This site writes the googtrans cookie')
 const googleAloneEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace("This site and Google's translation script set the googtrans cookie", "Google's translation script sets the googtrans cookie")
 const siteAloneKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី', 'គេហទំព័រនេះសរសេរខូឃី')
@@ -76,7 +85,7 @@ const googtrans = rowByName.get('googtrans')
 assert.ok(googtrans, 'no googtrans row')
 assert.equal(googtrans.kindKey, 'portal_legal_kind_cookie')
 const EN_ROW_WRITERS = /^Set by this site and by Google's translation script when you pick Simplified Chinese, Traditional Chinese, French or Spanish, to remember that choice\. This site clears it when you go back to Khmer or English, or when translation is paused\.$/
-const KM_ROW_WRITERS = /^គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់វា ពេលអ្នកជ្រើស[^។]*ដើម្បីចងចាំជម្រើសនោះ។ គេហទំព័រនេះលុបវា ពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។$/
+const KM_ROW_WRITERS = /^គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់វា ពេលអ្នកជ្រើសភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង ឬអេស្ប៉ាញ ដើម្បីចងចាំជម្រើសនោះ។ គេហទំព័រនេះលុបវា ពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។$/
 assert.match(PORTAL_LEGAL_EN[googtrans.purposeKey], EN_ROW_WRITERS)
 assert.doesNotMatch(PORTAL_LEGAL_EN[googtrans.purposeKey], /Set by Google Translate/)
 assert.doesNotMatch(PORTAL_LEGAL_EN[googtrans.purposeKey], /Written by this site/, 'the site is not the only writer')
@@ -91,6 +100,9 @@ assert.notEqual(rowSiteAloneEn, PORTAL_LEGAL_EN[googtrans.purposeKey], 'control:
 assert.notEqual(rowGoogleAloneEn, PORTAL_LEGAL_EN[googtrans.purposeKey], 'control: the Google-alone EN row replacement changed the text')
 assert.notEqual(rowSiteAloneKm, PORTAL_LEGAL_KM[googtrans.purposeKey], 'control: the site-alone KM row replacement changed the text')
 assert.notEqual(rowGoogleAloneKm, PORTAL_LEGAL_KM[googtrans.purposeKey], 'control: the Google-alone KM row replacement changed the text')
+const rowClauseKm = PORTAL_LEGAL_KM[googtrans.purposeKey].replace('ពេលអ្នកជ្រើស', 'ពេលអ្នកជ្រើស ហើយស្គ្រីបរបស់ Google តែមួយគត់កំណត់វាផងដែរ')
+assert.notEqual(rowClauseKm, PORTAL_LEGAL_KM[googtrans.purposeKey], 'control: the inserted-clause KM row mutation changed the text')
+assert.doesNotMatch(rowClauseKm, KM_ROW_WRITERS, 'control: a contradicting clause inside the Khmer row wording is rejected')
 const rowExtraKm = PORTAL_LEGAL_KM[googtrans.purposeKey] + ' ស្គ្រីបរបស់ Google ក៏សរសេរវាផងដែរ។'
 assert.notEqual(rowExtraKm, PORTAL_LEGAL_KM[googtrans.purposeKey], 'control: the extra-sentence KM row mutation changed the text')
 assert.doesNotMatch(rowExtraKm, KM_ROW_WRITERS, 'control: a sentence appended after the Khmer row wording is rejected')
@@ -100,7 +112,7 @@ assert.doesNotMatch(rowSiteAloneKm, KM_ROW_WRITERS, 'control: the Khmer site-alo
 assert.doesNotMatch(rowGoogleAloneKm, KM_ROW_WRITERS, 'control: the Khmer Google-alone row wording is rejected')
 // No hedge word: same patterns as tests/publicLegalNoHedges.test.ts (owner rule 16 Sep: policies state facts plainly). Keep in step with that test.
 const EN_HEDGE = /\b(?:may|might|perhaps|possibly|approximately|roughly|generally|around \d)\b|\babout (?:an? (?:hour|day|week|month|year)|one|two|thirty|ninety|\d+)\b/i
-const KM_HEDGE = /ប្រហែល/
+const KM_HEDGE = /ប្រហែល|អាចនឹង|ភាគច្រើន|ជាទូទៅ|ប្រមាណ|ពេលខ្លះ|ជួនកាល|ស្ទើរតែ/
 const KM_CAN_ALSO = /អាច[^។]*ដែរ/
 const KM_BARE_CAN = /អាច/
 for (const text of [PORTAL_LEGAL_EN[googtrans.purposeKey], PORTAL_LEGAL_EN.portal_legal_cookies_third_b]) assert.doesNotMatch(text, EN_HEDGE, 'googtrans wording hedges')
@@ -110,11 +122,19 @@ for (const real of [PORTAL_LEGAL_KM[googtrans.purposeKey], PORTAL_LEGAL_KM.porta
   assert.notEqual(canned, real, 'control: the can-set replacement changed the text')
   assert.match(canned, KM_BARE_CAN, 'control: the bare-can check rejects a "can set" rewrite')
 }
-// The patterns above are the ones tests/publicLegalNoHedges.test.ts scans with; this proves it instead of trusting the comment.
+// The declaration must match line for line, flags included, from a line start, so a commented-out or flag-dropped copy does not count.
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const declaredVerbatim = (source: string, name: string, pattern: RegExp) => new RegExp(`^const ${name} = /${escapeRe(pattern.source)}/${pattern.flags}\\r?\\n`, 'm').test(source)
 const hedgeTestSource = fs.readFileSync(new URL('./publicLegalNoHedges.test.ts', import.meta.url), 'utf8')
 for (const [name, pattern] of [['EN_HEDGE', EN_HEDGE], ['KM_HEDGE', KM_HEDGE], ['KM_CAN_ALSO', KM_CAN_ALSO]] as const) {
-  assert.ok(hedgeTestSource.includes(`const ${name} = /${pattern.source}/`), `${name} here differs from the one in publicLegalNoHedges.test.ts`)
+  assert.ok(declaredVerbatim(hedgeTestSource, name, pattern), `${name} here differs from the one in publicLegalNoHedges.test.ts`)
 }
+const enDeclaration = `const EN_HEDGE = /${EN_HEDGE.source}/${EN_HEDGE.flags}`
+assert.ok(declaredVerbatim(`${enDeclaration}\r\n`, 'EN_HEDGE', EN_HEDGE), 'control: the matcher accepts the exact declaration with CRLF')
+assert.ok(declaredVerbatim(`x\n${enDeclaration}\n`, 'EN_HEDGE', EN_HEDGE), 'control: the matcher accepts the exact declaration with LF')
+assert.ok(!declaredVerbatim(`${enDeclaration.replace(/i$/, '')}\n`, 'EN_HEDGE', EN_HEDGE), 'control: a dropped i flag is rejected')
+assert.ok(!declaredVerbatim(`// ${enDeclaration}\n`, 'EN_HEDGE', EN_HEDGE), 'control: a commented-out declaration is rejected')
+assert.ok(!declaredVerbatim(`const KM_HEDGE = /${KM_HEDGE.source}/i\n`, 'KM_HEDGE', KM_HEDGE), 'control: a flag added to a Khmer pattern is rejected')
 assert.match('Google\'s translation script may also write it', EN_HEDGE, 'control: the hedge pattern catches the retired wording')
 assert.match('ក៏អាចសរសេរវាដែរ', KM_CAN_ALSO, 'control: the Khmer can-also pattern catches the retired wording')
 assert.match(PORTAL_LEGAL_EN[googtrans.lifetimeKey], /translation is paused/)
