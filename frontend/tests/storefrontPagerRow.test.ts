@@ -21,7 +21,7 @@ assert.doesNotMatch(centered, /Filters (?:panel|field)/i, 'shared pagination mus
 
 const backAt = centered.indexOf('aria-label={backLabel}')
 const pageAt = centered.indexOf('aria-label={pageLabel}', backAt)
-const totalAt = centered.indexOf('<span className={countClass}>')
+const totalAt = centered.indexOf('<span translate="no" className={`${countClass} notranslate`}>')
 const nextAt = centered.indexOf('aria-label={nextLabel}')
 const rangeAt = centered.indexOf('{rangeText}')
 assert.ok(backAt > 0 && rangeAt > backAt && pageAt > rangeAt && totalAt > pageAt && nextAt > totalAt, 'owner 14 Nov: the row is Back, item range of total, editable page, page total, Next')

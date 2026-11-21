@@ -669,7 +669,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   <SlidersHorizontal className="h-4 w-4" />
                   <span className="hidden sm:inline">{copy('filters', 'Filters')}</span>
                   {portalActiveFilterCount > 0 ? (
-                    <span className="rounded-full bg-white px-2 py-0.5 text-xs text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">{portalActiveFilterCount}</span>
+                    <span translate="no" className="notranslate rounded-full bg-white px-2 py-0.5 text-xs text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">{portalActiveFilterCount}</span>
                   ) : null}
                 </button>
               )}
@@ -727,7 +727,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
             <span>{copy('filters', 'Filters')}</span>
             {portalActiveFilterCount > 0 ? (
-              <span className="rounded-full bg-white px-2 py-0.5 text-xs text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">{portalActiveFilterCount}</span>
+              <span translate="no" className="notranslate rounded-full bg-white px-2 py-0.5 text-xs text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">{portalActiveFilterCount}</span>
             ) : null}
           </button>
           </div>
@@ -1231,7 +1231,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                           <Plus className="h-3.5 w-3.5 shrink-0" />
                           <span className="hidden sm:inline">{copy('addToBucketShort', 'Add')}</span>
                           {added ? (
-                            <span className="ml-0.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold leading-4 text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">
+                            <span translate="no" className="notranslate ml-0.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold leading-4 text-[#7a5c22] dark:bg-[#23201b] dark:text-[#d6b56b]">
                               {qty}
                             </span>
                           ) : null}

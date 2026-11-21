@@ -66,7 +66,7 @@ runTest('the item range renders as a plain span, not a per-page dropdown trigger
   const branch = pagination.slice(branchStart, branchEnd)
   assert.match(
     branch,
-    /<span data-pager-range className="h-6 [^"]*rounded-full border[^>]*>\{rangeText\}<\/span>/,
+    /<span data-pager-range translate="no" className="notranslate h-6 [^"]*rounded-full border[^>]*>\{rangeText\}<\/span>/,
     'the range chip must be a plain span rendering the item range, not an interactive size selector',
   )
   assert.doesNotMatch(branch, /<PageSizeSelect\b/, 'P10-20 removed the per-page dropdown from this branch entirely')

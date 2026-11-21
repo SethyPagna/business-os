@@ -291,7 +291,7 @@ await runTest('the row order is [Back] [page / total] [Next] -- and both mounts 
   const branch = centeredBranch()
   const backAt = branch.indexOf('aria-label={backLabel}')
   const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
-  const totalAt = branch.indexOf('<span className={countClass}>')
+  const totalAt = branch.indexOf('<span translate="no" className={`${countClass} notranslate`}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
   const rangeAt = branch.indexOf('{rangeText}')
   assert.ok(backAt > 0 && rangeAt > backAt && pageAt > rangeAt && totalAt > pageAt && nextAt > totalAt, 'owner 14 Nov: Back, range of total, page, total pages, Next')

@@ -150,7 +150,7 @@ export default function PortalListPage({
               onClick={() => onSegment(key)}
               className={`min-h-11 rounded-lg px-4 sm:min-h-9 text-center font-semibold transition ${segment === key ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
             >
-              {label}{count > 0 ? <span className="ml-1.5 text-xs font-medium text-stone-600 dark:text-neutral-300">{count}</span> : null}
+              <span>{label}</span>{count > 0 ? <span translate="no" className="notranslate ml-1.5 text-xs font-medium text-stone-600 dark:text-neutral-300">{count}</span> : null}
             </button>
           ))}
         </div>

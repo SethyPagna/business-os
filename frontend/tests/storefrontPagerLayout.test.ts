@@ -97,7 +97,7 @@ runTest('the centred branch centres the pill and orders it Back / page / total /
   assert.match(branch, /flex w-full flex-wrap items-center justify-center gap-2/, 'the pager row must centre itself')
   const backAt = branch.indexOf('aria-label={backLabel}')
   const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
-  const countAt = branch.indexOf('<span className={countClass}>')
+  const countAt = branch.indexOf('<span translate="no" className={`${countClass} notranslate`}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
   assert.ok(backAt > 0 && pageAt > backAt, 'the editable page must follow Back')
   const rangeAt = branch.indexOf('{rangeText}')

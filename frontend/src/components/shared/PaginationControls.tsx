@@ -288,7 +288,7 @@ export default function PaginationControls({
             <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
             <span className={edgeTextClass}>{backLabel}</span>
           </button>
-          <span data-pager-range className={`${countClass} border-x border-slate-200 tabular-nums dark:border-slate-700`}>{rangeText}</span>
+          <span data-pager-range translate="no" className={`${countClass} notranslate border-x border-slate-200 tabular-nums dark:border-slate-700`}>{rangeText}</span>
           <div className="inline-flex min-w-0 shrink items-center">
             {editablePageInput ? (
               <>
@@ -306,9 +306,9 @@ export default function PaginationControls({
                 />
               </>
             ) : (
-              <span className="px-1 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
+              <span translate="no" className="notranslate px-1 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
             )}
-            <span className={countClass}>/ {totalPages}</span>
+            <span translate="no" className={`${countClass} notranslate`}>/ {totalPages}</span>
           </div>
           <button
             type="button"
@@ -355,7 +355,7 @@ export default function PaginationControls({
         <div className={`inline-flex min-w-0 items-center ${compactCentered ? 'gap-0 px-0' : 'gap-0.5 px-0.5'}`}>
           {/* Order per request: the item-range chip FIRST, then the editable
               page number, then the total page count. */}
-          <span data-pager-range className="h-6 whitespace-nowrap rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-semibold tabular-nums text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{rangeText}</span>
+          <span data-pager-range translate="no" className="notranslate h-6 whitespace-nowrap rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-semibold tabular-nums text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">{rangeText}</span>
           {editablePageInput ? (
             <>
               <span className="sr-only">{pageLabel}</span>
@@ -372,9 +372,9 @@ export default function PaginationControls({
               />
             </>
           ) : (
-              <span className={`${compactCentered ? 'px-0 text-[10px]' : 'px-0.5 text-xs'} font-semibold text-slate-800 dark:text-slate-100`}>{safePage}</span>
+              <span translate="no" className={`notranslate ${compactCentered ? 'px-0 text-[10px]' : 'px-0.5 text-xs'} font-semibold text-slate-800 dark:text-slate-100`}>{safePage}</span>
           )}
-          <span className={`shrink-0 whitespace-nowrap font-semibold text-slate-500 dark:text-slate-400 ${compactCentered ? 'text-[10px]' : 'text-xs'}`}>/ {unknownTotal ? '—' : totalPages}</span>
+          <span translate="no" className={`notranslate shrink-0 whitespace-nowrap font-semibold text-slate-500 dark:text-slate-400 ${compactCentered ? 'text-[10px]' : 'text-xs'}`}>/ {unknownTotal ? '—' : totalPages}</span>
         </div>
         <button
           type="button"
@@ -422,7 +422,7 @@ export default function PaginationControls({
             <ChevronLeft className="h-4 w-4" />
             <span className={edgeTextClass}>{backLabel}</span>
           </button>
-          <span data-pager-range className={`shrink-0 whitespace-nowrap rounded-full bg-slate-50 ${dense ? 'px-1' : 'px-1.5'} py-1 ${textSize} font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100`}>{rangeText}</span>
+          <span data-pager-range translate="no" className={`notranslate shrink-0 whitespace-nowrap rounded-full bg-slate-50 ${dense ? 'px-1' : 'px-1.5'} py-1 ${textSize} font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100`}>{rangeText}</span>
           {compactPageInput ? (
             <div className={`inline-flex shrink-0 items-center justify-center ${dense ? 'gap-0.5 px-0.5' : 'gap-1 px-1'} ${textSize} font-semibold tabular-nums text-slate-700 dark:text-slate-100`}>
               <input
@@ -438,10 +438,10 @@ export default function PaginationControls({
                 onBlur={(event) => commitPageDraft(event.currentTarget.value)}
                 onKeyDown={handlePageInputKeyDown}
               />
-              <span className={`shrink-0 ${textSize} font-semibold text-slate-500 dark:text-slate-300`}>/ {totalPages}</span>
+              <span translate="no" className={`notranslate shrink-0 ${textSize} font-semibold text-slate-500 dark:text-slate-300`}>/ {totalPages}</span>
             </div>
           ) : (
-            <span data-pager-page className={`shrink-0 whitespace-nowrap ${edgePad} text-center ${textSize} font-semibold tabular-nums text-slate-700 dark:text-slate-100`}>
+            <span data-pager-page translate="no" className={`notranslate shrink-0 whitespace-nowrap ${edgePad} text-center ${textSize} font-semibold tabular-nums text-slate-700 dark:text-slate-100`}>
               <span aria-hidden="true">{safePage} / {totalPages}</span>
               <span className="sr-only">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
             </span>
@@ -480,7 +480,7 @@ export default function PaginationControls({
           <ChevronLeft className="h-4 w-4" />
           <span className={edgeTextClass}>{backLabel}</span>
         </button>
-        <span data-pager-range className="min-w-0 whitespace-nowrap px-1.5 text-[11px] font-medium tabular-nums sm:px-3 sm:text-xs">
+        <span data-pager-range translate="no" className="notranslate min-w-0 whitespace-nowrap px-1.5 text-[11px] font-medium tabular-nums sm:px-3 sm:text-xs">
           <span className="hidden sm:inline">{showingLabel} </span>{rangeText}<span className="hidden sm:inline"> {label}</span>
         </span>
         {editablePageInput ? (
@@ -496,11 +496,11 @@ export default function PaginationControls({
               onBlur={(event) => commitPageDraft(event.currentTarget.value)}
               onKeyDown={handlePageInputKeyDown}
             />
-            <span className="text-slate-500 dark:text-slate-300">/ {totalPages}</span>
+            <span translate="no" className="notranslate text-slate-500 dark:text-slate-300">/ {totalPages}</span>
           </div>
         ) : (
           <span className="shrink-0 whitespace-nowrap bg-slate-50 px-2 py-2 sm:px-3 text-center font-semibold dark:bg-slate-800">
-            {pageLabel} {safePage} {ofLabel} {totalPages}
+            {pageLabel} <span translate="no" className="notranslate">{safePage}</span> {ofLabel} <span translate="no" className="notranslate">{totalPages}</span>
           </span>
         )}
         <button
