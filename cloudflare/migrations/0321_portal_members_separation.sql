@@ -82,8 +82,11 @@
 --       DROP TABLE IF EXISTS portal_members_guard_0321;
 --   DELETE FROM sqlite_sequence (before the DROP): removes only the zero-valued row of portal_accounts_0321_new, which
 --   the copy INSERT leaves on an empty table. It is the first write to sqlite_sequence in this project's migrations.
---   If a database refuses it, the file stops before DROP TABLE portal_accounts: the old table is intact and the file
---   can be applied again. Dropping the statement and accepting the zero row is a lead decision.
+--   If a database refuses it, the file stops before DROP TABLE portal_accounts: the old table is intact, but the same
+--   database refuses the same statement again, so applying this file again is refused again. It can be applied again
+--   only after the lead decides to remove that statement from the file (0321 is applied nowhere yet); accepting the
+--   zero row is that decision. On Cloudflare D1 a failed migration is rolled back and the deploy stops before the
+--   Worker is published.
 --   After a complete apply: roll the Worker back first if needed. The previous Worker reads only columns that
 --   still exist, but it would INSERT accounts with a NULL member_code and fail on NULL phone rows, so restore the
 --   old shape with a forward file (append-only: never edit this one):
@@ -92,6 +95,10 @@
 --     INSERT INTO portal_accounts (<the 15 old columns, age_confirmed_at included>)
 --       SELECT <the 15 old columns> FROM portal_accounts_0321_new
 --       WHERE phone IS NOT NULL AND password_hash IS NOT NULL AND membership_id IS NOT NULL;
+--     (sketch, still to add:) re-create the three 0087 indexes idx_portal_accounts_phone,
+--       idx_portal_accounts_membership and idx_portal_accounts_contact; keep the AUTOINCREMENT high-water mark
+--       (the new table's sqlite_sequence row must stay at or above the old one); then
+--       DROP TABLE portal_accounts_0321_new;
 --   Rows created by the new Worker (membership_id NULL) have no LC id and cannot live in the old shape: export
 --   them first (SELECT * FROM portal_accounts WHERE membership_id IS NULL) and decide with the owner.
 

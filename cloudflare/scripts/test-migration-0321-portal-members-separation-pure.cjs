@@ -5,7 +5,8 @@
 // a member may have no phone, password or LC number; one member per customer; the member_code shape check;
 // the file is LF only. Each new rule has a mutant that the same check turns red.
 //
-// D1 applies a migration file as one unit; node:sqlite does not, so a failing file runs inside BEGIN..ROLLBACK.
+// The file is written to be correct both ways: applied as one atomic batch (D1) and statement by statement. Both
+// ways are tested; node:sqlite has no batch, so the atomic case runs the file inside BEGIN..ROLLBACK.
 //
 // Run: node scripts/test-migration-0321-portal-members-separation-pure.cjs
 'use strict'
