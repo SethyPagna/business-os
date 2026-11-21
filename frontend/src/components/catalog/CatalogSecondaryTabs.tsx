@@ -1,14 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ComponentType, CSSProperties, Dispatch, SetStateAction } from 'react'
+import type { CSSProperties, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
-import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
-import Phone from 'lucide-react/dist/esm/icons/phone.js'
-import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
@@ -19,12 +16,12 @@ import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu.tsx'
-import PortalEmbedConsent, { mapFallbackHref } from './legal/PortalEmbedConsent.tsx'
 import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../../utils/aboutCoverLayout.ts'
 import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
-import { PortalContactRows } from './PortalSocialRow.tsx'
+import { PORTAL_CONTACT_ROW_INLINE, PortalContactRows } from './PortalSocialRow.tsx'
+import { portalAccountsNotShown, portalMapOpenHref } from './portalSocialLinks.ts'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
@@ -32,7 +29,6 @@ import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTra
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
 import { defaultConfigText } from './portalLanguagePacks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
-import { contactHref } from '../../utils/socialLinks.ts'
 import { aiConsentGiven, fillAiProviderTemplate, saveAiConsent } from './legal/aiProviderDisclosure.ts'
 import type { AiDisclosureLanguage, AiProviderState } from './legal/aiProviderDisclosure.ts'
 
@@ -76,7 +72,6 @@ interface BusinessFact {
   label: string
   value?: string
   href?: string
-  icon?: ComponentType<{ className?: string }>
 }
 
 interface AboutBlock {
@@ -92,7 +87,10 @@ interface CatalogAboutSectionProps {
   previewConfig: PreviewConfig
   mapEmbedUrl?: string
   addressFact?: BusinessFact | null
-  businessFacts?: BusinessFact[]
+  // The chat entries (Phone, Messenger, Telegram, WhatsApp) and the account entries (Facebook, Instagram, TikTok, Telegram channel, Website): the
+  // details card under the story lists both, as tappable rows with the real names.
+  contactEntries?: readonly PortalContactEntry[]
+  accountEntries?: readonly PortalContactEntry[]
   versionedBusinessLogo?: string
   versionedBusinessCover?: string
   imageFetchPriority?: 'high' | 'low' | 'auto'
@@ -293,36 +291,23 @@ function AboutCover({ src, imageFetchPriority, onFailed, onShape }: { src: strin
 // A long story reads better in two columns on a wide screen; a short one stays one block.
 const ABOUT_STORY_TWO_COLUMN_FROM = 700
 
-// Phone and address: icon, value, one action icon. The visible word is dropped (the icon says it);
-// the field name stays for a screen reader.
-function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyFn; address: boolean }) {
-  const Icon = item.icon || (address ? MapPin : Phone)
-  const ActionIcon = address ? ExternalLink : PhoneCall
-  // The dialer link is rebuilt from the number (digits only, 6 or more); a number that makes none shows as plain text.
-  const href = address ? item.href || mapFallbackHref(item.value || '', '') : contactHref('tel', item.value)
-  const actionLabel = address
-    ? copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
-    : copy('callUs', 'Call us', 'ហៅទូរស័ព្ទ')
-  return (
-    <div className="flex min-h-12 items-center gap-3">
-      <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
-      <div className="min-w-0 flex-1 break-words text-sm font-medium leading-6 text-[#23201b] dark:text-neutral-100" title={item.value}>
+// The address row of the details card: the brass pin, the real address, the whole row a link to the map. It wears the same recipe as a contact row.
+function AboutAddressRow({ item, copy }: { item: BusinessFact; copy: CopyFn }) {
+  const href = portalMapOpenHref(item.href, item.value)
+  const body = (
+    <>
+      <MapPin aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
+      <span className="min-w-0 flex-1 break-words leading-6">
         <span className="sr-only">{item.label}: </span>
         <span translate="no" className="notranslate">{item.value}</span>
-      </div>
-      {href ? (
-        <a
-          href={href}
-          target={address ? '_blank' : undefined}
-          rel={address ? 'noreferrer noopener' : undefined}
-          className={ICON_BUTTON}
-          aria-label={actionLabel}
-          title={actionLabel}
-        >
-          <ActionIcon aria-hidden="true" className="h-4 w-4" />
-        </a>
-      ) : null}
-    </div>
+      </span>
+    </>
+  )
+  if (!href) return <div className={PORTAL_CONTACT_ROW_INLINE} data-portal-about-address="">{body}</div>
+  return (
+    <a href={href} target="_blank" rel="noreferrer noopener" className={PORTAL_CONTACT_ROW_INLINE} data-portal-about-address="" aria-label={`${item.label}: ${item.value}`}>
+      {body}
+    </a>
   )
 }
 
@@ -332,7 +317,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     previewConfig,
     mapEmbedUrl,
     addressFact,
-    businessFacts,
+    contactEntries = [],
+    accountEntries = [],
     versionedBusinessLogo,
     versionedBusinessCover,
     imageFetchPriority,
@@ -371,9 +357,12 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const logoSizePx = Math.max(72, Number(previewConfig.logoSize || 80))
   // The same file as the cover: the round logo would only repeat the picture beside it.
   const showRoundLogo = !(hasCover && sameImageFile(versionedBusinessLogo, versionedBusinessCover))
-  const detailFacts = (businessFacts || []).filter((item) => item.key === 'phone' || item.key === 'address')
-  const hasFacts = detailFacts.length > 0
+  // The details card: Address, then the chat rows (Phone first), then the account rows; an account already listed as a chat row is not repeated.
+  const detailRows = [...contactEntries, ...portalAccountsNotShown(accountEntries, contactEntries)]
+  const addressText = String(addressFact?.value || '').trim()
+  const hasFacts = Boolean(addressText) || detailRows.length > 0
   const hasMap = Boolean(mapEmbedUrl)
+  const mapOpenHref = portalMapOpenHref(addressFact?.href, addressText)
   const storyInColumns = storyText.length > ABOUT_STORY_TWO_COLUMN_FROM
 
   return (
@@ -472,9 +461,9 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         </figure>
       ) : null}
 
-      {/* 2 Nov (owner): no empty space. The story takes the full width (two columns on a
-          wide screen when it is long). Under it, phone and address sit BESIDE the map
-          on a large screen and stack on a phone. The map keeps its consent gate. */}
+      {/* The story takes the full width (two columns on a wide screen when it is long). Directly under it (owner A62, 21 Nov 2026), before the About
+          blocks and not only in the footer: one details card (address, the chat rows, the account rows) with the live map beside it on a wide screen,
+          stacked on a phone (A63). */}
       {storyText ? (
         <div className={`rounded-2xl p-5 ${SURFACE}`}>
           <div className="text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100">{aboutTitle}</div>
@@ -485,27 +474,38 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
       ) : null}
 
       {hasFacts || hasMap ? (
-        <div data-portal-about-details="true" className={`grid gap-4 ${hasFacts && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-stretch' : ''}`}>
+        <div data-portal-about-details="true" className={`grid gap-4 ${hasFacts && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start' : ''}`}>
           {hasFacts ? (
-            <div data-portal-contact-tray="true" className={`flex flex-col justify-center divide-y divide-stone-200 rounded-2xl px-4 py-1 dark:divide-neutral-700 ${SURFACE}`}>
-              {detailFacts.map((item) => <AboutFactRow key={item.key} item={item} copy={copy} address={item.key === 'address'} />)}
+            <div data-portal-contact-tray="true" className={`space-y-2 rounded-2xl p-3 ${SURFACE}`}>
+              {addressText ? <AboutAddressRow item={{ ...addressFact, key: 'address', label: addressFact?.label || copy('address', 'Address'), value: addressText }} copy={copy} /> : null}
+              <PortalContactRows inline entries={detailRows} copy={copy} className="space-y-2" />
             </div>
           ) : null}
 
           {hasMap ? (
             <div data-portal-map-card="true" className={`flex flex-col overflow-hidden rounded-2xl ${SURFACE}`}>
-              {/* N45: the map is the storefront's only automatically-loading
-                  third party, so it waits for a click instead of fetching Google
-                  the moment this tab renders. Declining is a plain link, not a
-                  dead end. */}
-              <PortalEmbedConsent
-                className="flex-1"
-                frameClassName="h-72 w-full border-0 lg:h-auto lg:min-h-64 lg:flex-1"
-                copy={copy}
-                src={mapEmbedUrl || ''}
-                title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
-                address={addressFact?.value || ''}
-              />
+              {/* The live map loads as soon as this tab is shown (no click): 16:9 on a wide screen, 4:3 on a phone, lazy-loaded, no referrer sent beyond the origin. */}
+              <div className="aspect-[4/3] w-full bg-stone-200 sm:aspect-video dark:bg-neutral-800">
+                <iframe
+                  src={mapEmbedUrl || ''}
+                  title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  className="block h-full w-full border-0"
+                  allowFullScreen
+                />
+              </div>
+              {addressText || mapOpenHref ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e3d9c8] bg-[#faf6ef] p-3 dark:border-neutral-700 dark:bg-neutral-900">
+                  {addressText ? <p className="min-w-0 flex-1 break-words text-sm leading-6 text-[#23201b] dark:text-neutral-100"><span translate="no" className="notranslate">{addressText}</span></p> : null}
+                  {mapOpenHref ? (
+                    <a href={mapOpenHref} target="_blank" rel="noreferrer noopener" className={`${CHARCOAL_BUTTON} shrink-0`}>
+                      <MapPin aria-hidden="true" className="h-4 w-4" />
+                      <span>{copy('openInMaps', 'Open in Maps', 'បើកក្នុងផែនទី')}</span>
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

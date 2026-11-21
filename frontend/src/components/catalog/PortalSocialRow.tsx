@@ -28,6 +28,9 @@ export function PortalSocialText({ text, latin, className = '' }: { text: string
   return <span translate="no" {...getKhmerTextProps(text, `notranslate ${wrap}`)}>{text}</span>
 }
 
+/** One inline contact row: a tinted inset (page tone, a border, brass on hover). The About address row wears the same recipe. */
+export const PORTAL_CONTACT_ROW_INLINE = 'flex min-h-11 items-center gap-3 rounded-xl border border-[#e3d9c8] bg-[#faf6ef] px-4 py-2 text-sm text-[#23201b] transition hover:bg-[#f6ece0] dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
+
 /**
  * The rows themselves: one tappable 44 px row per entry (brand icon, then the real account name or number; the platform word is only the
  * accessible name). The Contact panel shows the chat entries (Phone, Messenger, Telegram, WhatsApp); About shows the account entries; the
@@ -36,7 +39,7 @@ export function PortalSocialText({ text, latin, className = '' }: { text: string
 export function PortalContactRows({ entries, copy, onNavigate, className = '', inline = false }: { entries: readonly PortalContactEntry[]; copy: CopyFn; onNavigate?: () => void; className?: string; inline?: boolean }) {
   if (!entries.length) return null
   const rowClass = inline
-    ? 'flex min-h-11 items-center gap-3 rounded-xl border border-[#e3d9c8] bg-[#faf6ef] px-4 py-2 text-sm text-[#23201b] transition hover:bg-[#f6ece0] dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
+    ? PORTAL_CONTACT_ROW_INLINE
     : 'flex min-h-11 items-center gap-3 px-4 py-2 text-sm text-[#23201b] transition hover:bg-stone-100 dark:text-neutral-100 dark:hover:bg-neutral-800'
   return (
     <ul className={className} aria-label={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')} data-portal-contact-menu={inline ? undefined : 'true'} data-portal-contact-inline={inline ? 'true' : undefined}>

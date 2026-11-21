@@ -8,9 +8,6 @@ import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
 import PullToRefreshIndicator from '../shared/PullToRefreshIndicator.tsx'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
-import Mail from 'lucide-react/dist/esm/icons/mail.js'
-import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
-import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
@@ -25,7 +22,6 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { buildPortalContactEntries, buildPortalSocialFromConfig, normalizePortalExternalUrl as normalizeExternalUrl, portalContactFooterLinks, portalFooterAccounts } from './portalSocialLinks.ts'
-import { contactHref } from '../../utils/socialLinks.ts'
 import PortalSheet from './PortalSheet.tsx'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
@@ -990,9 +986,8 @@ export default function PublicCatalogPage() {
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
   const mapEmbedUrl = displayConfig.showGoogleMap && activeTab === 'about' ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '') : ''
   const businessFacts = [
-    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: contactHref('tel', displayConfig.businessPhone), icon: Phone },
-    { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: contactHref('mailto', displayConfig.businessEmail), icon: Mail },
-    { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink), icon: MapPin },
+    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone },
+    { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address') || null
   // One builder for the dock's Contact panel, the inline chat rows, About and the footer: the visible text is the owner's label, else the real account
@@ -1290,7 +1285,7 @@ export default function PublicCatalogPage() {
         openPortalImage={openPortalImage}
         mapEmbedUrl={mapEmbedUrl}
         addressFact={addressFact}
-        businessFacts={businessFacts}
+        accountEntries={accountEntries}
         versionedBusinessLogo={businessLogoUrl}
         versionedBusinessCover={coverState === 'failed' ? '' : businessCoverUrl}
         publicFaqItems={publicFaqItems}

@@ -88,8 +88,9 @@ runCase('source pin: no catalog file builds a mailto: or tel: link by hand', () 
 runCase('source pin: the four places call the shared rule', () => {
   const read = (...parts: string[]) => fs.readFileSync(path.join(catalogDir, ...parts), 'utf8')
   assert.match(read('portalSocialLinks.ts'), /contactHref\('tel', phone\)/)
-  assert.equal((read('PublicCatalogPage.tsx').match(/contactHref\('(?:tel|mailto)', displayConfig\./g) || []).length, 2)
-  assert.equal((read('CatalogPage.tsx').match(/contactHref\('(?:tel|mailto)', displayConfig\./g) || []).length, 2)
+  // The pages no longer build a phone or e-mail link of their own: the phone goes to the builder as a number and the footer prints the e-mail itself.
+  assert.equal((read('PublicCatalogPage.tsx').match(/contactHref\(/g) || []).length, 0)
+  assert.equal((read('CatalogPage.tsx').match(/contactHref\(/g) || []).length, 0)
   assert.match(read('legal', 'LegalPages.tsx'), /import \{ contactHref \} from '\.\.\/\.\.\/\.\.\/utils\/socialLinks\.ts'/)
   assert.doesNotMatch(read('legal', 'LegalPages.tsx'), /function contactHref/)
 })

@@ -7,7 +7,6 @@ import { fmtTime } from '../../utils/formatters.ts'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { settingsSaveNormalisedKeys } from '../../utils/settingsSave.ts'
 import { buildPortalContactEntries, buildPortalSocialFromConfig, portalContactFooterLinks, portalFooterAccounts } from './portalSocialLinks.ts'
-import { contactHref } from '../../utils/socialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
@@ -3014,8 +3013,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     : ''
 
   const businessFacts = [
-    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: contactHref('tel', displayConfig.businessPhone) },
-    { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: contactHref('mailto', displayConfig.businessEmail) },
+    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone },
     { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
@@ -3260,8 +3258,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     openPortalImage,
     mapEmbedUrl,
     addressFact,
-    businessFacts,
-    socialLinks,
+    contactEntries,
+    accountEntries,
     versionedBusinessLogo,
     versionedBusinessCover,
     publicFaqItems,

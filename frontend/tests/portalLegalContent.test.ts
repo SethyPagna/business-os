@@ -123,10 +123,11 @@ assert.match(embedSource, /onClick=\{revoke\}/, 'the loaded map does not expose 
 assert.match(embedSource, /setGranted\(false\)/, 'revoking the grant does not unmount the third-party iframe')
 assert.ok(PORTAL_LEGAL_EN.portal_legal_map_consent_revoke, 'the map revoke control has no English label')
 assert.ok(PORTAL_LEGAL_KM.portal_legal_map_consent_revoke, 'the map revoke control has no Khmer label')
-// The gate itself: the map iframe must not render before the visitor asks.
+// Owner, 21 Nov 2026 (A63, "Live Google map"): the About map loads straight away, with no consent click. It is the shop's own live embed:
+// lazy, no referrer beyond the origin, a translated title. The click-to-load component is no longer used by About (the policy lane retires it).
 const secondary = source('components/catalog/CatalogSecondaryTabs.tsx')
-assert.doesNotMatch(secondary, /<iframe[^>]*src={mapEmbedUrl}/, 'the map embed loads Google without being asked')
-assert.match(secondary, /<PortalEmbedConsent/, 'the map must go through the embed consent gate')
+assert.match(secondary, /<iframe\s+src=\{mapEmbedUrl \|\| ''\}[\s\S]*?loading="lazy"[\s\S]*?referrerPolicy="no-referrer-when-downgrade"/, 'the live map is a lazy iframe with a safe referrer policy')
+assert.doesNotMatch(secondary, /PortalEmbedConsent/, 'About no longer goes through the click-to-load gate')
 
 // The standing storefront notice used to end on "YOUR PRIVACY IS OUR PRIORITY"; an
 // assurance with no policy behind it is exactly the unsupported claim the

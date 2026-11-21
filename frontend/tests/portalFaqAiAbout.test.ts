@@ -12,6 +12,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { buildSync } from 'esbuild'
+import { buildPortalContactEntries } from '../src/components/catalog/portalSocialLinks.ts'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from '../src/components/catalog/faqStarterText.ts'
@@ -316,8 +317,8 @@ const aboutProps = (over: Record<string, unknown> = {}, config: Record<string, u
   copy: copyFor('en'),
   previewConfig: { businessName: 'Leang Cosmetics', title: 'Leang Cosmetics', businessTagline: 'Beauty in Phnom Penh', showLogo: false, aboutTitle: 'About', aboutContent: 'Our story.', ...config },
   openPortalImage: () => {},
-  businessFacts: [{ key: 'phone', label: 'Phone', value: '+855 12 345 678', href: 'tel:+855 12 345 678' }],
-  socialLinks: [],
+  // The business phone goes through the one builder, so the link is the clean tel: link whatever the number looks like.
+  contactEntries: buildPortalContactEntries({ phone: '+855 12 345 678', language: 'en' }).chat,
   ...over,
 })
 
@@ -336,7 +337,7 @@ runTest('About: the Leang icon replaces initials when no logo is shown', () => {
   assert.doesNotMatch(out, />LE</, 'no initials')
 })
 
-runTest('About: the phone link is a clean tel: link', () => {
+runTest('About: the phone row in the details card is a clean tel: link', () => {
   const out = html(aboutProps())
   assert.match(out, /href="tel:\+85512345678"/)
   assert.doesNotMatch(out, /href="tel:\+855 12/)

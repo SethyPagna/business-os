@@ -283,6 +283,17 @@ export function buildPortalContactEntries(input: {
   return { chat, accounts }
 }
 
+/**
+ * Where "Open in Maps" goes: the shop's own Google Maps link when the owner set one, else a plain Maps search for the address, else nothing.
+ * Both are https links the visitor opens themselves.
+ */
+export function portalMapOpenHref(addressLink: unknown, address: unknown): string {
+  const link = String(addressLink ?? '').trim()
+  if (link) return link
+  const text = String(address ?? '').trim()
+  return text ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(text)}` : ''
+}
+
 /** The accounts a screen has not already shown as chat rows: the same account never appears twice on one screen. */
 export function portalAccountsNotShown(accounts: readonly PortalContactEntry[], shown: readonly PortalContactEntry[]): PortalContactEntry[] {
   const taken = new Set(shown.map(entryIdentity))

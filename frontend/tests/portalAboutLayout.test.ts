@@ -1,6 +1,6 @@
 // About page. Owner ask 2 Nov 2026: the cover photo shows in full and nothing leaves empty space. Public-web overhaul (20 Nov,
 // spec section 6): the cover is laid out by its own shape and never letterboxes; the gradient wrapper is gone; details are two
-// compact rows; the map asks consent in one line. The geometry itself is proven in a browser (e2e/storefront-about-layout.spec.ts and the
+// compact rows; the map is live with no consent click. The geometry itself is proven in a browser (e2e/storefront-about-layout.spec.ts and the
 // lane's screenshot run); this pins the structure that makes it true so a later edit cannot quietly bring the bars back.
 //
 // Run: node tests/portalAboutLayout.test.ts
@@ -19,7 +19,6 @@ function between(source: string, start: string, end: string): string {
 }
 
 const tabs = code(read('../src/components/catalog/CatalogSecondaryTabs.tsx'))
-const consent = code(read('../src/components/catalog/legal/PortalEmbedConsent.tsx'))
 const cover = between(tabs, 'function AboutCover(', '\n}\n')
 const about = between(tabs, 'function CatalogAboutSection(', '\nfunction CatalogFaqSection(')
 
@@ -102,37 +101,43 @@ run('the story is its own full-width card, before the details row', () => {
   assert.ok(storyAt > -1 && detailsAt > storyAt, 'story first, so a phone reads it before the contacts')
 })
 
-run('phone and address are compact rows (icon, value, one action icon); no chips, no field-name labels', () => {
-  const row = between(tabs, 'function AboutFactRow(', '\n}\n')
-  assert.match(row, /contactHref\('tel', item\.value\)/, 'the dialer link is rebuilt from the number by the shared rule')
-  assert.match(row, /aria-label=\{actionLabel\}\s+title=\{actionLabel\}/, 'the action icon has a tooltip and an accessible name')
+run('the details card holds the address row, the chat rows and the account rows as tappable rows with real names', () => {
+  const row = between(tabs, 'function AboutAddressRow(', '\n}\n')
+  assert.match(row, /portalMapOpenHref\(item\.href, item\.value\)/, 'the address row opens the shop link, else a maps search')
   assert.match(row, /<span className="sr-only">\{item\.label\}: <\/span>/, 'the field name stays for a screen reader only')
   assert.doesNotMatch(row, /uppercase|tracking-/, 'no tiny upper-case caption')
-  assert.match(about, /item\.key === 'phone' \|\| item\.key === 'address'/, 'only the two rows the spec names')
-  assert.doesNotMatch(about, /socialLinks|PortalSocialText/, 'the social chips left the About page')
+  assert.match(about, /const detailRows = \[\.\.\.contactEntries, \.\.\.portalAccountsNotShown\(accountEntries, contactEntries\)\]/, 'chat rows then account rows, no account twice')
+  assert.match(about, /<PortalContactRows inline entries=\{detailRows\}/)
+  assert.doesNotMatch(about, /PortalSocialText/, 'the social chips left the About page')
 })
 
-run('phone and address sit beside the map on a large screen and stack below it', () => {
+run('the details card is right after the story and before the About blocks', () => {
+  const storyAt = about.indexOf('<OwnerText text={storyText} />')
+  const detailsAt = about.indexOf('data-portal-about-details="true"')
+  const blocksAt = about.indexOf('{aboutBlocks.length ? (')
+  assert.ok(storyAt > -1 && detailsAt > storyAt && blocksAt > detailsAt, 'story, details card, About blocks')
+  assert.equal(about.slice(storyAt, detailsAt).includes('data-portal-about-picture'), false, 'nothing sits between the story and the card')
+})
+
+run('the details card sits beside the map on a large screen and stacks on a phone', () => {
   const details = between(about, 'data-portal-about-details="true"', 'data-portal-contact-tray="true"')
-  assert.match(details, /hasFacts && hasMap \? 'lg:grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)\] lg:items-stretch' : ''/, 'two columns only when both exist; stretched to one height')
-  assert.match(about, /data-portal-map-card="true" className=\{`flex flex-col overflow-hidden rounded-2xl \$\{SURFACE\}`\}/, 'the map card stretches with its row')
+  assert.match(details, /hasFacts && hasMap \? 'lg:grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)\] lg:items-start' : ''/, 'two columns only when both exist')
+  assert.match(about, /data-portal-map-card="true" className=\{`flex flex-col overflow-hidden rounded-2xl \$\{SURFACE\}`\}/)
 })
 
-run('the map keeps its consent gate, in one line, and fills the card it is given', () => {
-  assert.match(about, /<PortalEmbedConsent[\s\S]*?className="flex-1"[\s\S]*?src=\{mapEmbedUrl \|\| ''\}/)
-  assert.match(consent, /className = ''/)
-  assert.match(consent, /items-center/, 'the not-yet-loaded line is centred in the card')
-  assert.match(consent, /useEffect\(\(\) => \{ setGranted\(readStoredChoice\(\)\) \}, \[\]\)/, 'consent is still read after mount, default not granted')
-  assert.match(consent, /if \(granted\) \{[\s\S]*?<iframe/, 'the iframe renders only once granted')
-  assert.match(consent, /copy\('mapConsentLine', 'Google Maps sets its own cookies\.', 'Google Maps កំណត់ខូឃីរបស់ខ្លួន។'\)/, 'one line')
-  assert.match(consent, /copy\('mapLoad', 'Load map', 'ផ្ទុកផែនទី'\)/, 'the main action is icon plus one word')
-  assert.doesNotMatch(consent, /MAP_CONSENT_(?:BODY|LOAD|LINK)_/, 'the long body, the long button and the text link are gone')
-  assert.doesNotMatch(consent, /<p className="max-w-prose/, 'no paragraph')
+run('the map is live with no consent click: 16:9 wide, 4:3 on a phone, lazy, safe referrer, one Open in Maps button', () => {
+  assert.doesNotMatch(tabs, /PortalEmbedConsent|mapFallbackHref|useEffect\(\(\) => \{ setGranted/, 'no click-to-load gate is used by About')
+  assert.match(about, /<div className="aspect-\[4\/3\] w-full[^"]*sm:aspect-video[^"]*">\s*<iframe\s+src=\{mapEmbedUrl \|\| ''\}/, '4:3 on a phone, 16:9 from sm, the iframe fills it')
+  assert.match(about, /loading="lazy"\s+referrerPolicy="no-referrer-when-downgrade"/)
+  assert.match(about, /title=\{copy\('portal_a11y_map_title'/, 'the title is kept')
+  assert.match(about, /copy\('openInMaps', 'Open in Maps', 'បើកក្នុងផែនទី'\)/, 'one button, icon and the words Open in Maps')
+  assert.match(about, /portalMapOpenHref\(addressFact\?\.href, addressText\)/, 'to the shop link, else a maps search for the address')
+  assert.doesNotMatch(about, /sandbox=|<PortalEmbed/, 'control: nothing gates the iframe')
 })
 
 run('every surface on the About page is solid: no opacity suffix, no blur, no transparent fill, in light or dark', () => {
   const solid = /(?:\b(?:dark:)?(?:hover:)?(?:bg|border|ring|from|via|to|divide|shadow)-[\w[\]#.,()-]+\/\d+|backdrop-blur[\w-]*|bg-transparent|\bopacity-\d+)/g
-  assert.deepEqual([between(tabs, 'const BRASS_TEXT', 'function FaqSkeleton('), consent].flatMap((part) => part.match(solid) || []), [])
+  assert.deepEqual([between(tabs, 'const BRASS_TEXT', 'function FaqSkeleton(')].flatMap((part) => part.match(solid) || []), [])
 })
 
 if (failed) {
