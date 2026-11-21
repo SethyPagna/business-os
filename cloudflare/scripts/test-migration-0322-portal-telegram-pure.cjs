@@ -159,7 +159,7 @@ function assertTelegramIdShape(raw) {
   fails(() => insertMember(raw, { telegram_user_id: 9007199254740991n }), /CHECK/)
   insertMember(raw, { telegram_user_id: 1 })
   insertMember(raw, { telegram_user_id: TG_MAX })
-  for (const bad of ['2026-11-21 01:02:03', '2026-11-21T01:02:03Z', '2026-11-21T01:02:03.456+0', '2026-11-21T01:02:03.456X']) {
+  for (const bad of ['2026-11-21 01:02:03', '2026-11-21T01:02:03Z', '2026-11-21T01:02:03.456+0', '2026-11-21T01:02:03.456X', '2026-11-21 01:02:03.456Z', '2026/11/21T01:02:03.456Z']) {
     fails(() => insertMember(raw, { telegram_user_id: 99, telegram_verified_at: bad }), /CHECK/, `refused: ${bad}`)
   }
   insertMember(raw, { telegram_user_id: 99, telegram_verified_at: T })
@@ -172,6 +172,10 @@ check('T-B3 Telegram id 0, -1, 2^52, a fraction and non-numeric text are refused
   assert.throws(() => assertTelegramIdShape(noLower), 'without the lower bound 0 is accepted')
   const noTime = applied(mutate("AND substr(telegram_verified_at, 24, 1) = 'Z'", ''))
   assert.throws(() => assertTelegramIdShape(noTime), 'without the Z check a 24-character text passes')
+  const noDash = applied(mutate("AND substr(telegram_verified_at, 5, 1) = '-'", ''))
+  assert.throws(() => assertTelegramIdShape(noDash), 'without the dash check a 24-character text with / at 5 passes')
+  const noT = applied(mutate("AND substr(telegram_verified_at, 11, 1) = 'T'", ''))
+  assert.throws(() => assertTelegramIdShape(noT), 'without the T check a 24-character text with a space at 11 passes')
 })
 
 check('T-B3 note: the digits-only text 5 is coerced to the integer 5 by the INTEGER column (affinity), and then passes; the design said refused', () => {
@@ -223,6 +227,7 @@ check('the trigger fires once (no recursion even with recursive_triggers on)', (
 })
 
 // ------------------------------------------------------------------------------------------------ T-B5
+const PENDING_TIME_COLUMNS = ['window_started_at', 'created_at', 'expires_at']
 function assertPendingTable(raw) {
   assert.ok(!/WITHOUT ROWID/i.test(raw.prepare("SELECT sql FROM sqlite_master WHERE name = 'portal_telegram_pending'").get().sql))
   insertPending(raw, { id: 11 })
@@ -236,6 +241,8 @@ function assertPendingTable(raw) {
   fails(() => insertPending(raw, { id: 17, window_started_at: '2026-11-21 01:02:03' }), /CHECK/, '19-character time')
   fails(() => insertPending(raw, { id: 18, expires_at: '2026-11-21 01:02:03' }), /CHECK/, '19-character expiry')
   fails(() => insertPending(raw, { id: 19, attempts: 0 }), /CHECK/, 'attempts 0')
+  for (const col of PENDING_TIME_COLUMNS) fails(() => insertPending(raw, { id: 20, [col]: '2026-11-21 01:02:03.456Z' }), /CHECK/, `${col}: 24 characters with a space at 11`)
+  fails(() => insertPending(raw, { id: 21, flags: 5.5 }), /CHECK/, 'flags 5.5 stays a real and typeof refuses it')
   fails(() => insertPending(raw, { id: 0 }), /CHECK/, 'id 0')
   fails(() => insertPending(raw, { id: TG_MAX + 1 }), /CHECK/, 'id 2^52')
   fails(() => insertPending(raw, { id: 11 }), /UNIQUE|PRIMARY/, 'one row per Telegram user')
@@ -250,6 +257,19 @@ check('T-B5 pending: rowid table without a sequence row; flags 0 to 65535; ticke
   assert.throws(() => assertPendingTable(autoinc), 'AUTOINCREMENT writes a sequence row')
   const noPrefix = applied(mutate("AND substr(ticket_hash, 1, 4) = 'tg1:'", ''))
   assert.throws(() => assertPendingTable(noPrefix), 'without the prefix check any 68 characters pass')
+  for (const col of PENDING_TIME_COLUMNS) {
+    const noT = applied(mutate(`substr(${col}, 11, 1) = 'T'`, '1 = 1'))
+    assert.throws(() => assertPendingTable(noT), `without the T check on ${col} a space at 11 passes`)
+  }
+  const noType = applied(mutate("CHECK (typeof(flags) = 'integer' AND flags BETWEEN", 'CHECK (flags BETWEEN'))
+  assert.throws(() => assertPendingTable(noType), 'without typeof(flags) the real 5.5 passes the range')
+})
+
+check('T-B5 note: flags given as the text 5 is coerced to the integer 5 by the INTEGER column (affinity) and passes; 5.5 stays a real and typeof refuses it', () => {
+  const raw = real()
+  insertPending(raw, { id: 30, flags: '5' })
+  assert.deepEqual({ ...raw.prepare('SELECT typeof(flags) AS t, flags AS v FROM portal_telegram_pending WHERE id = 30').get() }, { t: 'integer', v: 5 })
+  fails(() => insertPending(raw, { id: 31, flags: 'x5' }), /CHECK/, 'non-numeric text stays text and typeof refuses it')
 })
 
 // ------------------------------------------------------------------------------------------------ T-B6
