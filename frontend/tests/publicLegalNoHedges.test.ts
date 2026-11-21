@@ -19,6 +19,8 @@ const MAP_CONSENT_LINE_KM = /copy\('mapConsentLine', '[^']*', '([^']*)'/.exec(em
 
 const EN_HEDGE = /\b(?:may|might|perhaps|possibly|approximately|roughly|generally|around \d)\b|\babout (?:an? (?:hour|day|week|month|year)|one|two|thirty|ninety|\d+)\b/i
 const KM_HEDGE = /ប្រហែល/
+// Khmer "may also" (retired: ក៏អាចសរសេរវាដែរ). A bare អាច is plain "can" in about ten strings, so only the can-also shape is banned.
+const KM_CAN_ALSO = /អាច[^។]*ដែរ/
 
 const rendered = new Set<string>(['portal_legal_footer_content_concerns'])
 for (const sections of Object.values(LEGAL_PAGE_SECTIONS)) for (const section of sections) { rendered.add(section.heading); for (const body of section.bodies) rendered.add(body) }
@@ -28,7 +30,7 @@ function scan(en: Record<string, string>, km: Record<string, string>): string[] 
   const found: string[] = []
   for (const key of rendered) {
     if (EN_HEDGE.test(en[key] || '')) found.push(`en ${key}: ${en[key]}`)
-    if (KM_HEDGE.test(km[key] || '')) found.push(`km ${key}: ${km[key]}`)
+    if (KM_HEDGE.test(km[key] || '') || KM_CAN_ALSO.test(km[key] || '')) found.push(`km ${key}: ${km[key]}`)
   }
   return found
 }
@@ -45,6 +47,9 @@ check('no rendered policy string hedges, in English or Khmer', () => {
   assert.doesNotMatch(MAP_CONSENT_LINE_EN, EN_HEDGE)
   assert.match(MAP_CONSENT_LINE_KM, /[ក-៿]/, 'real Khmer')
   assert.doesNotMatch(MAP_CONSENT_LINE_KM, /អាចកំណត់/)
+  assert.doesNotMatch(MAP_CONSENT_LINE_KM, KM_HEDGE)
+  assert.doesNotMatch(MAP_CONSENT_LINE_KM, KM_CAN_ALSO)
+  assert.match('Google Maps ក៏អាចកំណត់ខូឃីដែរ។', KM_CAN_ALSO, 'control: the map-line check would catch a can-also hedge')
 })
 
 check('privacy keeps its substance: no billing data, never share bank details (EN + KM)', () => {
@@ -59,8 +64,18 @@ check('control: the retired 30 Sep wording fails the same scan', () => {
   const retiredEn = { ...PORTAL_LEGAL_EN,
     portal_legal_terms_account_b: 'tell us if someone else may be using your account. We may pause an account that is misused.',
     portal_legal_privacy_retention_b: 'Security records are removed after about a day.' }
-  const retiredKm = { ...PORTAL_LEGAL_KM, portal_legal_store_session_l: 'រហូតដល់ប្រហែល ១៣ ខែ។' }
-  assert.equal(scan(retiredEn, retiredKm).length, 3)
+  const retiredKm = { ...PORTAL_LEGAL_KM, portal_legal_store_session_l: 'រហូតដល់ប្រហែល ១៣ ខែ។',
+    portal_legal_cookies_third_b: 'ស្គ្រីបរបស់ Google ក៏អាចសរសេរវាដែរ។' }
+  assert.ok(rendered.has('portal_legal_store_session_l') && rendered.has('portal_legal_cookies_third_b'), 'the retired strings sit on rendered keys')
+  assert.equal(scan(retiredEn, retiredKm).length, 4)
+})
+
+check('control: a plain Khmer "you can" sentence is not a hedge', () => {
+  const plain = PORTAL_LEGAL_KM.portal_legal_privacy_rights_b
+  assert.match(plain, /អ្នកអាច/, 'the real string says "you can"')
+  assert.doesNotMatch(plain, KM_CAN_ALSO)
+  assert.doesNotMatch(plain, KM_HEDGE)
+  assert.equal(scan(PORTAL_LEGAL_EN, { ...PORTAL_LEGAL_KM, portal_legal_cookies_third_b: plain }).length, 0, 'the scan must not ban every អាច')
 })
 
 console.log(`\n${passed} passed${process.exitCode ? ', FAILURES above' : ''}`)
