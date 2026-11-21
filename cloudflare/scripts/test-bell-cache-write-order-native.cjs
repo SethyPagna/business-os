@@ -89,8 +89,10 @@ async function main() {
 
     const lifetimeMs = Number(first.json.sectionLifetimeSeconds) * 1000
     check('3. control: the lifetime is reported', lifetimeMs > 0, first.json.sectionLifetimeSeconds)
-    world.clockMs = Date.now() + lifetimeMs + 5000
+    const laterAt = Date.now() + lifetimeMs + 5000
+    world.clockMs = laterAt
     const later = await read()
+    world.clockMs = laterAt + 1000
     const replaced = await read()
     world.clockMs = null
     check('3. control: a miss that started later does replace it (the same read, a moment on, serves the new entry)', stamp(later) > g2 && replaced.json.generatedAt === later.json.generatedAt, [g2, later.json.generatedAt, replaced.json.generatedAt])
