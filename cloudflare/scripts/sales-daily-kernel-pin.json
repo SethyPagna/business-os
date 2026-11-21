@@ -1,6 +1,6 @@
 {
- "version": 4,
- "aggregate": "2399ccc3a193ea8cf9c9",
+ "version": 5,
+ "aggregate": "8624d772d0f89952f034",
  "history": [
   {
    "version": 1,
@@ -17,6 +17,10 @@
   {
    "version": 4,
    "aggregate": "2399ccc3a193ea8cf9c9"
+  },
+  {
+   "version": 5,
+   "aggregate": "8624d772d0f89952f034"
   }
  ],
  "files": {
@@ -148,8 +152,10 @@
   "src/lib/planTier.ts": {
    "imports": "cfc19ad7ce0a9947195b",
    "decls": {
-    "const PAID_LIMITS": "87903c34376e9d7910b0",
-    "const FREE_LIMITS": "567429450349180d354c",
+    "const PAID_LIMITS": "bfbf856bca1e819230df",
+    "const PAID_LIMITS.readSwitchMemoSeconds": "64de7b5948ec616b1cfa",
+    "const FREE_LIMITS": "332bc33f92a77920c487",
+    "const FREE_LIMITS.readSwitchMemoSeconds": "3c41496ccef0ad7c1f03",
     "const PLAN_LIMITS_BY_TIER": "57ef4f47a0b3f78fa6b5",
     "const cachedTier": "613785f4b27076d31cf4",
     "function resolvePlanTier": "bbec11cf79e71df458fe",
