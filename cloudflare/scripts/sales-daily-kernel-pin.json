@@ -1,6 +1,6 @@
 {
- "version": 6,
- "aggregate": "cda86a72797044a9dd46",
+ "version": 7,
+ "aggregate": "8618a56c3a1817692182",
  "history": [
   {
    "version": 1,
@@ -25,6 +25,10 @@
   {
    "version": 6,
    "aggregate": "cda86a72797044a9dd46"
+  },
+  {
+   "version": 7,
+   "aggregate": "8618a56c3a1817692182"
   }
  ],
  "files": {
@@ -210,7 +214,9 @@
     "const DATA_EPOCH_KEY": "60f86231a87982bcd37c",
     "const SWITCH_ROWS_SQL": "b0ea261f9d75efe95cd7",
     "const SWITCH_ROWS_PARAMS": "a4b24a47963dd78afa1a",
-    "const KNOWN_READ_SWITCHES": "36aa9ba64a091946cff9",
+    "const KNOWN_READ_SWITCHES": "8b6e867763c1f0bf99ec",
+    "const KNOWN_READ_SWITCHES.report_atomic": "6224c58a79d2726a29b9",
+    "const KNOWN_READ_SWITCHES.report_atomic_long": "6ec4051e94dc79b28660",
     "const readSwitchMemoMs": "70f761d778b80e80bcc0",
     "const READ_SWITCH_SHADOW_MAX_RATE": "87e382cd4dde2d8eb187",
     "const SWITCH_HEADER": "606e68d82f328a520997",

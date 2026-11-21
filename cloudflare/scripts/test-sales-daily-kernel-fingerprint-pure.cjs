@@ -2,10 +2,11 @@
 // The stored daily totals are only worth keeping if they are computed by EXACTLY the money kernel the live screens run: the same SQL text and the same JS.
 // Design 7.6. Two sides, each with a mutant that must turn this test red.
 //
-// LIVE SIDE (K1-K11): src/lib/salesAnalytics.ts and every module it imports at run time (minus db.ts) are fingerprinted statement by statement and tied to
+// LIVE SIDE (K1-K17): src/lib/salesAnalytics.ts and every module it imports at run time (minus db.ts) are fingerprinted statement by statement and tied to
 // SALES_DAILY_KERNEL_VERSION through scripts/sales-daily-kernel-pin.json. Any change to a kernel statement (one character of a SQL template included)
 // fails until the version is bumped and the pin rewritten (--write-pin refuses to do that under the same version). Comment, whitespace and CRLF edits do not.
 // The two plan-limit tables are hashed per key the kernel reads (K5-K11): the keys are derived by a scan that refuses every use of a limit table it does not recognise.
+// The switch list of readSwitches.ts (KNOWN_READ_SWITCHES) is hashed the same way (K13-K17): its shape plus one entry per switch the kernel reads, so a lane that adds a read switch does not move the fingerprint.
 // CRON SIDE (C1-C5): the cron, its seam and the totals module hold no second copy of the kernel: they read no kernel table, copy no kernel SQL text and no
 // kernel statement, and reach salesAnalytics only through the seam (lib/salesDailyKernel.ts). The only way a payload is produced is kernel.computeDays, and
 // what the kernel returns is what is stored, byte for byte (D1, D2).
@@ -374,7 +375,7 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
   })
 
   // The aggregate of every kernel version, the one in force included, held here as literals: the pin file alone could be edited and re-pinned in one go. Each version bump appends one line here.
-  const PINNED = { 1: 'e0fc6748b9692bad96e1', 2: '79ef55bb36a7d1f69a8a', 3: 'cca31e5c5ff7babd1346', 4: '2399ccc3a193ea8cf9c9', 5: '8624d772d0f89952f034', 6: 'cda86a72797044a9dd46' }
+  const PINNED = { 1: 'e0fc6748b9692bad96e1', 2: '79ef55bb36a7d1f69a8a', 3: 'cca31e5c5ff7babd1346', 4: '2399ccc3a193ea8cf9c9', 5: '8624d772d0f89952f034', 6: 'cda86a72797044a9dd46', 7: '8618a56c3a1817692182' }
   /** Everything wrong with a pin: a gap or no history, a history that does not end at the version in force, an entry or the pinned aggregate that differs from the literal map. */
   const historyProblems = (pin, version, pinned) => {
     const gap = F.historyGap(pin.history)
@@ -451,6 +452,130 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
     assert.deepEqual([clean.keys, clean.refusals], [[], []], 'positive control: the real deepFreeze form of planTier is accepted as it is')
     const exported = liveProblems(planWith((t) => t.replace('const PAID_LIMITS:', 'export const PAID_LIMITS:')))
     assert.ok(exported.includes(`${PLAN}: const PAID_LIMITS CHANGED`), exported.join('\n'))
+  })
+
+  // ---------- read-switch list (K13-K17): the list is hashed as its shape plus one entry per switch the kernel reads ----------
+  const RS = 'src/lib/readSwitches.ts'
+  const RAS = 'src/lib/reportAtomicSwitch.ts'
+  const SW = 'KNOWN_READ_SWITCHES'
+  const swEntry = (n) => `const ${SW}.${n}`
+  const withMany = (...pairs) => new Map(pairs.map(([rel, edit]) => { const before = read(rel); const after = edit(before); assert.notEqual(after, before, `the mutation of ${rel} must change the file`); return [rel, after] }))
+  const swProblems = (overrides) => liveProblems(overrides)
+  const refusalLines = (overrides, file) => F.fingerprint(overrides).refusals.filter((l) => l.startsWith(`${file}:`) && /^[^:]+:\d+: refused: /.test(l))
+  const listEdit = (edit) => (t) => t.replace(/export const KNOWN_READ_SWITCHES = \[[^\]]*\] as const/, edit)
+
+  await check('K13 the purpose: a read switch the kernel does not read can be added, removed, reordered or renamed in the list without moving the fingerprint (ic_marks appended is the case that forced a bump)', () => {
+    const base = F.fingerprint().aggregate
+    const extra = read(RS).includes("'ic_marks'") ? 'ic_marks_probe' : 'ic_marks'
+    const appended = withText(RS, listEdit((s) => s.replace('] as const', `, '${extra}'] as const`)))
+    assert.ok(appended.get(RS).includes(`, '${extra}'] as const`), `${extra} is appended to the real list`)
+    assert.deepEqual(swProblems(appended), [], 'ic_marks appended')
+    assert.equal(F.fingerprint(appended).aggregate, base)
+    const dropped = withText(RS, listEdit((s) => s.replace("'probe', ", '')))
+    assert.deepEqual(swProblems(dropped), [], 'an unread switch removed')
+    const reordered = withText(RS, listEdit((s) => s.replace("'probe', 'report_atomic', 'report_atomic_long'", "'report_atomic_long', 'probe', 'report_atomic'")))
+    assert.deepEqual(swProblems(reordered), [], 'the order is not hashed')
+    const renamed = withText(RS, listEdit((s) => s.replace("'probe'", "'probe_renamed'")))
+    assert.deepEqual(swProblems(renamed), [], 'an unread switch renamed')
+    const comment = withText(RS, (t) => t.replace("export const KNOWN_READ_SWITCHES = [", "export const KNOWN_READ_SWITCHES = [ // c\n  "))
+    assert.deepEqual(swProblems(comment), [], 'whitespace and comments inside the list')
+    console.log('  K13 green: ic_marks appended, an unread switch removed, reordered, renamed')
+  })
+
+  await check('K14 MUTANT (membership): a kernel-read switch removed from the list, or renamed, is red with its entry REMOVED (and the read named as missing); the other statements of readSwitches.ts stay hashed whole', () => {
+    assert.ok(F.fingerprint().switchNames.length >= 1, 'no vacuous loop')
+    for (const name of F.fingerprint().switchNames) {
+      const gone = withText(RS, listEdit((s) => s.replace(new RegExp(`'${name}', ?|, '${name}'`), '')))
+      const p = swProblems(gone)
+      assert.ok(p.includes(`${RS}: ${swEntry(name)} REMOVED`), p.join('\n'))
+      assert.ok(p.some((l) => new RegExp(`^${RS}:\\d+: refused: the kernel reads switch ${name}, which is not in ${SW}$`).test(l)), p.join('\n'))
+      const renamed = withText(RS, listEdit((s) => s.replace(`'${name}'`, `'${name}_x'`)))
+      const q = swProblems(renamed)
+      assert.ok(q.includes(`${RS}: ${swEntry(name)} REMOVED`), q.join('\n'))
+    }
+    const other = withText(RS, (t) => t.replace("export const READ_SWITCH_SHADOW_MAX_RATE = 0.1", "export const READ_SWITCH_SHADOW_MAX_RATE = 0.2"))
+    assert.ok(swProblems(other).includes(`${RS}: const READ_SWITCH_SHADOW_MAX_RATE CHANGED`), 'every other statement is hashed whole')
+    const elsewhere = withText(RS, (t) => t.replace("export const DATA_EPOCH_KEY = 'data_epoch'", "export const DATA_EPOCH_KEY = 'data_epoch2'"))
+    assert.ok(swProblems(elsewhere).includes(`${RS}: const DATA_EPOCH_KEY CHANGED`))
+    console.log('  K14 red: each kernel-read switch removed, each renamed, another statement changed')
+  })
+
+  await check('K15 MUTANT (shape): as const removed, export removed, const turned into let, the list turned into a non-array, an element that is not a string literal -> red', () => {
+    const cases = [
+      ['as const removed', (t) => t.replace(/(export const KNOWN_READ_SWITCHES = \[[^\]]*\]) as const/, '$1')],
+      ['export removed', (t) => t.replace('export const KNOWN_READ_SWITCHES', 'const KNOWN_READ_SWITCHES')],
+      ['const to let', (t) => t.replace('export const KNOWN_READ_SWITCHES', 'export let KNOWN_READ_SWITCHES')],
+      ['a type annotation added', (t) => t.replace('export const KNOWN_READ_SWITCHES =', 'export const KNOWN_READ_SWITCHES: readonly string[] =')],
+    ]
+    for (const [label, edit] of cases) {
+      const p = swProblems(withText(RS, edit))
+      assert.ok(p.includes(`${RS}: ${'const'} ${SW} CHANGED`), `${label}: ${p.join('\n')}`)
+    }
+    const spread = swProblems(withText(RS, listEdit((s) => s.replace("'probe'", '...OTHER')))).filter((l) => /refused: KNOWN_READ_SWITCHES holds an element that is not a string literal/.test(l))
+    assert.equal(spread.length, 1, 'a spread element is refused')
+    const notArray = swProblems(withText(RS, listEdit(() => "export const KNOWN_READ_SWITCHES = Object.freeze(['report_atomic']) as const"))).filter((l) => /refused: KNOWN_READ_SWITCHES is not a single declaration initialised by an array literal/.test(l))
+    assert.equal(notArray.length, 1)
+    console.log('  K15 red: as const removed, export removed, let, annotation, spread element, non-array')
+  })
+
+  const nameOf = (over) => F.fingerprint(over).switchNames
+  const refuses = (label, over, file, reason) => {
+    const fp = F.fingerprint(over)
+    assert.ok(fp.refusals.some((l) => l.startsWith(`${file}:`) && reason.test(l)), `${label}: expected ${reason} in ${file}, got ${JSON.stringify(fp.refusals)}`)
+    const written = F.pinWrite(F.readPin(), fp, F.currentVersion(new Map()) + 1)
+    assert.ok(written.refused && written.pin === null, `${label}: a refusal is never pinned`)
+  }
+
+  await check('K16 MUTANT (refusals): a template, a concatenation, a property, a spread, a parameter from outside, a local, an alias, a namespace import, a re-export, a dynamic import, a plain-string union, a default outside the union, an assertion to the union, a non-null call argument and any use of KNOWN_READ_SWITCHES in another closure file are refusals naming file and line', () => {
+    const call = 'const reading = await readSwitchState(env, name)'
+    const callEdit = (replacement) => withText(RAS, (t) => t.replace(call, replacement))
+    refuses('template', callEdit('const reading = await readSwitchState(env, `report_${name}`)'), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: switch name is a template literal/)
+    refuses('no-substitution template', callEdit('const reading = await readSwitchState(env, `report_atomic`)'), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: switch name is a template literal/)
+    refuses('concatenation', callEdit("const reading = await readSwitchState(env, 'report_' + name)"), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: switch name is BinaryExpression/)
+    refuses('property access', callEdit('const reading = await readSwitchState(env, env.DB_NAME)'), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: switch name env\.DB_NAME is not a property declared/)
+    refuses('spread', callEdit('const reading = await readSwitchState(env, ...[name])'), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: switch name is SpreadElement/)
+    refuses('call expression', callEdit('const reading = await readSwitchState(env, String(name))'), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: switch name is CallExpression/)
+    refuses('missing argument', callEdit('const reading = await readSwitchState(env)'), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: readSwitchState called without its switch name argument/)
+    refuses('a parameter passed in from outside', withText(RAS, (t) => `${t}\nexport async function readOutside(env: Env, outside: string) { return readSwitchState(env, outside) }\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: switch name parameter outside is not typed as a same-file alias/)
+    refuses('a local', withText(RAS, (t) => `${t}\nexport async function readLocal(env: Env) { const local = 'report_atomic'; return readSwitchState(env, local) }\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: switch name local is a local/)
+    refuses('an unbound identifier', withText(RAS, (t) => `${t}\nexport async function readFree(env: Env) { return readSwitchState(env, someGlobal) }\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: switch name someGlobal is not a top-level const/)
+    refuses('a top-level let', withText(RAS, (t) => `${t}\nlet mutableName = 'report_atomic'\nexport async function readLet(env: Env) { return readSwitchState(env, mutableName) }\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: switch name mutableName is not a top-level const/)
+    refuses('an aliased import', withMany([RAS, (t) => t.replace("import { readSwitchState } from './readSwitches'", "import { readSwitchState as rss } from './readSwitches'").replace(call, 'const reading = await rss(env, name)')]), RAS, /^src\/lib\/reportAtomicSwitch\.ts:3: refused: aliased import readSwitchState/)
+    refuses('a call through a local alias', callEdit('const via = readSwitchState; const reading = await via(env, name)'), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: readSwitchState used other than called directly/)
+    refuses('a namespace import', withMany([RAS, (t) => t.replace("import { readSwitchState } from './readSwitches'", "import * as RSW from './readSwitches'\nimport { readSwitchState } from './readSwitches'")]), RAS, /^src\/lib\/reportAtomicSwitch\.ts:3: refused: default or namespace import of readSwitches/)
+    refuses('a re-export', withText(RAS, (t) => `${t}\nexport { readSwitch } from './readSwitches'\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: re-exports readSwitches/)
+    refuses('a dynamic import', withText(RAS, (t) => `${t}\nexport const lazy = () => import('./readSwitches')\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: dynamic import of readSwitches/)
+    refuses('a union member typed as plain string', withText(RAS, (t) => t.replace('typeof REPORT_ATOMIC_SWITCH | typeof REPORT_ATOMIC_LONG_SWITCH', 'typeof REPORT_ATOMIC_SWITCH | string')), RAS, /^src\/lib\/reportAtomicSwitch\.ts:23: refused: switch name parameter name is not typed as a same-file alias/)
+    refuses('a default outside the union', withMany([RAS, (t) => t.replace("name: ReportAtomicSwitchName = REPORT_ATOMIC_SWITCH", "name: ReportAtomicSwitchName = OTHER_SWITCH").replace("export type ReportAtomicSwitchName", "const OTHER_SWITCH = 'probe'\nexport type ReportAtomicSwitchName")]), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: the default of switch name parameter name is not one of the union's consts/)
+    refuses('ic_marks asserted to the union', withText(RAS, (t) => `${t}\nexport const marks = (env: Env) => reportAtomicMode(env, 'ic_marks' as ReportAtomicSwitchName)\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: type assertion to a switch-name union/)
+    refuses('ic_marks passed to the typed function', withText(RAS, (t) => `${t}\nexport const marks = (env: Env) => reportAtomicMode(env, 'ic_marks')\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: call of reportAtomicMode passes a switch outside its union/)
+    refuses('a non-null argument to the typed function', withText(RAS, (t) => `${t}\nexport const nn = (env: Env, v?: ReportAtomicSwitchName) => reportAtomicMode(env, v!)\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: call of reportAtomicMode: switch name is NonNullExpression/)
+    refuses('a parameter passed to the typed function', withText(RAS, (t) => `${t}\nexport const pp = (env: Env, v: ReportAtomicSwitchName) => reportAtomicMode(env, v)\n`), RAS, /^src\/lib\/reportAtomicSwitch\.ts:\d+: refused: call of reportAtomicMode: switch name v is a parameter/)
+    refuses('another closure file iterating the list', withMany(['src/lib/analytics.ts', (t) => `import { KNOWN_READ_SWITCHES } from './readSwitches'\n${t}\nexport const everySwitch = () => KNOWN_READ_SWITCHES.map((n) => n)\n`]), 'src/lib/analytics.ts', /^src\/lib\/analytics\.ts:\d+: refused: uses KNOWN_READ_SWITCHES/)
+    refuses('the entry file using the list', withText(F.ENTRY, (t) => `${t}\nexport const listed = (globalThis as any).KNOWN_READ_SWITCHES\n`), F.ENTRY, /refused: uses KNOWN_READ_SWITCHES/)
+    assert.ok(swProblems(callEdit('const reading = await readSwitchState(env, `report_${name}`)')).some((l) => /refused: switch name is a template literal/.test(l)), 'the live test is red on a refusal')
+    console.log('  K16 red: every refusal above names its file and line')
+  })
+
+  await check('K17 derivation on the real tree and the positive control: the scan finds the switches the kernel reads (report_atomic and report_atomic_long, through reportAtomicMode), nothing is refused, readSwitches.ts is accepted as it is, and the pin holds one entry per derived name', () => {
+    const fp = F.fingerprint()
+    assert.deepEqual(fp.refusals, [])
+    assert.deepEqual(fp.switchTakers, { isKnownReadSwitch: 0, serializeReadSwitches: 1, readSwitchState: 1, readSwitch: 1 }, 'the functions of readSwitches.ts that take a switch name, found by the scan')
+    assert.deepEqual(fp.switchNames, ['report_atomic', 'report_atomic_long'])
+    const where = [...new Set(fp.switchReads.map((r) => `${r.name} @ ${r.at}: ${r.line}`))].sort()
+    console.log(`  K17 derived: ${where.join(' | ')}`)
+    assert.ok(fp.switchReads.length >= 1 && fp.switchReads.every((r) => r.file !== RS), 'no vacuous scan, and readSwitches.ts is not scanned')
+    assert.ok(fp.switchReads.some((r) => r.name === 'report_atomic' && r.at === `${RAS}:23`), 'positive control')
+    const names = Object.keys(F.readPin().files[RS].decls).filter((n) => n.startsWith(`${swEntry('')}`)).sort()
+    assert.deepEqual(names, fp.switchNames.map(swEntry), 'one pin entry per derived name')
+    assert.ok(!Object.keys(F.readPin().files[RS].decls).includes(swEntry('ic_marks')), 'a switch the kernel does not read is not hashed')
+    const scanOne = F.switchReads(read(RAS), RAS, new Map(Object.entries(fp.switchTakers)))
+    assert.deepEqual(scanOne.refusals, [])
+    const fixture = F.switchReads("import { readSwitchState } from './readSwitches'\nconst S = 'a_switch'\nexport const f = (env: any) => [readSwitchState(env, 'lit'), readSwitchState(env, S)]\n", 'src/lib/fx.ts', new Map([['readSwitchState', 1]]))
+    assert.deepEqual([fixture.names.map((n) => n.name), fixture.refusals], [['lit', 'a_switch'], []], 'a literal and a top-level const are accepted')
+    const own = F.fileHashes(read(RS), RS, fp.limitKeys, fp.switchNames)
+    assert.ok(own.decls[swEntry('report_atomic')] && own.decls[`const ${SW}`], 'the real readSwitches.ts hashes with no refusal')
+    console.log('  K17 control: the real readSwitches.ts and reportAtomicSwitch.ts are accepted')
   })
 
   await check('C1 the cron side is clean on the real tree: no kernel table, no copied kernel text, no shadowed kernel statement, kernel reached through the seam only', () => {
