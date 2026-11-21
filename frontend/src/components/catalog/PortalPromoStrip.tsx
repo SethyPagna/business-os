@@ -198,7 +198,7 @@ export default function PortalPromoStrip({
             <button
               key={item.key}
               type="button"
-              aria-label={`${copy('promoStripJump', 'Jump to promotion')} ${index + 1}`}
+              aria-label={`${copy('promoStripJump', 'Go to promotion')} ${index + 1}`}
               onClick={() => jumpTo(index)}
               className={`h-3 w-3 leading-none text-base ${index === activeDot ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500 hover:text-slate-700 dark:text-neutral-400 dark:hover:text-neutral-200'}`}
             >

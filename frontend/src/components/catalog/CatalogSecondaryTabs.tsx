@@ -23,12 +23,13 @@ import LazyPortalMenu from '../shared/LazyPortalMenu.tsx'
 import PortalEmbedConsent, { mapFallbackHref } from './legal/PortalEmbedConsent.tsx'
 import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../../utils/aboutCoverLayout.ts'
 import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
-import { SectionShell } from './catalogUi'
+import { SectionShell, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
 import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
+import { defaultConfigText } from './portalLanguagePacks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { contactHref } from '../../utils/socialLinks.ts'
 import { aiConsentGiven, fillAiProviderTemplate, saveAiConsent } from './legal/aiProviderDisclosure.ts'
@@ -246,7 +247,7 @@ function PortalContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenCont
   return (
     <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
       <MessageCircle aria-hidden="true" className="h-4 w-4" />
-      {copy('contactButton', 'Contact', 'ទាក់ទង')}
+      <span translate="no" className="notranslate">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
     </button>
   )
 }
@@ -311,7 +312,7 @@ function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyF
   const href = address ? item.href || mapFallbackHref(item.value || '', '') : contactHref('tel', item.value)
   const actionLabel = address
     ? copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
-    : copy('callUs', 'Call', 'ហៅទូរស័ព្ទ')
+    : copy('callUs', 'Call us', 'ហៅទូរស័ព្ទ')
   return (
     <div className="flex min-h-12 items-center gap-3">
       <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
@@ -609,16 +610,16 @@ export function FaqList(props: {
             autoComplete="off"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            aria-label={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
-            placeholder={copy('faqSearch', 'Search questions', 'ស្វែងរកសំណួរ')}
+            aria-label={copy('faqSearch', 'Search the questions', 'ស្វែងរកសំណួរ')}
+            placeholder={copy('faqSearch', 'Search the questions', 'ស្វែងរកសំណួរ')}
             className={`h-11 w-full rounded-xl pl-10 pr-11 text-sm ${FIELD}`}
           />
           {query ? (
             <button
               type="button"
               className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-stone-600 dark:text-neutral-300"
-              aria-label={copy('clear', 'Clear', 'សម្អាត')}
-              title={copy('clear', 'Clear', 'សម្អាត')}
+              aria-label={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')}
+              title={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')}
               onClick={() => setQuery('')}
             >
               <X aria-hidden="true" className="h-4 w-4" />
@@ -666,8 +667,8 @@ export function FaqList(props: {
         </ul>
       ) : (
         <div className={`flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 text-sm text-stone-700 dark:text-neutral-300 ${SURFACE}`} role="status">
-          <span className="min-w-0 flex-1 leading-7 [overflow-wrap:anywhere]">{copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ').replace('{query}', activeQuery)}</span>
-          <button type="button" className={ICON_BUTTON} aria-label={copy('clear', 'Clear', 'សម្អាត')} title={copy('clear', 'Clear', 'សម្អាត')} onClick={() => setQuery('')}>
+          <span className="min-w-0 flex-1 leading-7 [overflow-wrap:anywhere]">{withTypedTerm(copy('faqNoMatch', 'No question matches "{query}"', 'គ្មានសំណួរត្រូវនឹង "{query}" ទេ'), '{query}', activeQuery)}</span>
+          <button type="button" className={ICON_BUTTON} aria-label={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')} title={copy('clearSearch', 'Reset search', 'សម្អាតការស្វែងរក')} onClick={() => setQuery('')}>
             <X aria-hidden="true" className="h-4 w-4" />
           </button>
         </div>
@@ -858,8 +859,9 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
   const language: AiDisclosureLanguage = copy('aiPolicyLanguage', 'en', 'ខ្មែរ') === 'ខ្មែរ' ? 'km' : 'en'
   const title = previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')
   const tagline = previewConfig.aiIntro || copy('assistantTagline', 'AI suggestions, not medical advice.', 'ការណែនាំពី AI មិនមែនជាយោបល់វេជ្ជសាស្ត្រទេ។')
-  const defaultDisclaimer = copy('aiDisclaimer', 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.')
-  const ownerDisclaimer = String(previewConfig.aiDisclaimer || '').trim()
+  const defaultDisclaimer = copy('aiDisclaimer', 'Written by AI, for reference only. For exact answers, please contact our shop on Instagram or Facebook.')
+  // The editor preview passes the config unlocalized, so a stored copy of an earlier default is mapped here too and never shows as the owner's own note.
+  const ownerDisclaimer = String(defaultConfigText(language, 'aiDisclaimer', previewConfig.aiDisclaimer) || '').trim()
   const infoLabel = copy('assistantInfo', 'About the assistant', 'អំពីជំនួយការ')
   const labelClass = 'block text-sm font-medium leading-6 text-stone-700 dark:text-neutral-200'
   const detailsLabel = copy('assistantAddDetails', 'Add details', 'បន្ថែមព័ត៌មាន')
@@ -868,7 +870,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
   const skinTypes = [
     { value: 'Dry', label: copy('skinDry', 'Dry', 'ស្ងួត') },
     { value: 'Oily', label: copy('skinOily', 'Oily', 'ខ្លាញ់') },
-    { value: 'Combination', label: copy('skinCombination', 'Combination', 'ចម្រុះ') },
+    { value: 'Combination', label: copy('skinCombination', 'Combination skin', 'ស្បែកចម្រុះ') },
     { value: 'Sensitive', label: copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម') },
     { value: 'Normal', label: copy('skinNormal', 'Normal', 'ធម្មតា') },
     { value: 'Acne-prone', label: copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន') },
@@ -1010,14 +1012,15 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
             type="button"
             className={ICON_BUTTON}
             onClick={clearAssistantState}
-            aria-label={copy('assistantReset', 'Clear')}
-            title={copy('assistantReset', 'Clear')}
+            aria-label={copy('assistantReset', 'Clear the question and answer')}
+            title={copy('assistantReset', 'Clear the question and answer')}
           >
             <RotateCcw aria-hidden="true" className="h-4 w-4" />
           </button>
-          <button type="button" className={`${CHARCOAL_BUTTON} ml-auto`} onClick={send} disabled={assistantLoading}>
+          <button type="button" className={`${CHARCOAL_BUTTON} ml-auto whitespace-nowrap`} onClick={send} disabled={assistantLoading}>
             <Send aria-hidden="true" className="h-4 w-4" />
-            {assistantLoading ? copy('assistantLoading', 'Thinking...') : copy('assistantSend', 'Send', 'ផ្ញើ')}
+            {/* Google rewrites text nodes, so a label that changes is remounted (keyed), never updated in place. */}
+            <span key={assistantLoading ? 'wait' : 'send'}>{assistantLoading ? copy('assistantLoading', 'Please wait…') : copy('assistantSend', 'Send', 'ផ្ញើ')}</span>
           </button>
         </div>
       </div>
@@ -1026,8 +1029,8 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
 
       {assistantResponse?.summary ? (
         <div className={`mt-4 rounded-2xl p-4 ${SURFACE}`}>
-          <div className="text-xs font-semibold leading-6 text-stone-600 dark:text-neutral-300">{copy('assistantResults', 'Suggested matches')}</div>
-          <p className="mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300">{assistantResponse.summary}</p>
+          <div className="text-xs font-semibold leading-6 text-stone-600 dark:text-neutral-300">{copy('assistantResults', 'Suggested products')}</div>
+          <p translate="no" className="notranslate mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300">{assistantResponse.summary}</p>
           {/* Backend returns follow_up_questions (snake_case); the camelCase followUpQuestions was
               pre-existing dead UI since askPortalAi returns the raw JSON body with no key remapping.
               Reading either shape fixes that without a wider camelCase pass across the contract. */}
@@ -1036,7 +1039,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
               <div className="text-xs font-semibold leading-6 text-stone-600 dark:text-neutral-300">{copy('assistantFollowUps', 'Helpful follow-up questions')}</div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {(assistantResponse.followUpQuestions || assistantResponse.follow_up_questions || []).map((question) => (
-                  <button key={question} type="button" className={`${CHIP} ${CHIP_IDLE}`} onClick={() => setAssistantQuestion(question)}>
+                  <button key={question} type="button" translate="no" className={`notranslate ${CHIP} ${CHIP_IDLE}`} onClick={() => setAssistantQuestion(question)}>
                     {question}
                   </button>
                 ))}
@@ -1091,12 +1094,13 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                       }}
                     >
                       {added.has(addKey) ? <Check aria-hidden="true" className="h-4 w-4" /> : <Plus aria-hidden="true" className="h-4 w-4" />}
-                      {added.has(addKey) ? copy('inList', 'In list', 'ក្នុងបញ្ជី') : copy('addToList', 'Add', 'បន្ថែម')}
+                      {/* Google rewrites text nodes, so a label that changes is remounted (keyed), never updated in place. */}
+                      <span key={added.has(addKey) ? 'in' : 'add'}>{added.has(addKey) ? copy('inList', 'In list', 'ក្នុងបញ្ជី') : copy('addToList', 'Add', 'បន្ថែម')}</span>
                     </button>
                   ) : null}
                 </div>
-                {item.reason ? <p className="mt-2 text-sm leading-7 text-stone-600 dark:text-neutral-300">{item.reason}</p> : null}
-                {item.fit_summary ? <p className="mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300"><span className="font-semibold text-[#23201b] dark:text-neutral-100">{copy('assistantWhy', 'Why this match')}:</span> {item.fit_summary}</p> : null}
+                {item.reason ? <p translate="no" className="notranslate mt-2 text-sm leading-7 text-stone-600 dark:text-neutral-300">{item.reason}</p> : null}
+                {item.fit_summary ? <p className="mt-1 text-sm leading-7 text-stone-700 dark:text-neutral-300"><span className="font-semibold text-[#23201b] dark:text-neutral-100">{copy('assistantWhy', 'Why recommended')}:</span> <span translate="no" className="notranslate">{item.fit_summary}</span></p> : null}
               </article>
             )
           })}

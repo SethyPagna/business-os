@@ -3,7 +3,8 @@ import type { LucideIcon } from 'lucide-react'
 import { microLabelProps } from './catalogUi'
 import { PRODUCT_ACTIVE_CLASS, PRODUCT_CHIP_CLASS } from './portalProductSurfaces.ts'
 
-export type BrowseOption<T extends string> = { value: T; icon: LucideIcon; label: string; tip: string }
+// noTranslate: the label is not a word (A-Z), so a page translator must leave it as written.
+export type BrowseOption<T extends string> = { value: T; icon: LucideIcon; label: string; tip: string; noTranslate?: boolean }
 
 // One labelled row of a filter menu: the label, then its control. A flat row, not a tile inside the
 // menu's own panel (no nested rounded containers); rows are told apart by the line between them.
@@ -48,7 +49,7 @@ export default function PortalBrowseRow<T extends string>({ label, options, valu
               className={`inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold leading-5 transition-colors ${active ? PRODUCT_ACTIVE_CLASS : PRODUCT_CHIP_CLASS}`}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>{option.label}</span>
+              <span translate={option.noTranslate ? 'no' : undefined} className={option.noTranslate ? 'notranslate' : undefined}>{option.label}</span>
             </button>
           )
         })}

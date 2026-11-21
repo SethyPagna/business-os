@@ -103,7 +103,7 @@ test.describe('storefront pager', () => {
     await seedStorefrontLanguage(context, STOREFRONT_ORIGIN, 'en')
   })
 
-  test('reads [Back] [page / total] [Next], in that order', async ({ page }) => {
+  test('reads [Previous] [page / total] [Next], in that order', async ({ page }) => {
     // CATCHES: the control order regressing back to the admin layout (a
     // "Showing 1-50 of 137" summary on the left, a size selector beside Next)
     // or the per-page chooser coming back -- P10-20 (owner, 2026-09-17: "no
@@ -120,7 +120,7 @@ test.describe('storefront pager', () => {
       const label = node.getAttribute('aria-label')
       return label || node.textContent?.trim() || node.nodeName.toLowerCase()
     }))
-    expect(order, 'pager control order').toEqual(['Back', 'Page', 'Next'])
+    expect(order, 'pager control order').toEqual(['Previous', 'Page', 'Next'])
 
     // No size chooser anywhere in the row; the count beside the page box is the
     // total page count at the store's default size of 50.

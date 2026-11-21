@@ -181,7 +181,7 @@ run('a link wraps the message only when there is one, opens a new tab, and is ne
 
 run('the dismiss control exists only on the live page, is a button with a translated name, and is a 44px target', () => {
   const live = draw({ text: 'Sample', textLanguage: 'en', link: '', version: 'v1' }, { onDismiss: () => {} })
-  assert.match(live, /<button type="button" aria-label="Close announcement" title="Close announcement"[^>]*data-portal-announcement-dismiss="true"[^>]*class="[^"]*h-11 w-11/)
+  assert.match(live, /<button type="button" aria-label="Close the announcement" title="Close the announcement"[^>]*data-portal-announcement-dismiss="true"[^>]*class="[^"]*h-11 w-11/)
   const preview = draw({ text: 'Sample', textLanguage: 'en', link: '', version: 'v1' })
   assert.ok(!preview.includes('<button'), 'the Website Editor preview has no close button')
   assert.match(preview, /role="region" aria-label="Announcement"/)

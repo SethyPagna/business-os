@@ -6,7 +6,7 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 export default function PortalNoPaymentNotice({ copy, className = '' }: { copy: CopyFn; className?: string }) {
   return (
     <p role="note" data-portal-no-payment="true" className={`text-sm leading-relaxed text-stone-600 dark:text-neutral-300 ${className}`.trim()}>
-      {copy('noPaymentLine', 'No online payment. Send us your list to order.', 'មិនមានការទូទាត់អនឡាញទេ។ ផ្ញើបញ្ជីមកយើងដើម្បីបញ្ជាទិញ។')}
+      {copy('noPaymentLine', 'You cannot pay on this website. Send us your list to order.', 'មិនមានការទូទាត់អនឡាញទេ។ ផ្ញើបញ្ជីមកយើងដើម្បីបញ្ជាទិញ។')}
     </p>
   )
 }

@@ -458,7 +458,7 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
 
     const failure = page.locator('[data-portal-load-failed="true"]')
     await expect(failure).toContainText(FAILURE_EN, { timeout: 20_000 })
-    await expect(failure.getByRole('button', { name: 'Retry' })).toBeVisible()
+    await expect(failure.getByRole('button', { name: 'Try again' })).toBeVisible()
     await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
     await expect(failure).toContainText(FAILURE_EN)
     await page.getByRole('navigation', { name: STOREFRONT_EN_LABELS.sectionNavigation }).getByRole('button', { name: 'FAQ' }).click()
@@ -466,7 +466,7 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     expect(await page.locator('#root').innerText()).not.toMatch(RAW_FAILURE_TEXT)
 
     await page.unrouteAll({ behavior: 'wait' })
-    await failure.getByRole('button', { name: 'Retry' }).click()
+    await failure.getByRole('button', { name: 'Try again' }).click()
     await expect(failure).toHaveCount(0)
     await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
     await expect(page.locator(storefrontCards).first()).toBeVisible()

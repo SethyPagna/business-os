@@ -61,7 +61,7 @@ const baseProps = {
   contactEntries: [{ key: 'phone', platform: 'phone', href: 'tel:012345678', label: '012 345 678', accessibleName: 'Phone: 012 345 678', latin: true }],
   onCopy: noop, onDownload: noop, copyState: 'idle',
 }
-const PAYMENT = { en: 'No online payment. Send us your list to order.', km: 'មិនមានការទូទាត់អនឡាញទេ។ ផ្ញើបញ្ជីមកយើងដើម្បីបញ្ជាទិញ។' }
+const PAYMENT = { en: 'You cannot pay on this website. Send us your list to order.', km: 'មិនមានការទូទាត់អនឡាញទេ។ ផ្ញើបញ្ជីមកយើងដើម្បីបញ្ជាទិញ។' }
 const render = (language: 'en' | 'km', extra: Record<string, unknown> = {}) =>
   renderToStaticMarkup(React.createElement(ListPage, { ...baseProps, copy: copyFor(language), ...extra }))
 
@@ -74,7 +74,7 @@ for (const language of ['en', 'km'] as const) {
     assert.equal(text.split(PAYMENT[language]).length - 1, 1, 'the payment line is said once')
     assert.ok(text.includes(copy('contactButton', 'Contact', 'ទាក់ទង')), 'Contact is icon + word')
     assert.match(html, /aria-pressed="true"[^>]*data-portal-list-segment="list"|data-portal-list-segment="list"[^>]*aria-pressed="true"/, 'List is the pressed segment')
-    const fallbacks: Record<string, string> = { decreaseQty: 'Decrease quantity', increaseQty: 'Increase quantity', removeFromBucket: 'Remove', copyList: 'Copy list', downloadList: 'Download' }
+    const fallbacks: Record<string, string> = { decreaseQty: 'Decrease quantity', increaseQty: 'Increase quantity', removeFromBucket: 'Remove', copyList: 'Copy the list', downloadList: 'Download' }
     for (const [key, fallback] of Object.entries(fallbacks)) {
       const label = copy(key, fallback)
       assert.ok(label && html.includes(`aria-label="${label}"`) && html.includes(`title="${label}"`), `${key}: an icon-only button has an aria-label and a tooltip`)

@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import { containsKhmerScript } from '../../utils/scriptTypography.ts'
 
@@ -109,4 +110,18 @@ export function StatusPill({ status, copy }: StatusPillProps) {
       {label}
     </span>
   )
+}
+
+// A sentence that quotes what the shopper typed: the term sits in its own span a page translator
+// leaves alone, so the sentence around it is translated and the term stays exactly as typed. A
+// template without the placeholder (a pack edit removed it) is shown as written.
+export function withTypedTerm(template: string, placeholder: string, term: string): ReactNode {
+  const parts = template.split(placeholder)
+  if (parts.length < 2) return template
+  return parts.map((part, index) => (
+    <Fragment key={index}>
+      {index > 0 ? <span translate="no" className="notranslate">{term}</span> : null}
+      {part}
+    </Fragment>
+  ))
 }

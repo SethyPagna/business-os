@@ -97,7 +97,7 @@ runTest('the centred branch centres the pill and orders it Back / page / total /
   assert.match(branch, /flex w-full flex-wrap items-center justify-center gap-2/, 'the pager row must centre itself')
   const backAt = branch.indexOf('aria-label={backLabel}')
   const pageAt = branch.indexOf('aria-label={pageLabel}', backAt)
-  const countAt = branch.indexOf('<span className={countClass}>')
+  const countAt = branch.indexOf('<span translate="no" className={`${countClass} notranslate`}>')
   const nextAt = branch.indexOf('aria-label={nextLabel}')
   assert.ok(backAt > 0 && pageAt > backAt, 'the editable page must follow Back')
   const rangeAt = branch.indexOf('{rangeText}')
@@ -200,7 +200,7 @@ runTest('both pager mounts translate Back and Next instead of leaking the raw ke
   const maps = catalogProducts.match(/t=\{\(key\) => \(\{[\s\S]*?\}\)\[key\] \|\| key\}/g) || []
   assert.equal(maps.length, 1, 'the one shared pager element carries the translation map')
   for (const map of maps) {
-    assert.match(map, /back: copy\('back', 'Back'\)/, "'back' fell through the map and printed itself as the button label")
+    assert.match(map, /back: copy\('portalPagerPrevious', 'Previous'\)/, "'back' fell through the map and printed itself as the button label")
     assert.match(map, /next: copy\('next', 'Next'\)/, "'next' fell through the map and printed itself as the button label")
     assert.doesNotMatch(map, /showing:/, 'the Showing key is retired with the summary bar')
   }

@@ -33,7 +33,7 @@ export default function PortalAnnouncementStrip({ announcement, copy, onDismiss,
     }
   }, [onHeight])
 
-  const dismissLabel = copy('portal_a11y_announcement_dismiss', 'Close announcement', 'បិទសេចក្តីជូនដំណឹង')
+  const dismissLabel = copy('portal_a11y_announcement_dismiss', 'Close the announcement', 'បិទសេចក្តីជូនដំណឹង')
   const message = (
     <span {...getKhmerTextProps(announcement.text, '[overflow-wrap:anywhere]')} translate="no" lang={announcement.textLanguage}>{announcement.text}</span>
   )

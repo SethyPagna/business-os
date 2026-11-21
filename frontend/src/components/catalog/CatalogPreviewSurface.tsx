@@ -167,7 +167,7 @@ const HEADER_ICON_CLASS = 'inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-
 // The main action of the header: icon + the word "Contact" from sm up, the icon alone on a phone.
 const HEADER_CONTACT_CLASS = `inline-flex h-11 w-11 sm:h-10 shrink-0 items-center justify-center gap-2 rounded-full transition sm:w-auto sm:px-4 sm:text-sm sm:font-semibold ${PORTAL_PRIMARY_COLORS}`
 const HEADER_ICON_GLYPH = 'h-[18px] w-[18px]'
-const HEADER_COUNT_CLASS = 'absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-700 px-1 text-[10px] font-bold leading-none text-white'
+const HEADER_COUNT_CLASS = 'notranslate absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-700 px-1 text-[10px] font-bold leading-none text-white'
 // The surface recipe (spec section 1) for the floating scroll buttons.
 const SCROLL_BUTTON_CLASS = 'inline-flex h-10 w-10 items-center justify-center rounded-xl border border-stone-300 bg-white text-[#23201b] shadow-sm transition hover:bg-stone-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
 // The strip runs under the page gutters (the page container's own px-4 / sm:px-6 / lg:px-10 / xl:px-14).
@@ -474,7 +474,7 @@ export default function CatalogPreviewSurface({
                           title={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')}
                         >
                           <MessageCircle className={HEADER_ICON_GLYPH} />
-                          <span className="hidden sm:inline">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
+                          <span translate="no" className="notranslate hidden sm:inline">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
                         </button>
                       )}
                     />
@@ -489,7 +489,7 @@ export default function CatalogPreviewSurface({
                       title={copy('saved', 'Saved')}
                     >
                       <Heart className={HEADER_ICON_GLYPH} />
-                      {wishlistCount > 0 ? <span className={HEADER_COUNT_CLASS}>{wishlistCount}</span> : null}
+                      {wishlistCount > 0 ? <span translate="no" className={HEADER_COUNT_CLASS}>{wishlistCount}</span> : null}
                     </button>
                     </span>
                   ) : null}
@@ -502,7 +502,7 @@ export default function CatalogPreviewSurface({
                       title={copy('bucketTitle', 'My List')}
                     >
                       <ClipboardList className={HEADER_ICON_GLYPH} />
-                      {listCount > 0 ? <span className={HEADER_COUNT_CLASS}>{listCount}</span> : null}
+                      {listCount > 0 ? <span translate="no" className={HEADER_COUNT_CLASS}>{listCount}</span> : null}
                     </button>
                   ) : null}
                   {onOpenAccount ? (

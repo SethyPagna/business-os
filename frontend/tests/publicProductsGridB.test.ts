@@ -57,7 +57,7 @@ check('B2: a 44px clear button empties the search and returns focus to the field
 })
 
 check('B2: the placeholder is the concise Khmer phrase and the focus ring is brass, not blue', () => {
-  assert.match(products, /copy\('searchProductsShort', 'Search products', 'ស្វែងរកផលិតផល'\)/)
+  assert.match(products, /copy\('searchProductsShort', 'Search products…', 'ស្វែងរកផលិតផល'\)/)
   assert.match(products, /placeholder=\{searchLabel\}/)
   assert.match(products, /focus-within:border-\[#7a5c22\] focus-within:ring-2 focus-within:ring-\[#7a5c22\]/)
   assert.match(products, /focus-visible:!outline-none/, 'the global sky outline is not drawn around the bare input')
@@ -86,7 +86,7 @@ check('B5: Khmer micro-labels are at least 12px with no case or tracking; Latin 
 check('B6: the empty state names the search term and offers Clear search / Clear filters', () => {
   const empty = /data-portal-empty="true"[\s\S]*?\n        <\/div>/.exec(products)
   assert.ok(empty, 'the empty block')
-  assert.match(empty[0], /copy\('noProductsForSearch'[\s\S]*?\{ term: searchTerm \}/)
+  assert.match(empty[0], /copy\('noProductsForSearch'[\s\S]*?'\{term\}', searchTerm\)/)
   assert.match(empty[0], /data-empty-clear-search[\s\S]*?setSearch\(''\)/)
   assert.match(empty[0], /data-empty-clear-filters[\s\S]*?onClick=\{clearPortalFilters\}/)
   assert.match(empty[0], /portalActiveFilterCount > 0/, 'Clear filters only when filters are on')
