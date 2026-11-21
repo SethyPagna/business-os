@@ -1,4 +1,4 @@
-import { Suspense, cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, cloneElement, isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -13,6 +13,7 @@ import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import PortalContactMenu from './PortalContactMenu.tsx'
+import PortalHiddenLabel from './PortalHiddenLabel.tsx'
 import { PORTAL_PRIMARY_COLORS } from './portalButtons.ts'
 import CatalogProductImage from './catalogImages'
 import { PortalNavSearchSlotContext } from './portalNavSearchSlot.ts'
@@ -330,6 +331,9 @@ export default function CatalogPreviewSurface({
     zIndex: 40,
   } : undefined
 
+  // The header nav gains its search field and Filters button after mount, so it is named by a hidden label, never aria-label: see PortalHiddenLabel.
+  const navLabelId = useId()
+
   return (
     <div
       data-portal-root="true"
@@ -578,11 +582,12 @@ export default function CatalogPreviewSurface({
             {/* The tab strip is solid page ground with one line under it, and runs edge to edge so nothing scrolls past it in the page gutters.
                 The tabs scroll sideways without a scrollbar; an edge that hides more tabs fades instead of cutting a label. */}
             <nav
-              aria-label={copy('publicNavigation', 'Section navigation')}
+              aria-labelledby={navLabelId}
               ref={publicPortalNavRef}
               className={publicView ? 'sticky top-0 z-40' : ''}
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
             >
+              <PortalHiddenLabel id={navLabelId}>{copy('publicNavigation', 'Section navigation')}</PortalHiddenLabel>
               <div
                 className={`portal-nav-shell border-b border-stone-300 bg-[#f4f1ea] dark:border-neutral-800 dark:bg-[#0b0b0c] ${publicView && !publicPortalNavPinned ? NAV_FULL_BLEED_CLASS : ''}`}
                 style={pinnedNavStyle}

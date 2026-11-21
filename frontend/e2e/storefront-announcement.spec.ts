@@ -207,7 +207,7 @@ test.describe('Announcement bar', () => {
     await page.evaluate(() => window.scrollTo(0, 600))
     const report = await page.evaluate(() => {
       const strip = document.querySelector('[data-portal-announcement="true"]')!.getBoundingClientRect()
-      const tabs = document.querySelector('nav[aria-label="Section navigation"]')!.getBoundingClientRect()
+      const tabs = document.querySelector('nav:has([data-portal-nav-search-slot])')!.getBoundingClientRect()
       return { stripBottom: strip.bottom, tabsTop: tabs.top }
     })
     expect(report.stripBottom).toBeLessThanOrEqual(0)
