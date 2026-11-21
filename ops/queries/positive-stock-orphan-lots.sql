@@ -9,7 +9,8 @@
 -- LIMIT keeps a damaged database from printing every row: the first 50 are enough to start from.
 -- ops:min-rows 0
 -- ops:max-rows 0
--- ops:max-rows-read 8753
+-- Ceiling estimated from production counts of 20 Nov (product_batches 37,171, branch_stock 16,844, products 8,739); replace it with the rows read of the first production run plus a quarter.
+-- ops:max-rows-read 80000
 SELECT bbs.id AS branch_batch_stock_id, bbs.batch_id, bbs.branch_id, bbs.quantity,
        CASE WHEN pb.id IS NULL THEN 'lot_missing' ELSE 'lot_inactive' END AS problem
 FROM branch_batch_stock bbs INDEXED BY idx_branch_batch_stock_positive_batch_0155

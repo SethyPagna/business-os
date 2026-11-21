@@ -37,7 +37,7 @@ const check = async (name, fn) => { await fn(); passed++; console.log(`PASS ${na
 
   await check('the ops guard accepts it: SELECT only, a read ceiling, healthy means zero rows', () => {
     assert.deepEqual(canonical.rules, { minRows: 0, maxRows: 0, expectZero: null })
-    assert(Number.isInteger(canonical.maxRowsRead) && canonical.maxRowsRead > 0 && canonical.maxRowsRead <= 1000000, `ceiling ${canonical.maxRowsRead}`)
+    assert(Number.isInteger(canonical.maxRowsRead) && canonical.maxRowsRead === 80000, `ceiling ${canonical.maxRowsRead}`)
     assert(!canonical.refusedOnFree)
     assert(/^SELECT\b/i.test(canonical.sql.trim()))
     assert(!/\b(?:INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|PRAGMA|ATTACH)\b/i.test(canonical.sql))
