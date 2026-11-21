@@ -858,7 +858,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
   const language: AiDisclosureLanguage = copy('aiPolicyLanguage', 'en', 'ខ្មែរ') === 'ខ្មែរ' ? 'km' : 'en'
   const title = previewConfig.aiTitle || copy('portalAssistant', 'AI assistant')
   const tagline = previewConfig.aiIntro || copy('assistantTagline', 'AI suggestions, not medical advice.', 'ការណែនាំពី AI មិនមែនជាយោបល់វេជ្ជសាស្ត្រទេ។')
-  const defaultDisclaimer = copy('aiDisclaimer', 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.')
+  const defaultDisclaimer = copy('aiDisclaimer', 'Written by AI, for reference only. For exact answers, please contact our shop on Instagram or Facebook.')
   const ownerDisclaimer = String(previewConfig.aiDisclaimer || '').trim()
   const infoLabel = copy('assistantInfo', 'About the assistant', 'អំពីជំនួយការ')
   const labelClass = 'block text-sm font-medium leading-6 text-stone-700 dark:text-neutral-200'

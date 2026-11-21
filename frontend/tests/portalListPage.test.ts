@@ -61,7 +61,7 @@ const baseProps = {
   contactEntries: [{ key: 'phone', platform: 'phone', href: 'tel:012345678', label: '012 345 678', accessibleName: 'Phone: 012 345 678', latin: true }],
   onCopy: noop, onDownload: noop, copyState: 'idle',
 }
-const PAYMENT = { en: 'No online payment. Send us your list to order.', km: 'មិនមានការទូទាត់អនឡាញទេ។ ផ្ញើបញ្ជីមកយើងដើម្បីបញ្ជាទិញ។' }
+const PAYMENT = { en: 'You cannot pay on this website. Send us your list to order.', km: 'មិនមានការទូទាត់អនឡាញទេ។ ផ្ញើបញ្ជីមកយើងដើម្បីបញ្ជាទិញ។' }
 const render = (language: 'en' | 'km', extra: Record<string, unknown> = {}) =>
   renderToStaticMarkup(React.createElement(ListPage, { ...baseProps, copy: copyFor(language), ...extra }))
 

@@ -270,22 +270,26 @@ export function getPortalLanguageText(language: unknown, key: unknown): string {
 // language; any other value is the merchant's wording and is kept. Today the Worker
 // (routes/portal.ts) fills only aiTitle, aiDisclaimer and faqTitle when empty; the other
 // three are matched for copies of this English already stored in settings.
-const DEFAULT_CONFIG_COPY_KEYS: Record<string, [englishDefault: string, resourceKey: string]> = {
+// A default may carry the English it used to say: settings and the Worker can still hold that
+// copy, and it is system text too, so it shows as the current default (never as the merchant's).
+type DefaultCopyEntry = [englishDefault: string, resourceKey: string, previousEnglish?: readonly string[]]
+const DEFAULT_CONFIG_COPY_KEYS: Record<string, DefaultCopyEntry> = {
   aboutTitle: ['About us', 'aboutTitle'],
   aiTitle: ['Beauty Assistant', 'aiTitle'],
   aiIntro: ['Tell us what you are shopping for and the assistant will compare products from the current public catalogue.', 'aiIntro'],
-  aiDisclaimer: ['AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.', 'aiDisclaimer'],
+  aiDisclaimer: ['Written by AI, for reference only. For exact answers, please contact our shop on Instagram or Facebook.', 'aiDisclaimer', ['AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.']],
   faqTitle: ['Frequently asked questions', 'faqTitle'],
   promotionsTitle: ['Featured offers', 'promotionsSectionFallback'],
 }
-const DEFAULT_LINK_LABEL_COPY_KEYS: Record<string, [englishDefault: string, resourceKey: string]> = {
+const DEFAULT_LINK_LABEL_COPY_KEYS: Record<string, DefaultCopyEntry> = {
   website: ['Website', 'website'],
 }
 
 const sameText = (value: unknown, text: string) => String(value || '').normalize('NFC').trim() === text
 
-function localizedDefault(language: unknown, value: unknown, [englishDefault, resourceKey]: [string, string]): unknown {
-  return sameText(value, englishDefault) ? getPortalLanguageText(language, resourceKey) || value : value
+function localizedDefault(language: unknown, value: unknown, [englishDefault, resourceKey, previousEnglish = []]: DefaultCopyEntry): unknown {
+  const isDefault = sameText(value, englishDefault) || previousEnglish.some((previous) => sameText(value, previous))
+  return isDefault ? getPortalLanguageText(language, resourceKey) || englishDefault : value
 }
 
 export function defaultConfigText(language: unknown, field: string, value: unknown): unknown {

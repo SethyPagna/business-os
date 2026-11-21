@@ -58,7 +58,16 @@ assert.deepEqual(report, [], `${report.length} storefront string(s) render Engli
   }
   assert.ok(KHMER_SCRIPT.test(khmer.linkLabels.website), `the Worker default website label renders "${khmer.linkLabels.website}" on the Khmer storefront`)
   assert.equal(khmer.linkLabels.facebook, 'Facebook')
-  assert.deepEqual(localizeDefaultConfigCopy(config, 'en'), config)
+  // English keeps every Worker default except the AI note: the Worker may still send the earlier wording
+  // of it, and that is system text, so the storefront shows the current default in its place.
+  assert.deepEqual(
+    localizeDefaultConfigCopy(config, 'en'),
+    { ...config, aiDisclaimer: 'Written by AI, for reference only. For exact answers, please contact our shop on Instagram or Facebook.' },
+  )
+  const currentNote = 'Written by AI, for reference only. For exact answers, please contact our shop on Instagram or Facebook.'
+  const noteConfig: { aiDisclaimer: string; linkLabels?: Record<string, string> } = { aiDisclaimer: currentNote }
+  assert.ok(KHMER_SCRIPT.test(localizeDefaultConfigCopy(noteConfig, 'km').aiDisclaimer), 'the current AI note renders Khmer on the Khmer storefront')
+  assert.equal(localizeDefaultConfigCopy(noteConfig, 'en').aiDisclaimer, currentNote)
   const merchantWording = { faqTitle: 'Ask us anything', aiTitle: 'Skin coach', linkLabels: { website: 'Our online shop' } }
   assert.deepEqual(localizeDefaultConfigCopy(merchantWording, 'km'), merchantWording)
   assert.match(
