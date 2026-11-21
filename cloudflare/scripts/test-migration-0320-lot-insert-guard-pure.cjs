@@ -45,12 +45,30 @@ check('the file is LF-only and is exactly one DROP TRIGGER IF EXISTS statement',
   assert(!sql.includes('\r'), 'LF only')
   const code = sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n').trim()
   assert.equal(code, `DROP TRIGGER IF EXISTS ${REMOVED};`)
-  assert(!/'/.test(sql), 'no apostrophe anywhere, so no statement splitter can be confused by a comment')
+  for (const line of sql.split('\n')) {
+    const n = (line.match(/'/g) || []).length
+    assert(n === 0 || (/^--/.test(line) && n % 2 === 0), `an apostrophe outside a comment, or an unbalanced one, could confuse a statement splitter: ${line}`)
+  }
 })
 check('the header carries the why, the pre and post assertions and the recovery note', () => {
-  for (const need of ['Why:', 'Preflight and postflight', 'WHERE bbs.quantity>0 AND (pb.id IS NULL OR pb.is_active IS NOT 1)', ...KEPT_TRIGGERS, KEPT_INDEX, 'Recovery:', '0155_positive_lot_parent_identity_guard.sql']) {
+  for (const need of ['Why:', 'Preflight and postflight', 'WHERE bbs.quantity>0 AND (pb.id IS NULL OR pb.is_active IS NOT 1)', ...KEPT_TRIGGERS, KEPT_INDEX, 'Recovery:', '0155_positive_lot_parent_identity_guard.sql', 'ops/queries/positive-stock-orphan-lots.sql', 'test-lot-replace-sweep-pure.cjs', 'after every deploy and weekly']) {
     assert(sql.includes(need), `header lacks ${need}`)
   }
+  assert(!/daily/i.test(sql), 'no daily check was decided')
+})
+check('the recovery note carries the exact CREATE TRIGGER statement of 0155, which re-creates the dropped trigger', () => {
+  const original = fs.readFileSync(path.join(dir, '0155_positive_lot_parent_identity_guard.sql'), 'utf8').replace(/\r/g, '').split('\n')
+  const from = original.findIndex((l) => l.startsWith(`CREATE TRIGGER ${REMOVED}`))
+  const statement = original.slice(from, original.findIndex((l, i) => i > from && l === 'END;') + 1)
+  assert(statement.length > 5, 'found the statement in 0155')
+  const pasted = sql.split('\n').filter((l) => l.startsWith('--   ')).map((l) => l.slice(5))
+  const at = pasted.findIndex((l) => l === statement[0])
+  assert(at >= 0 && statement.every((l, i) => pasted[at + i] === l), 'the pasted statement equals the 0155 statement line for line')
+  const db = new Database(schema)
+  db.exec(`DROP TRIGGER ${REMOVED}`)
+  db.exec(pasted.slice(at, at + statement.length).join('\n'))
+  assert.deepEqual(names(db, 'trigger'), [...KEPT_TRIGGERS, REMOVED].sort())
+  db.close()
 })
 check('before 0320 all four triggers and the partial index exist; after it only the insert scan is gone', () => {
   const before = fixture(false)

@@ -20,8 +20,19 @@
 --   (type trigger) and idx_branch_batch_stock_positive_batch_0155 (type index), and after, no trigger named
 --   positive_lot_reject_parent_insert_orphan_0155 remains.
 --
--- Recovery: no data changes, nothing to roll back. To restore the scan, re-create the trigger with the exact text from
--- 0155_positive_lot_parent_identity_guard.sql (the CREATE TRIGGER positive_lot_reject_parent_insert_orphan_0155 statement,
--- AFTER INSERT ON product_batches, WHEN EXISTS over the partial index ... RAISE(ABORT, ...)). Re-creating it brings back the
--- per-insert read cost, so only do it together with removing the reason the Worker guard exists.
+-- Recovery: no data changes, nothing to roll back. To restore the scan, run this exact statement (copied from
+-- 0155_positive_lot_parent_identity_guard.sql):
+--   CREATE TRIGGER positive_lot_reject_parent_insert_orphan_0155
+--   AFTER INSERT ON product_batches
+--   WHEN EXISTS (
+--     SELECT 1 FROM branch_batch_stock bbs INDEXED BY idx_branch_batch_stock_positive_batch_0155
+--     WHERE bbs.quantity>0 AND NOT EXISTS (SELECT 1 FROM product_batches WHERE id=bbs.batch_id)
+--   )
+--   BEGIN
+--     SELECT RAISE(ABORT,'Cannot orphan positive branch stock by replacing a received lot');
+--   END;
+-- Re-creating it brings back the per-insert read cost (about 45,000 rows per new lot), so only do it together with removing the
+-- reason the Worker guard exists.
+-- After a rollback of the Worker to a commit without the guard, run ops/queries/positive-stock-orphan-lots.sql, and run
+-- scripts/test-lot-replace-sweep-pure.cjs on any branch older than this lane before merging it.
 DROP TRIGGER IF EXISTS positive_lot_reject_parent_insert_orphan_0155;
