@@ -71,8 +71,8 @@ type LegalOpenDetail = { page: LegalPageKey; handled: boolean }
 
 const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200'
 
-const CONCERNS_CONTACT_EN = 'If something on this site is about you, or you are concerned about an image, contact us on {contact}. We review every request and ask only for the information needed to identify the content and the person making the request.'
-const CONCERNS_CONTACT_KM = 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទងយើងតាម {contact}។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។'
+const CONCERNS_CONTACT_EN = 'If something on this site is about you, or you are concerned about an image, contact us using the contact details on this page. We review every request and ask only for the information needed to identify the content and the person making the request.'
+const CONCERNS_CONTACT_KM = 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទងយើងតាមព័ត៌មានទំនាក់ទំនងនៅលើទំព័រនេះ។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -200,7 +200,7 @@ export default function PortalFooter({
   const year = new Date().getFullYear()
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
   const telegramLink = socialLinks.find((link) => (link.platform ?? link.key) === 'telegram')
-  const [concernsBefore, concernsAfter = ''] = copy('portalFooterConcernsContact', CONCERNS_CONTACT_EN, CONCERNS_CONTACT_KM).split('{contact}')
+  const concernsContact = copy('portalFooterConcernsContact', CONCERNS_CONTACT_EN, CONCERNS_CONTACT_KM)
 
   const openPage = useCallback((page: LegalPageKey) => {
     // The opener -- one of the footer's always-visible policy links, or the
@@ -341,17 +341,7 @@ export default function PortalFooter({
             {details.email ? (
               <div className="pt-1">{fill('portal_legal_footer_content_concerns')}</div>
             ) : telegramLink || details.phone ? (
-              <div className="pt-1">
-                {concernsBefore}
-                {telegramLink ? (
-                  <a className={INLINE_LINK_CLASS} href={telegramLink.value} target="_blank" rel="noreferrer">
-                    <span className="notranslate" translate="no">{telegramLink.label}</span>
-                  </a>
-                ) : contactHref('tel', details.phone) ? (
-                  <a className={`${INLINE_LINK_CLASS} notranslate`} translate="no" href={contactHref('tel', details.phone)}>{details.phone}</a>
-                ) : <span className="notranslate" translate="no">{details.phone}</span>}
-                {concernsAfter}
-              </div>
+              <div className="pt-1">{concernsContact}</div>
             ) : null}
           </div>
 
@@ -551,6 +541,9 @@ function LegalReader({
         </p>
         <p data-portal-legal-updated="true" className="mt-1 text-xs leading-6 text-slate-600 dark:text-neutral-400">
           {fill('portal_legal_updated_notice')}
+        </p>
+        <p data-portal-legal-official-notice="true" className="mt-1 text-xs font-medium leading-6 text-slate-700 dark:text-neutral-300">
+          {text('portal_legal_official_notice')}
         </p>
 
         <BusinessIdentityCard text={text} details={details} />

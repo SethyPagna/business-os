@@ -216,7 +216,7 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
     clearAllKeep: 'រក្សា',
     translateUnavailable: 'ឥឡូវនេះមិនអាចបកប្រែបានទេ។',
     aiPolicyLanguage: 'ខ្មែរ',
-    portalFooterConcernsContact: 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទងយើងតាម {contact}។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។',
+    portalFooterConcernsContact: 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទងយើងតាមព័ត៌មានទំនាក់ទំនងនៅលើទំព័រនេះ។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។',
     install_app: 'ដំឡើងកម្មវិធី',
     install_shop_band: 'ដំឡើង Leang Cosmetics',
     ios_install_hint: 'បន្ថែមទៅអេក្រង់ដើម ក្នុង ៣ ជំហាន។',
@@ -259,8 +259,6 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
     signupPasswordHint: '១០ តួអក្សរឡើងទៅ។',
     productInStore: 'ក្នុងហាង',
     noPaymentLine: 'មិនមានការទូទាត់អនឡាញទេ។ ផ្ញើបញ្ជីមកយើងដើម្បីបញ្ជាទិញ។',
-    mapConsentLine: 'Google Maps កំណត់ខូឃីរបស់ខ្លួន។',
-    mapLoad: 'ផ្ទុកផែនទី',
     portalConsentLine: 'ខ្ញុំមានអាយុ ១៦ ឆ្នាំឡើងទៅ ហើយទទួលយក{terms} និង{privacy}។',
   },
 }

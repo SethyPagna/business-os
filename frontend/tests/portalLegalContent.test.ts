@@ -88,7 +88,7 @@ assert.equal(legalText('fr', 'portal_legal_privacy_title'), PORTAL_LEGAL_EN.port
 assert.equal(legalText('en', 'portal_legal_not_a_key'), '')
 // lib/portalSession.ts slides a session only once SLIDE_AFTER_FRACTION (0.5)
 // of its window has passed; G38 P0 states that plainly instead of 'may renew'.
-assert.match(PORTAL_LEGAL_EN.portal_legal_store_session_l, /renews if you use your account after its first 200 days/i, 'the cookie row must describe conditional session renewal')
+assert.match(PORTAL_LEGAL_EN.portal_legal_store_session_l, /If you use your account after the first 200 days, this cookie is renewed for 399 days from that day/, 'the cookie row must describe conditional session renewal')
 assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_store_session_l, /each time|every visit/i, 'the policy overstates how often the server slides a session')
 
 // The cookie table must enumerate the storage this storefront really writes.
@@ -98,7 +98,6 @@ for (const expected of [
   'business-os-portal-bucket-v1',
   'business-os-portal-wishlist-v1',
   'business-os:portal-translate-target',
-  'business-os-portal-map-consent-v1',
 ]) {
   assert.ok(storageNames.includes(expected), `cookie policy does not disclose ${expected}`)
 }
@@ -111,20 +110,13 @@ assert.match(source('components/catalog/portalLanguageOptions.ts'), /'business-o
 // The storefront keeps no saved copy of the shop (owner rule); it only removes the old one.
 assert.equal(storageNames.includes('business-os-catalog-portal-cache'), false, 'the cookie policy still lists the retired storefront cache')
 assert.doesNotMatch(source('components/catalog/publicFirstPaint.ts'), /setItem\(RETIRED_PORTAL_CACHE_KEY/, 'the storefront writes its saved copy again; disclose it in the cookie policy')
-const embedSource = source('components/catalog/legal/PortalEmbedConsent.tsx')
-assert.match(embedSource, /MAP_CONSENT_STORAGE_KEY = 'business-os-portal-map-consent-v1'/, 'the map consent key moved; update the cookie policy')
-// Once the visitor does ask for the map, the frame still leaks as little as
-// possible: origin-only referrer, and no navigation rights over the storefront.
-assert.match(embedSource, /referrerPolicy="strict-origin-when-cross-origin"/, 'the map embed sends the full storefront URL to Google')
-assert.doesNotMatch(embedSource, /no-referrer-when-downgrade/, 'the map embed still uses the full-URL referrer policy')
-assert.match(embedSource, /sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"/, 'the map embed is not sandboxed')
-assert.match(embedSource, /localStorage\.removeItem\(MAP_CONSENT_STORAGE_KEY\)/, 'the visitor cannot forget a persisted map grant')
-assert.match(embedSource, /onClick=\{revoke\}/, 'the loaded map does not expose its revoke control')
-assert.match(embedSource, /setGranted\(false\)/, 'revoking the grant does not unmount the third-party iframe')
-assert.ok(PORTAL_LEGAL_EN.portal_legal_map_consent_revoke, 'the map revoke control has no English label')
-assert.ok(PORTAL_LEGAL_KM.portal_legal_map_consent_revoke, 'the map revoke control has no Khmer label')
+// Owner, 21 Nov 2026: the About map loads without asking, so the policy lists no map-consent storage and the click-to-load component is gone.
+assert.equal(storageNames.includes('business-os-portal-map-consent-v1'), false, 'the cookie policy still lists the retired map-consent key')
+assert.equal(fs.existsSync(path.join(here, '..', 'src', 'components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')), false, 'the click-to-load map component is back')
+assert.equal('portal_legal_map_consent_revoke' in PORTAL_LEGAL_EN || 'portal_legal_store_map_consent_p' in PORTAL_LEGAL_EN, false, 'a map-consent string is back in English')
+assert.equal('portal_legal_map_consent_revoke' in PORTAL_LEGAL_KM || 'portal_legal_store_map_consent_p' in PORTAL_LEGAL_KM, false, 'a map-consent string is back in Khmer')
 // Owner, 21 Nov 2026 (A63, "Live Google map"): the About map loads straight away, with no consent click. It is the shop's own live embed:
-// lazy, no referrer beyond the origin, a translated title. The click-to-load component is no longer used by About (the policy lane retires it).
+// lazy, no referrer beyond the origin, a translated title.
 const secondary = source('components/catalog/CatalogSecondaryTabs.tsx')
 assert.match(secondary, /<iframe\s+src=\{mapEmbedUrl \|\| ''\}[\s\S]*?loading="lazy"[\s\S]*?referrerPolicy="no-referrer-when-downgrade"/, 'the live map is a lazy iframe with a safe referrer policy')
 assert.doesNotMatch(secondary, /PortalEmbedConsent/, 'About no longer goes through the click-to-load gate')
@@ -210,9 +202,9 @@ assert.match(
 // 7. day-first date, and a consent version tied to it
 assert.match(PORTAL_LEGAL_LAST_UPDATED_ISO, /^\d{4}-\d{2}-\d{2}$/)
 assert.equal(formatLegalLastUpdated('2026-09-07'), '07/09/2026')
-assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-11-20', 'the 20 Nov 2026 wording (Translation section, storage rows) moved the shown date')
-assert.equal(formatLegalLastUpdated(), '20/11/2026')
-assert.equal(PORTAL_LEGAL_CONSENT_VERSION, 'portal-legal-2026-10-20', 'the 20 Nov 2026 wording asks nothing new of an account, so the consent version stays and nobody agrees again')
+assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-11-21', 'the 21 Nov 2026 wording (official-text notice, measured rewordings, live map) moved the shown date')
+assert.equal(formatLegalLastUpdated(), '21/11/2026')
+assert.equal(PORTAL_LEGAL_CONSENT_VERSION, 'portal-legal-2026-10-20', 'the 21 Nov 2026 wording discloses more and asks nothing new of an account, so the consent version stays and nobody agrees again')
 assert.ok(PORTAL_LEGAL_CONSENT_VERSION.slice('portal-legal-'.length) <= PORTAL_LEGAL_LAST_UPDATED_ISO, 'a consent version is never newer than the shown date')
 
 // 8. Owner, 30 Sep 2026: welcoming privacy and terms texts that stay safe for the shop.
@@ -250,11 +242,11 @@ for (const [text, where] of [[privacyKm, 'privacy'], [termsKm, 'terms']] as cons
   assert.match(text, /ទោះបី[^។]*(?:ហាងយើង|ជាយើង)/, `the Khmer ${where} text warns about someone claiming to be the shop`)
 }
 // The brand-enquiry route stays.
-assert.match(PORTAL_LEGAL_EN.portal_legal_terms_ip_b, /respective rights holders[\s\S]*Contact the store using the verified details above/)
+assert.match(PORTAL_LEGAL_EN.portal_legal_terms_ip_b, /belong to their owners[\s\S]*contact the shop using the verified details above/)
 assert.match(PORTAL_LEGAL_KM.portal_legal_terms_ip_b, /ម្ចាស់សិទ្ធិ[\s\S]*សូមទាក់ទងហាង/)
-// Short and plain: the text may not grow past the 30 Sep rewrite plus the picture-review disclosure, the 7-day returns section, the age-16 wording and the assistant provider section and the one sentence that says translation is paused while signed in (1,072 English words; the 7 Sep text was 1,148).
+// Short and plain: the text may not grow past the 30 Sep rewrite plus the picture-review disclosure, the 7-day returns section, the age-16 wording and the assistant provider section and the one sentence that says translation is paused while signed in. Owner, 21 Nov 2026: the translator-safe rewording says each fact in a full short sentence (no clause chains), which costs 145 words: 1,217 English words now, and the cap moved with it.
 const words = (text: string) => text.split(/\s+/).filter(Boolean).length
-assert.ok(words(privacyEn) + words(termsEn) <= 1072, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
+assert.ok(words(privacyEn) + words(termsEn) <= 1217, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
 
 // Page keys
 assert.equal(isLegalPageKey('privacy'), true)

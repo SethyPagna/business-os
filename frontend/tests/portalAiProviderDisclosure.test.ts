@@ -154,7 +154,7 @@ for (const language of ['en', 'km'] as const) {
       assert.ok(html.includes(`href="${entry.policyUrl}"`))
       assert.match(html, /rel="noopener noreferrer"/)
       assert.match(html, language === 'en' ? /processed outside Cambodia/ : /ដំណើរការក្រៅប្រទេសកម្ពុជា/)
-      assert.match(html, language === 'en' ? /deleted after 30 days/ : /លុបបន្ទាប់ពី ៣០ ថ្ងៃ/)
+      assert.match(html, language === 'en' ? /We delete our own copy after 30 days/ : /យើងលុបច្បាប់ចម្លងរបស់យើងផ្ទាល់បន្ទាប់ពី ៣០ ថ្ងៃ/)
     })
   }
 

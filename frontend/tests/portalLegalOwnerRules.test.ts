@@ -56,7 +56,7 @@ const pageText = (page: 'privacy' | 'terms', lang: 'en' | 'km') =>
 test('Terms carry a Returns section: 7 days, unopened, with the receipt (EN + KM)', () => {
   const keys = LEGAL_PAGE_SECTIONS.terms.map((s) => s.heading)
   assert.ok(keys.includes('portal_legal_terms_returns_h'), 'the Terms have no Returns section')
-  assert.equal(PORTAL_LEGAL_EN.portal_legal_terms_returns_b, 'Returns are accepted within 7 days for unopened items with the receipt.')
+  assert.equal(PORTAL_LEGAL_EN.portal_legal_terms_returns_b, 'You can return an unopened item within 7 days. Bring the receipt.')
   assert.match(PORTAL_LEGAL_KM.portal_legal_terms_returns_b, KHMER)
   assert.match(PORTAL_LEGAL_KM.portal_legal_terms_returns_b, /៧ ថ្ងៃ/, 'Khmer returns window must say 7 days')
   assert.match(pageText('terms', 'km'), /៧ ថ្ងៃ/)

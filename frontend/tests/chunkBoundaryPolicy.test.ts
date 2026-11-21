@@ -67,7 +67,6 @@ const boundaries: Array<[string, string]> = [
   ['components/shared/AlphaIndexRail.tsx', 'shared-ui'],
   ['utils/alphaRail.ts', 'shared-ui'],
   ['components/catalog/logoImageStyle.ts', 'catalog-public-utils'],
-  ['components/catalog/legal/PortalEmbedConsent.tsx', 'catalog-legal'],
   // The data-repair transports are imported only by the repair panels inside
   // ResetData's lazy chunk. The '/src/api/' fallback filed them in
   // app-api-methods, which the storefront and every admin page load at boot.
@@ -164,7 +163,7 @@ for (const relative of [
   'utils/workDrafts.ts', 'utils/dirtyWork.ts', 'utils/lazyImport.ts',
   'components/shared/Modal.tsx', 'components/shared/UnsavedChangesPrompt.tsx',
   'components/shared/AlphaIndexRail.tsx', 'utils/alphaRail.ts',
-  'components/catalog/logoImageStyle.ts', 'components/catalog/legal/PortalEmbedConsent.tsx',
+  'components/catalog/logoImageStyle.ts',
 ]) {
   const closure = sourceClosure(relative)
   assert.equal(closure.has(path.join(frontend, 'src/AppContext.tsx')), false, `${relative} must not import admin startup`)

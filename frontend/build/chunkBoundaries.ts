@@ -86,7 +86,6 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/components/catalog/PortalNoPaymentNotice.tsx', 'catalog-legal'],
   ['/src/components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
   ['/src/components/catalog/legal/legalContent.ts', 'catalog-legal'],
-  ['/src/components/catalog/legal/PortalEmbedConsent.tsx', 'catalog-legal'],
 ]
 
 // These icons have consumers on both sides of a route boundary. Pinning them
