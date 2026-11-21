@@ -729,6 +729,8 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/systemJobs.ts')) return 'system-jobs-api'
     if (
       normalized.endsWith('/src/api/notificationSummary.ts')
+      // The bell's catch-up controller and the lifetime the summary answer notes: left to the catch-all they rode app-api-methods, which the storefront loads.
+      || normalized.endsWith('/src/api/bellFollowUp.ts')
       || normalized.endsWith('/src/api/cooldownFallbacks.ts')
     ) return 'notification-api'
     if (normalized.endsWith('/src/api/productWriteTransport.ts')) return 'product-write-api'

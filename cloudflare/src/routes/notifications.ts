@@ -187,12 +187,12 @@ async function loadPreferences(env: Env) {
 // answered from the Workers Cache API for a short while.
 //
 // The sections the /summary handler marks ttlOnly in its cachedSection calls (since the owner's 11 Nov decision: the bell may be up to
-// 5 minutes old and says when it was computed) are keyed by their INPUTS only (low-stock config, expiry window and the like) and live for getPlanLimits(env).notificationSectionCacheSeconds
+// 5 minutes old and says when its producer STARTED) are keyed by their INPUTS only (low-stock config, expiry window and the like) and live for getPlanLimits(env).notificationSectionCacheSeconds
 // whatever happens to the data meanwhile: a sale on another till no longer makes the next poll re-walk
 // the catalog. The actor's own write must never show stale, so the bell asks for `?fresh=1` after its
 // own bell-relevant write (frontend/src/api/bellFreshness.ts: `fresh=1`, or `fresh=a,b` naming only the sections the write resolves) or on the refresh button: that request recomputes and overwrites the
 // entry for everyone, but only when a data version moved since the entry was computed (the entry stores them), so a button
-// pressed with no write in between is answered from the entry. This holds only while every writer bumps its version before it responds. Every cached entry carries the time its data was computed and /summary reports the
+// pressed with no write in between is answered from the entry. This holds only while every writer bumps its version before it responds. Every cached entry carries the time its computation started and /summary reports the
 // oldest of them as generatedAt, which is the "as of" the panel shows. The data epoch is part of the key
 // (lib/cacheKey.ts), so nothing from before a restore is served.
 //
@@ -228,6 +228,8 @@ type SectionCache = (<T>(name: string, namespaces: string[], inputs: string, pro
 const BELL_VERSION_NAMESPACES = ['products', 'stock', 'sales', 'customers']
 // A fixed token in the place a data version takes in the key: the entry must not move when a version does.
 const TTL_ONLY_KEY_VERSION = 'bell-ttl'
+// The start time of a stored section entry, also kept as a header so the write rule can date the entry without parsing its body (up to 5,000 rows). An entry without it is older than any computation.
+const TTL_ONLY_AT_HEADER = 'x-bell-at'
 
 // One per request: each data version is read once however many sections key on it
 // (products, settings and the rest are shared by two or three of them).
@@ -282,16 +284,24 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
           }
         }
       }
+      // The entry's time is when its producer STARTED, read right after the cache match (Date.now() in a Worker only advances on I/O): every
+      // write committed before the start is in the data, so a plain read can trust an entry for the plan lifetime counted from its start.
+      const startedAt = Date.now()
       // Versions are read BEFORE the producer: a write that lands while it runs leaves the stored versions older than the data
       // version, so the next fresh read recomputes instead of trusting a half-old entry.
       const v = store && key ? await versionsNow(namespaces) : null
       const value = await producer()
-      const at = Date.now()
+      const at = startedAt
       computedAt.push(at)
       if (store && key) {
-        c.executionCtx.waitUntil(store.put(key, new Response(JSON.stringify({ at, v, value }), {
-          headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
-        })))
+        // A computation that started later has already stored: this older one must not overwrite it (it could bring back a resolved alert).
+        c.executionCtx.waitUntil((async () => {
+          const held = await store.match(key)
+          if (held && Number(held.headers.get(TTL_ONLY_AT_HEADER)) > startedAt) return
+          await store.put(key, new Response(JSON.stringify({ at, v, value }), {
+            headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}`, [TTL_ONLY_AT_HEADER]: String(at) },
+          }))
+        })().catch(() => {}))
       }
       return value
     }
