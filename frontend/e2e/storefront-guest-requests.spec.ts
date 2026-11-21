@@ -45,6 +45,9 @@ test.describe('storefront guard: guests add no requests', () => {
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
     await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
     await expect(page.locator(storefrontCards).first()).toBeVisible()
+    // The offers banner is lazy and reads promotions once when it mounts; networkidle alone can resolve before that one read on a slow
+    // WebKit run, which then looked like a request the events caused (measured 22 Nov 2026: one read per load on every run).
+    await expect.poll(() => apiPaths.filter((entry) => entry.startsWith('GET /api/portal/promotions')).length, { message: 'the banner reads promotions once on load' }).toBe(1)
     await page.waitForLoadState('networkidle')
 
     const loadPaths = [...apiPaths]
