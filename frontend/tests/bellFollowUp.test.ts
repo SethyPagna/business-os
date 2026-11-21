@@ -227,6 +227,25 @@ for (const lifetime of [null, 0, -5, Number.NaN]) {
   pending.advance(3_600_000)
   assert.deepEqual(pending.state.reloads, [325_000, 326_000], 'a merge does not move the timer already armed; the later event gets the next read')
 }
+// 9b. A steady stream of events under the merge window apart must not slide one slot forward for ever: a merge is measured from where the cluster STARTED.
+{
+  const seeded = () => { let x = 12345; return () => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648 } }
+  for (const [label, totalMs, gapMs] of [['5 min at 700 ms', 300_000, 700], ['60 s at 700 ms', 60_000, 700], ['290 s at 700 ms', 290_000, 700]] as const) {
+    const h = harness(300, { random: seeded() })
+    const events: number[] = []
+    for (let t = 0; t <= totalMs; t += gapMs) {
+      h.advanceTo(t)
+      events.push(h.now())
+      h.followUp.armAfterEvent()
+    }
+    h.advance(3_600_000)
+    for (const e of events) {
+      const inWindow = h.state.reloads.filter((r) => r >= e + K(300) && r <= e + K(300) + BELL_FOLLOW_UP_JITTER_MS + BELL_EVENT_MERGE_MS)
+      assert.ok(inWindow.length >= 1, label + ': event at ' + e + ' has no read in [K, K + 21 s]; reads ' + h.state.reloads.join(','))
+    }
+    assert.equal(h.timers(), 0, label + ': and it ends')
+  }
+}
 // 10. The lifetime is the answer's, not a constant (the Free lifetime may differ).
 {
   const h = harness(45, { random: 0.25 })

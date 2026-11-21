@@ -40,6 +40,7 @@ const validLifetime = (seconds: number | null): seconds is number => seconds !==
 
 export function createBellFollowUp(deps: BellFollowUpDeps): BellFollowUp {
   let events: number[] = []
+  let clusterStart = 0
   let handle: unknown = null
   let owed = false
   let reading = false
@@ -77,8 +78,11 @@ export function createBellFollowUp(deps: BellFollowUpDeps): BellFollowUp {
       const seconds = deps.lifetimeSeconds()
       if (!validLifetime(seconds)) return
       const at = deps.now()
-      if (events.length > 0 && at - events[events.length - 1] < BELL_EVENT_MERGE_MS) events[events.length - 1] = at
-      else events.push(at)
+      if (events.length > 0 && at - clusterStart < BELL_EVENT_MERGE_MS) events[events.length - 1] = at
+      else {
+        events.push(at)
+        clusterStart = at
+      }
       if (handle === null && !owed && !reading) schedule()
     },
     onVisible() {
