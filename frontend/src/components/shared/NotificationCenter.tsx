@@ -21,7 +21,8 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
-import { createBellFollowUp, getSectionLifetimeSeconds, onBellResolved, requestFreshBell } from '../../api/bellFreshness.ts'
+import { onBellResolved, requestFreshBell } from '../../api/bellFreshness.ts'
+import { createBellFollowUp, getSectionLifetimeSeconds } from '../../api/bellFollowUp.ts'
 import { olderAsOf, stockAsOfText } from '../dashboard/stockAsOf.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
