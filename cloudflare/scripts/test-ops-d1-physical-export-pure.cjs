@@ -654,7 +654,7 @@ async function main() {
       INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at)
       VALUES('physical-count',NULL,990001,'close','physical-count-1','${INVENTORY_REQUEST_HASH}','{"status":"open","revision":0}','{"status":"closed","revision":1}','{"sessionRevision":1}','2026-10-19')`)
     const { dir, manifest } = await exportFixture(source, '55')
-    assert.ok(manifest.tables.length > 130 && manifest.omitted.length === 6)
+    assert.ok(manifest.tables.length > 130 && manifest.omitted.length === 7 && JSON.stringify(manifest.omitted).includes('portal_telegram_pending'))
     assert.ok(manifest.tables.some((t) => t.name === 'products') && !manifest.tables.some((t) => /products_fts/.test(t.name)))
     const out = path.join(tmpdir('mig'), 'rebuilt.sqlite')
     const result = loader.buildDatabase({

@@ -239,7 +239,7 @@ export const PII_COLUMNS = Object.freeze({
   delivery_contacts: ['name', 'phone', 'address', 'notes'],
   suppliers: ['phone', 'email', 'address', 'contact_person', 'notes'],
   users: ['username', 'name', 'phone', 'phone_lookup', 'email', 'google_email', 'google_subject'],
-  portal_accounts: ['name', 'phone', 'email'],
+  portal_accounts: ['name', 'phone', 'email', 'telegram_user_id'],
   branches: ['manager'],
   // auth ephemera: destinations, IPs, device names/ids, user agents, lockout keys
   verification_codes: ['target', 'requester_ip'],
@@ -308,6 +308,7 @@ export const SECRET_COLUMNS = Object.freeze({
   verification_codes: ['code_hash'],
   user_sessions: ['token_hash'],
   portal_sessions: ['token_hash'],
+  portal_telegram_pending: ['ticket_hash'],
   portal_password_resets: ['token_hash'],
   ai_provider_configs: ['api_key_encrypted'],
   google_drive_sync_entries: ['upload_session_url'], // resumable-upload URL is a bearer capability

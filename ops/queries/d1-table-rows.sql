@@ -80,6 +80,7 @@ SELECT
     'portal_auth_lockouts', (SELECT COUNT(*) FROM portal_auth_lockouts),
     'portal_password_resets', (SELECT COUNT(*) FROM portal_password_resets),
     'portal_sessions', (SELECT COUNT(*) FROM portal_sessions),
+    'portal_telegram_pending', (SELECT COUNT(*) FROM portal_telegram_pending),
     'product_batches', (SELECT COUNT(*) FROM product_batches),
     'product_conflict_action_group_members', (SELECT COUNT(*) FROM product_conflict_action_group_members),
     'product_conflict_action_groups', (SELECT COUNT(*) FROM product_conflict_action_groups)

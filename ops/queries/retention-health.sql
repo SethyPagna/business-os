@@ -28,7 +28,8 @@ SELECT
   (SELECT MIN(created_at) FROM action_history) AS action_history_oldest,
   (SELECT COUNT(*) FROM action_history WHERE created_at < datetime('now', '-180 days')) AS action_history_past_window,
   (SELECT MIN(created_at) FROM user_sessions WHERE revoked_at IS NOT NULL OR expires_at < datetime('now')) AS dead_user_session_oldest,
-  (SELECT MIN(created_at) FROM portal_sessions WHERE revoked_at IS NOT NULL OR expires_at < datetime('now')) AS dead_portal_session_oldest,
+  (SELECT MIN(created_at) FROM portal_sessions WHERE revoked_at IS NOT NULL OR datetime(expires_at) < datetime('now')) AS dead_portal_session_oldest,
+  (SELECT MIN(created_at) FROM portal_telegram_pending WHERE datetime(expires_at) < datetime('now')) AS dead_portal_telegram_pending_oldest,
   (SELECT MIN(revoked_at) FROM trusted_devices WHERE revoked_at IS NOT NULL) AS revoked_device_oldest,
   (SELECT MIN(updated_at) FROM login_lockouts) AS login_lockout_oldest,
   (SELECT last_run_at FROM image_audit_state WHERE id = 1) AS image_audit_last_run;

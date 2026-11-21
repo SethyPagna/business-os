@@ -234,7 +234,7 @@ const REQUIRED_PII = {
   delivery_contacts: ['phone', 'address', 'name'],
   suppliers: ['phone', 'email', 'address', 'contact_person'],
   users: ['phone', 'email', 'google_email'],
-  portal_accounts: ['phone', 'email'],
+  portal_accounts: ['phone', 'email', 'telegram_user_id'],
   verification_codes: ['target', 'requester_ip'],
   user_sessions: ['last_ip', 'device_name'],
   portal_sessions: ['last_ip'],
@@ -251,6 +251,7 @@ const REQUIRED_SECRET = {
   verification_codes: ['code_hash'],
   user_sessions: ['token_hash'],
   portal_sessions: ['token_hash'],
+  portal_telegram_pending: ['ticket_hash'],
   portal_password_resets: ['token_hash'],
 }
 check('column map covers every column the brief names', () => {
@@ -262,7 +263,7 @@ check('column map covers every column the brief names', () => {
 const MAPPED_BEYOND_CLASSIFIER = [
   'contact_duplicate_dismissals.cluster_value', 'customer_share_submissions.note',
   'customers.company', 'customers.name', 'customers.notes', 'delivery_contacts.name', 'delivery_contacts.notes',
-  'legacy_deleted_sale_items.deleted_by', 'portal_accounts.name', 'portal_auth_lockouts.key',
+  'legacy_deleted_sale_items.deleted_by', 'portal_accounts.name', 'portal_accounts.telegram_user_id', 'portal_auth_lockouts.key',
   'rate_limit_events.client_key', 'returns.notes', 'sales.notes', 'suppliers.notes', 'users.name',
   'verification_codes.target',
 ]
