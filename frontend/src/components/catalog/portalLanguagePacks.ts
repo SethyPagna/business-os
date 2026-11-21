@@ -199,7 +199,6 @@ const PORTAL_TEXT_BY_LANGUAGE: Partial<Record<PortalLanguage, PortalTextMap>> = 
     dockTheme: 'របៀប',
     themeLight: 'ភ្លឺ',
     themeDark: 'ងងឹត',
-    portalGoogleNote: 'Google បកប្រែភាសាទាំងបួនដែលមានសញ្ញា។ អត្ថបទផ្លូវការគឺភាសាអង់គ្លេស និងខ្មែរ។',
     portalAccountUnavailable: 'គណនីមិនអាចប្រើបានពេលនេះទេ។',
     portalAccountIncomplete: 'ចម្លើយគណនីមិនពេញលេញ។ សូមព្យាយាមម្ដងទៀត។',
     portalAccountGenericError: 'មានបញ្ហា។ សូមព្យាយាមម្ដងទៀត។',

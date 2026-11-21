@@ -147,6 +147,29 @@ runTest('the official-text notice shows once on each of the three pages, in both
   assert.doesNotMatch(visible(renderPage('privacy', 'en').replace(/data-portal-legal-page="privacy"[\s\S]*$/, '')), /official text/, 'the footer alone does not carry the notice')
 })
 
+runTest('ONE source string: the dock picker note is the policy pages\' official-text notice, in both languages', () => {
+  const dockBundle = buildSync({
+    entryPoints: [path.join(SRC, 'components/catalog/PortalDock.tsx')],
+    bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', write: false, logLevel: 'silent',
+    external: ['react', 'react-dom'], loader: { '.css': 'empty' },
+  })
+  const dockModule = { exports: {} as Record<string, unknown> }
+  new Function('require', 'module', 'exports', dockBundle.outputFiles[0].text)(createRequire(import.meta.url), dockModule, dockModule.exports)
+  const LanguageOptions = dockModule.exports.LanguageOptions as React.ComponentType<Record<string, unknown>>
+  for (const language of ['en', 'km'] as const) {
+    const copy = (key: string, fallback = '', fallbackKm = fallback) => resolveStorefrontCopy(language, (k: string) => k, key, fallback, fallbackKm)
+    const picker = renderToStaticMarkup(React.createElement(LanguageOptions, { copy, options: [], active: 'en', onPick: () => {} }))
+    const pickerNote = visible(/<p data-portal-google-note=""[^>]*>([\s\S]*?)<\/p>/.exec(picker)?.[1] ?? '')
+    const pageNote = visible(/data-portal-legal-official-notice="true"[^>]*>([\s\S]*?)<\/p>/.exec(renderPage('privacy', language))?.[1] ?? '')
+    assert.ok(pickerNote.length > 40, `${language} the picker shows the note`)
+    assert.equal(pickerNote, pageNote, `${language} the picker and the policy page disagree`)
+    assert.equal(pickerNote, language === 'en' ? NOTICE : KM_NOTICE)
+  }
+  const dockSource = fs.readFileSync(path.join(SRC, 'components', 'catalog', 'PortalDock.tsx'), 'utf8')
+  assert.doesNotMatch(dockSource, /machine translations|portalGoogleNote|official text/, 'the dock holds no copy of the notice of its own')
+  assert.match(dockSource, /legalCopy\(copy, 'portal_legal_official_notice'\)/, 'the dock reads the legal string through the legal resolver')
+})
+
 runTest('the map-consent items are gone', () => {
   assert.equal(LEGAL_STORAGE_ROWS.some((row) => row.id === 'map-consent' || row.name.includes('map-consent')), false)
   for (const pack of [PORTAL_LEGAL_EN, PORTAL_LEGAL_KM]) {

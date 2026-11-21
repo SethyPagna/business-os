@@ -27,7 +27,7 @@ import {
   formatLegalLastUpdated,
   interpolateLegal,
   isLegalPageKey,
-  legalText,
+  legalCopy,
   protectLegalFacts,
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
@@ -185,7 +185,7 @@ export default function PortalFooter({
   // first (so a future translation of portal_legal_* just works), then the
   // en/km text declared in legalContent.ts.
   const text = useCallback(
-    (key: string) => copy(key, legalText('en', key), legalText('km', key)),
+    (key: string) => legalCopy(copy, key),
     [copy],
   )
 

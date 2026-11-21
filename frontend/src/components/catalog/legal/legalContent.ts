@@ -434,6 +434,14 @@ export function legalText(target: string, key: string): string {
 }
 
 /**
+ * The one way a surface asks for a legal string: the storefront language pack first, then the declared English / Khmer text. The
+ * policy reader and the dock's language picker both read the official-text notice through this, so the two can never disagree.
+ */
+export function legalCopy(copy: (key: string, fallback?: string, fallbackKm?: string) => string, key: string): string {
+  return copy(key, legalText('en', key), legalText('km', key))
+}
+
+/**
  * Fill {placeholders} from the merchant's own business details. Unknown
  * placeholders are left untouched so a typo shows up rather than silently
  * vanishing. A display/trade name is never substituted for a registered name.

@@ -11,6 +11,8 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import { ProtectedText } from './legal/LegalPages.tsx'
+import { legalCopy } from './legal/legalContent.ts'
 import PortalContactMenu from './PortalContactMenu.tsx'
 import { PortalContactRows } from './PortalSocialRow.tsx'
 import { PORTAL_PRIMARY_COLORS } from './portalButtons.ts'
@@ -86,9 +88,10 @@ export function LanguageOptions({ copy, options, active, onPick }: { copy: CopyF
           </button>
         )
       })}
-      {/* Which languages Google writes and which are the shop's own text: a notice, not a control. */}
+      {/* Which languages Google writes and which are the shop's own text: a notice, not a control. It is the policy pages' official-text notice,
+          read through the same resolver, so the picker and the policies always say the same thing. */}
       <p data-portal-google-note="" className="mx-3 mt-1 border-t border-stone-200 px-1 pb-1 pt-2 text-xs leading-6 text-stone-600 dark:border-neutral-700 dark:text-neutral-300">
-        {copy('portalGoogleNote', 'Google translates the four marked languages. English and Khmer are the official text.', 'Google បកប្រែភាសាទាំងបួនដែលមានសញ្ញា។ អត្ថបទផ្លូវការគឺភាសាអង់គ្លេស និងខ្មែរ។')}
+        <ProtectedText text={legalCopy(copy, 'portal_legal_official_notice')} />
       </p>
     </div>
   )

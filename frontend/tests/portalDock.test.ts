@@ -17,6 +17,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
 import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from '../src/components/catalog/portalLanguageOptions.ts'
+import { PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
 import { SRC, storefrontTranslator } from './storefrontCopyScan.ts'
 
 const requireActual = createRequire(import.meta.url)
@@ -140,12 +141,17 @@ for (const language of ['en', 'km'] as const) {
   check(`${language}: the Language menu has the six options, the Google tags and one note line at the bottom`, () => {
     const html = renderToStaticMarkup(React.createElement(LanguageOptions, { copy, options: PUBLIC_STOREFRONT_LANGUAGE_OPTIONS, active: 'km', onPick: noop }))
     assert.equal((html.match(/<button/g) || []).length, 6, 'six options, and the note is no button')
-    assert.equal((html.match(/>Google</g) || []).length, 4, 'the four Google tags stay')
-    const note = copy('portalGoogleNote', 'Google translates the four marked languages. English and Khmer are the official text.', 'Google បកប្រែភាសាទាំងបួនដែលមានសញ្ញា។ អត្ថបទផ្លូវការគឺភាសាអង់គ្លេស និងខ្មែរ។')
-    assert.ok(html.includes(note))
-    assert.ok(html.lastIndexOf(note) > html.lastIndexOf('</button>'), 'the note is under the options')
+    assert.equal((html.slice(0, html.indexOf('data-portal-google-note')).match(/>Google</g) || []).length, 4, 'the four Google tags stay')
+    // The note is the policy pages' official-text notice (legal/legalContent.ts), one source for both; Google is not translated.
+    const note = PORTAL_LEGAL_EN.portal_legal_official_notice
+    const noteHtml = /<p data-portal-google-note=""[^>]*>([\s\S]*?)<\/p>/.exec(html)?.[1] ?? ''
+    const visibleNote = noteHtml.replace(/<\/?span\b[^>]*>/g, '')
+    const expected = language === 'en' ? note : PORTAL_LEGAL_KM.portal_legal_official_notice
+    assert.equal(visibleNote, expected, 'the note is the official-text notice, byte for byte')
+    assert.ok(noteHtml.includes('<span translate="no" class="notranslate">Google</span>'), 'Google is not translated')
+    assert.ok(html.lastIndexOf('data-portal-google-note') > html.lastIndexOf('</button>'), 'the note is under the options')
     assert.match(html, /<p data-portal-google-note=""/, 'a paragraph, not a control')
-    assert.notEqual(note, copyFor(language === 'en' ? 'km' : 'en')('portalGoogleNote', 'Google translates the four marked languages. English and Khmer are the official text.', 'Google បកប្រែភាសាទាំងបួនដែលមានសញ្ញា។ អត្ថបទផ្លូវការគឺភាសាអង់គ្លេស និងខ្មែរ។'), 'the two languages differ')
+    assert.notEqual(PORTAL_LEGAL_EN.portal_legal_official_notice, PORTAL_LEGAL_KM.portal_legal_official_notice, 'the note changes with the language')
     assert.doesNotMatch(html, /aria-label=/, 'the group is named by aria-labelledby, never an aria-label on a container')
   })
 }
@@ -183,7 +189,7 @@ check('the header holds none of the six controls and nothing at the top is stick
 
 check('the new keys have Khmer in the storefront pack, equal to the call-site text', () => {
   const pack = read('components/catalog/portalLanguagePacks.ts')
-  for (const key of ['dockMenu', 'dockLanguage', 'dockTheme', 'themeLight', 'themeDark', 'portalGoogleNote']) {
+  for (const key of ['dockMenu', 'dockLanguage', 'dockTheme', 'themeLight', 'themeDark']) {
     assert.match(pack, new RegExp('\n    ' + key + ": '[^']*[ក-៿]"), key + ' has Khmer in portalLanguagePacks.ts')
   }
   assert.doesNotMatch(read('components/catalog/PortalDock.tsx'), /\bt\('/, 'the dock never reaches the admin pack')
