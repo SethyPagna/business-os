@@ -535,6 +535,31 @@ export function protectLegalFacts(text: string, literals: readonly string[] = []
   return segments
 }
 
+/**
+ * Google trims the spaces at the edges of the text it translates, so a fact between two translated pieces ends up glued to
+ * its neighbours ("dans7 daysApportez", measured 21 Nov 2026). The spaces next to a fact move inside its untranslated span,
+ * where Google leaves them. The segments still join back to the input.
+ */
+export function padProtectedSegments(segments: readonly LegalTextSegment[]): LegalTextSegment[] {
+  const out = segments.map((part) => ({ ...part }))
+  for (let index = 0; index < out.length; index += 1) {
+    if (!out[index].protect) continue
+    const before = out[index - 1]
+    if (before && !before.protect) {
+      const lead = before.text.match(/\s+$/)?.[0] || ''
+      before.text = before.text.slice(0, before.text.length - lead.length)
+      out[index].text = lead + out[index].text
+    }
+    const after = out[index + 1]
+    if (after && !after.protect) {
+      const trail = after.text.match(/^\s+/)?.[0] || ''
+      after.text = after.text.slice(trail.length)
+      out[index].text += trail
+    }
+  }
+  return out.filter((part) => part.text)
+}
+
 // Owner, 21 Nov 2026: a one-word homonym the translator turned into a biscuit ("Galleta", "曲奇饼"). The cell is the
 // word for the storage type, so it is kept in the official language.
 export const LEGAL_KEEP_OFFICIAL_KEYS: readonly string[] = ['portal_legal_kind_cookie']

@@ -32,6 +32,7 @@ import {
   PORTAL_LEGAL_KM,
   interpolateLegal,
   legalText,
+  padProtectedSegments,
   protectLegalFacts,
 } from '../src/components/catalog/legal/legalContent.ts'
 
@@ -122,6 +123,9 @@ const renderPage = (page: string, language: 'en' | 'km') => {
   } finally { delete globals.window }
 }
 const SPAN = '<span translate="no" class="notranslate">'
+const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+// The spaces next to a fact sit inside its span (padProtectedSegments), so a wrapped fact may carry them.
+const wraps = (html: string, fact: string) => new RegExp(`${escapePattern(SPAN)}\\s*${escapePattern(fact)}\\s*</span>`).test(html)
 const unwrap = (html: string) => html.split(SPAN).join('').replace(/<\/span>/g, '')
 const escapeHtml = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;')
 
@@ -146,17 +150,17 @@ runTest('every rendered page shows the exact text of every key, in English and K
 runTest('the real pages wrap the real facts', () => {
   const privacy = renderPage('privacy', 'en')
   for (const fact of ['399 days', '1 day', '30 days', '90 days', '180 days', '200 days', '16', 'Sentry', 'Cloudflare', 'Cloudinary', 'Google', 'Google Translate', details.name]) {
-    assert.ok(privacy.includes(`${SPAN}${fact}</span>`), `privacy: ${fact} is not wrapped`)
+    assert.ok(wraps(privacy, fact), `privacy: ${fact} is not wrapped`)
   }
   const terms = renderPage('terms', 'en')
-  for (const fact of ['7 days', '16', details.name]) assert.ok(terms.includes(`${SPAN}${fact}</span>`), `terms: ${fact} is not wrapped`)
+  for (const fact of ['7 days', '16', details.name]) assert.ok(wraps(terms, fact), `terms: ${fact} is not wrapped`)
   const cookies = renderPage('cookies', 'en')
   for (const fact of ['399 days', '200 days', 'googtrans', 'Google Maps', 'Google Translate', 'Telegram', 'WhatsApp', 'Messenger', 'Facebook', 'Instagram']) {
-    assert.ok(cookies.includes(`${SPAN}${fact}</span>`), `cookies: ${fact} is not wrapped`)
+    assert.ok(wraps(cookies, fact), `cookies: ${fact} is not wrapped`)
   }
-  for (const page of LEGAL_PAGE_ORDER) assert.ok(renderPage(page, 'en').includes(`${SPAN}21/11/2026</span>`), `${page}: the date is not wrapped`)
+  for (const page of LEGAL_PAGE_ORDER) assert.ok(wraps(renderPage(page, 'en'), '21/11/2026'), `${page}: the date is not wrapped`)
   const km = renderPage('privacy', 'km')
-  for (const fact of ['៣៩៩ ថ្ងៃ', '១ ថ្ងៃ', '៣០ ថ្ងៃ', '១៦ ឆ្នាំ', 'Sentry', 'Cloudflare', '21/11/2026']) assert.ok(km.includes(`${SPAN}${fact}</span>`), `km privacy: ${fact} is not wrapped`)
+  for (const fact of ['៣៩៩ ថ្ងៃ', '១ ថ្ងៃ', '៣០ ថ្ងៃ', '១៦ ឆ្នាំ', 'Sentry', 'Cloudflare', '21/11/2026']) assert.ok(wraps(km, fact), `km privacy: ${fact} is not wrapped`)
 })
 
 runTest('KEEP-OFFICIAL: the Cookie type cell is not translated, the other type cells still are', () => {
@@ -170,6 +174,23 @@ runTest('KEEP-OFFICIAL: the Cookie type cell is not translated, the other type c
   assert.ok(localCell && !/translate="no"/.test(localCell[1]), 'the Local storage cell stays translatable')
   const km = renderPage('cookies', 'km')
   assert.equal([...km.matchAll(/<td\b[^>]*translate="no"[^>]*>ខូឃី<\/td>/g)].length, cookieCells.length, 'the Khmer Cookie cells are kept too')
+})
+
+runTest('PAD: the spaces next to a fact sit inside its span, so Google cannot glue the fact to its neighbours', () => {
+  const text = 'You can return an unopened item within 7 days. Bring the receipt.'
+  const raw = protectLegalFacts(text)
+  assert.deepEqual(raw.filter((part) => part.protect).map((part) => part.text), ['7 days'], 'control: the bare cut has no spaces in the fact')
+  const padded = padProtectedSegments(raw)
+  assert.deepEqual(padded.map((part) => part.text), ['You can return an unopened item within', ' 7 days', '. Bring the receipt.'])
+  assert.equal(padded.map((part) => part.text).join(''), text)
+  assert.deepEqual(padProtectedSegments(protectLegalFacts('Hosted by Cloudflare and Sentry.')).map((part) => part.text), ['Hosted by', ' Cloudflare ', 'and', ' Sentry', '.'])
+  for (const lang of ['en', 'km'] as const) {
+    for (const page of LEGAL_PAGE_ORDER) {
+      const html = renderPage(page, lang)
+      assert.equal(html.includes(` ${SPAN}`), false, `${lang} ${page}: a space is left outside a fact's span (before it)`)
+      assert.equal(/<span translate="no" class="notranslate">[^<]*<\/span> /.test(html), false, `${lang} ${page}: a space is left outside a fact's span (after it)`)
+    }
+  }
 })
 
 runTest('the legal module uses no regex look-behind', () => {

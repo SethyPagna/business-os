@@ -28,6 +28,7 @@ import {
   interpolateLegal,
   isLegalPageKey,
   legalCopy,
+  padProtectedSegments,
   protectLegalFacts,
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
@@ -81,7 +82,7 @@ const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-of
 export function ProtectedText({ text, literals = [] }: { text: string; literals?: readonly string[] }) {
   return (
     <>
-      {protectLegalFacts(text, literals).map((part, index) => (
+      {padProtectedSegments(protectLegalFacts(text, literals)).map((part, index) => (
         part.protect ? <span key={index} translate="no" className="notranslate">{part.text}</span> : part.text
       ))}
     </>
