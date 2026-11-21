@@ -1,4 +1,4 @@
-import { waitingLineSql } from './inventoryCheckSessions'
+import { waitingKeySql, waitingLineSql } from './inventoryCheckSessions'
 import { PRODUCT_ID_BUCKETS_SQL } from './productIdBuckets'
 
 // The count marks (read switch ic_marks, contract docs/contracts/inventory-check-marks-20261121.md): what a device holds so it can show status chips, filters and
@@ -37,19 +37,24 @@ export const MARKS_BY_IDS_SQL = `SELECT CAST(w.value AS INTEGER) AS id, ${T('i.u
 export const TOP_SQL = 'SELECT id, actor_id, request_id, created_at FROM inventory_check_events ORDER BY id DESC LIMIT 1'
 export const AT_SQL = 'SELECT id, actor_id, request_id, created_at FROM inventory_check_events WHERE id = @since'
 export const EVENTS_SQL = 'SELECT id, session_id, product_id, actor_id, request_id, created_at FROM inventory_check_events WHERE id > @since ORDER BY id LIMIT @pageEvents'
-export const SCOPE_SQL = `SELECT s.id AS id, EXISTS (SELECT 1 FROM inventory_check_approvals a WHERE a.session_id = s.id) AS approval
-  FROM json_each(@sessions) w CROSS JOIN inventory_check_sessions s ON s.id = w.value WHERE s.organization_id IS @organization AND s.branch_id = @branchId`
-export const SESSION_PRODUCTS_SQL = 'SELECT DISTINCT session_id, product_id FROM inventory_check_items WHERE session_id IN (SELECT value FROM json_each(@sessions))'
-// Which touched products wait. Driven from the pending approvals of the branch and their stored line sets (line_set_json keys are product ids), so the rows read follow the waiting backlog, never the touched ids times the history; an approval without a stored line set falls back to the overlay's count-differs rule.
-export const PENDING_LINES_SQL = `SELECT product_id, session_id FROM (
-  SELECT CAST(je.key AS INTEGER) AS product_id, a.session_id AS session_id FROM inventory_check_approvals a INDEXED BY inventory_check_approvals_pending, json_each(a.line_set_json) je
-    WHERE a.organization_id IS @organization AND a.status = 'pending' AND a.branch_id = @branchId AND a.line_set_json IS NOT NULL AND CAST(je.key AS INTEGER) IN (SELECT value FROM json_each(@ids))
-      AND json_extract(a.applied_json, '$.lines."' || je.key || '"') IS NULL AND json_extract(a.superseded_json, '$."' || je.key || '"') IS NULL
-      AND json_extract(a.line_decisions_json, '$."' || je.key || '".decision') IS NOT 'reject'
-      AND EXISTS (SELECT 1 FROM inventory_check_items i WHERE i.session_id = a.session_id AND i.product_id = CAST(je.key AS INTEGER) AND i.branch_id = @branchId)
-  UNION
-  SELECT i.product_id AS product_id, a.session_id AS session_id FROM inventory_check_approvals a INDEXED BY inventory_check_approvals_pending JOIN inventory_check_items i ON i.session_id = a.session_id
-    WHERE a.organization_id IS @organization AND a.status = 'pending' AND a.branch_id = @branchId AND a.line_set_json IS NULL AND i.branch_id = @branchId AND i.product_id IN (SELECT value FROM json_each(@ids)) AND ${waitingLineSql('a', 'i')})`
+// The sessions the events name: which are in the viewer's scope, whether each holds an approval, and the lines of that approval that wait. A waiting line is decided by its approval row alone (the keys of the stored line set, the rule of waitingKeySql), so the
+// rows read follow the sessions the events name, never the waiting backlog. `legacy` is a pending approval with no stored line set (a Worker older than the column wrote it): its list comes from LEGACY_WAITING_SQL, and `items` (its member count, from its create event) is what the walk charges for it.
+export const SCOPE_WAITING_SQL = `SELECT s.id AS id, a.session_id IS NOT NULL AS approval, a.status AS status, a.lines AS lines,
+       a.line_set_json IS NULL AND a.session_id IS NOT NULL AND a.status = 'pending' AS legacy,
+       CASE WHEN a.line_set_json IS NULL AND a.session_id IS NOT NULL AND a.status = 'pending' THEN
+         (SELECT CAST(json_extract(e.after_json,'$.members') AS INTEGER) FROM inventory_check_events e WHERE e.session_id = s.id ORDER BY e.id LIMIT 1)
+       END AS items,
+       CASE WHEN a.status = 'pending' AND a.line_set_json IS NOT NULL THEN
+         (SELECT json_group_array(CAST(j.key AS INTEGER)) FROM json_each(a.line_set_json) j WHERE ${waitingKeySql('a', 'j.key')})
+       ELSE '[]' END AS waiting
+FROM json_each(@sessions) w CROSS JOIN inventory_check_sessions s ON s.id = w.value
+LEFT JOIN inventory_check_approvals a ON a.session_id = s.id
+WHERE s.organization_id IS @organization AND s.branch_id = @branchId`
+// The waiting lines of pending approvals that hold no stored line set, by the engine's own rule over the session's items.
+export const LEGACY_WAITING_SQL = `SELECT a.session_id AS session_id, i.product_id AS product_id
+FROM json_each(@legacy) w CROSS JOIN inventory_check_approvals a ON a.session_id = w.value
+JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
+WHERE ${waitingLineSql('a', 'i')}`
 // The waiting set, built once per device: the lines of the next pending approvals of the branch (newest first, keyset), with the approval's position so the caller can name the next page.
 export const PENDING_PAGE_SQL = `WITH pg AS (SELECT a.session_id AS session_id, a.submitted_at AS submitted_at FROM inventory_check_approvals a INDEXED BY inventory_check_approvals_pending
     WHERE a.organization_id IS @organization AND a.status = 'pending' AND a.branch_id = @branchId
@@ -89,41 +94,64 @@ export async function readTopAndAt(db: Db, since: number): Promise<{ top: number
 }
 
 export type Limits = { pageEvents: number; touchedMax: number }
-export type ChangesAnswer = { rebuild: true; top: number } | { cursor: number; tag: string; top: number; more: boolean; marks: Mark[]; pending?: Array<[number, 0 | 1]> }
-/** The change feed (spec section 1): the marks of the products the events after `since` touched, as states. `permitted`: the viewer may see Waiting. */
-export async function readChanges(db: Db, scope: MarksScope, since: number, tag: string, limits: Limits, permitted: boolean): Promise<ChangesAnswer> {
+export type WaitingEntry = [sessionId: string, productIds: number[]]
+export type ChangesAnswer = { rebuild: true; top: number } | { cursor: number; tag: string; top: number; more: boolean; exact: boolean; marks: Mark[]; waiting: WaitingEntry[] }
+/**
+ * The change feed: the marks of the products the events after `since` touched, and for every session those events name the full list of its waiting products, as states. Waiting is computed for every viewer; the route strips it for a viewer who may not see it.
+ * The walk charges a product once (its first event) and a legacy session its items once; waiting ids cost nothing. The last batch ends with TOP_SQL: the answer is exact only when no event was written since call 1, else `more` is true and the device does not publish.
+ */
+export async function readChanges(db: Db, scope: MarksScope, since: number, tag: string, limits: Limits): Promise<ChangesAnswer> {
   const [top, at, events] = await db.batch([{ sql: TOP_SQL }, { sql: AT_SQL, params: { since } }, { sql: EVENTS_SQL, params: { since, pageEvents: limits.pageEvents } }])
   const topId = eventOf(rowsOf(top))?.id ?? 0
   const atEvent = eventOf(rowsOf(at))
   if (since > topId || (since > 0 && (!atEvent || eventTag(atEvent) !== tag))) return { rebuild: true, top: topId }
   const list = rowsOf(events)
-  if (!list.length) return { cursor: since, tag, top: topId, more: false, marks: [], ...(permitted ? { pending: [] } : {}) }
-  const sessions = [...new Set(list.map((row) => String(row.session_id)))]
-  const nullSessions = [...new Set(list.filter((row) => row.product_id == null).map((row) => String(row.session_id)))]
-  const second = await db.batch([{ sql: SCOPE_SQL, params: { ...scope, sessions: JSON.stringify(sessions) } },
-    ...(nullSessions.length ? [{ sql: SESSION_PRODUCTS_SQL, params: { sessions: JSON.stringify(nullSessions) } }] : [])])
-  const inScope = new Map(rowsOf(second[0]).map((row): [string, boolean] => [String(row.id), Number(row.approval) === 1]))
-  const sessionProducts = new Map<string, number[]>()
-  for (const row of rowsOf(second[1])) { const k = String(row.session_id); sessionProducts.set(k, [...sessionProducts.get(k) ?? [], Number(row.product_id)]) }
-  const touched = new Set<number>()
-  let last: Row | null = null, stopped = false
+  if (!list.length) return { cursor: since, tag, top: topId, more: false, exact: true, marks: [], waiting: [] }
+  const named = list.some((row) => row.product_id != null)
+  const second = await db.batch([{ sql: SCOPE_WAITING_SQL, params: { ...scope, sessions: JSON.stringify([...new Set(list.map((row) => String(row.session_id)))]) } }, ...(named ? [] : [{ sql: TOP_SQL }])])
+  const scoped = new Map(rowsOf(second[0]).map((row): [string, Row] => [String(row.id), row]))
+  const touched = new Set<number>(), charged = new Set<string>(), walked = new Set<string>()
+  let last: Row | null = null, stopped = false, legacyCost = 0
   for (const row of list) {
-    const sid = String(row.session_id), approval = inScope.get(sid)
-    const add: number[] = approval === undefined ? [] : row.product_id != null ? [Number(row.product_id)] : approval ? sessionProducts.get(sid) ?? [] : []
-    const fresh = add.filter((id) => !touched.has(id))
-    if (touched.size + fresh.length > limits.touchedMax && last !== null) { stopped = true; break }
-    for (const id of fresh) touched.add(id)
+    const sid = String(row.session_id), known = scoped.get(sid)
+    const productId = known && row.product_id != null ? Number(row.product_id) : null
+    const freshSession = known !== undefined && Number(known.legacy) === 1 && !charged.has(sid)
+    const items = freshSession ? known.items == null ? limits.touchedMax : Number(known.items) : 0
+    const freshProduct = productId !== null && !touched.has(productId) ? 1 : 0
+    if (touched.size + legacyCost + freshProduct + items > limits.touchedMax && last !== null) { stopped = true; break }
+    if (productId !== null) touched.add(productId)
+    if (freshSession) { charged.add(sid); legacyCost += items }
+    walked.add(sid)
     last = row
   }
   const cursorRow = last as Row
   const ids = [...touched]
-  const third = ids.length ? await db.batch([{ sql: MARKS_BY_IDS_SQL, params: { ...scope, ids: JSON.stringify(ids) } }, ...(permitted ? [{ sql: PENDING_LINES_SQL, params: { ...scope, ids: JSON.stringify(ids) } }] : [])]) : []
-  const waiting = new Set(rowsOf(third[1]).map((row) => Number(row.product_id)))
+  const legacyIds = [...charged]
+  let closing = second
+  if (named || legacyIds.length) {
+    closing = await db.batch([
+      ...(ids.length ? [{ sql: MARKS_BY_IDS_SQL, params: { ...scope, ids: JSON.stringify(ids) } }] : []),
+      ...(legacyIds.length ? [{ sql: LEGACY_WAITING_SQL, params: { legacy: JSON.stringify(legacyIds) } }] : []),
+      { sql: TOP_SQL }])
+  }
+  const lastTop = eventOf(rowsOf(closing[closing.length - 1]))?.id ?? 0
+  const exact = lastTop === topId
+  const marksAt = ids.length ? 0 : -1
+  const legacyAt = legacyIds.length ? (marksAt === 0 ? 1 : 0) : -1
+  const legacyLists = new Map<string, number[]>()
+  for (const row of legacyAt >= 0 ? rowsOf(closing[legacyAt]) : []) { const k = String(row.session_id); legacyLists.set(k, [...legacyLists.get(k) ?? [], Number(row.product_id)]) }
+  const waiting: WaitingEntry[] = []
+  for (const sid of walked) {
+    const known = scoped.get(sid)
+    if (!known || Number(known.approval) !== 1) continue
+    waiting.push([sid, Number(known.legacy) === 1 ? legacyLists.get(sid) ?? [] : (JSON.parse(String(known.waiting)) as unknown[]).map(Number)])
+  }
   return { cursor: Number(cursorRow.id), tag: eventTag({ id: Number(cursorRow.id), actor_id: Number(cursorRow.actor_id), request_id: String(cursorRow.request_id), created_at: String(cursorRow.created_at) }),
-    top: topId, more: stopped || list.length >= limits.pageEvents, marks: markRows(rowsOf(third[0])), ...(permitted ? { pending: ids.map((id): [number, 0 | 1] => [id, waiting.has(id) ? 1 : 0]) } : {}) }
+    top: topId, more: stopped || list.length >= limits.pageEvents || !exact, exact, marks: marksAt >= 0 ? markRows(rowsOf(closing[marksAt])) : [], waiting }
 }
 
-export type PendingAnswer = { cursor: number; tag: string; ids: number[]; next: { afterAt: string; afterId: string } | null }
+export type PendingAnswer = { cursor: number; tag: string; sessions: WaitingEntry[]; next: { afterAt: string; afterId: string } | null }
+/** The cold build of the waiting lists: the next pending approvals of the branch, newest first, each with its waiting products (a claimed approval whose open lines all landed answers an empty list). */
 export async function readPendingPage(db: Db, scope: MarksScope, after: { afterAt: string; afterId: string } | null, pageApprovals: number): Promise<PendingAnswer> {
   const [top, rows] = await db.batch([{ sql: TOP_SQL }, { sql: PENDING_PAGE_SQL, params: { ...scope, afterAt: after?.afterAt ?? null, afterId: after?.afterId ?? null, pageApprovals: pageApprovals + 1 } }])
   const event = eventOf(rowsOf(top))
@@ -135,6 +163,5 @@ export async function readPendingPage(db: Db, scope: MarksScope, after: { afterA
     if (row.product_id != null) bySession.get(sid)!.push(Number(row.product_id))
   }
   const page = order.slice(0, pageApprovals)
-  const ids = [...new Set(page.flatMap((o) => bySession.get(o.id)!))]
-  return { cursor: event?.id ?? 0, tag: event ? eventTag(event) : '', ids, next: order.length > pageApprovals ? { afterAt: page[page.length - 1].at, afterId: page[page.length - 1].id } : null }
+  return { cursor: event?.id ?? 0, tag: event ? eventTag(event) : '', sessions: page.map((o): WaitingEntry => [o.id, bySession.get(o.id)!]), next: order.length > pageApprovals ? { afterAt: page[page.length - 1].at, afterId: page[page.length - 1].id } : null }
 }

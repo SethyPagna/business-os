@@ -24,7 +24,7 @@ import { readInventoryCheckLots } from '../lib/inventoryCheckLots'
 import { getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { cacheKeyRequest } from '../lib/cacheKey'
-import { MARKS_FORMAT, fnv1a32, readChanges, readPendingPage, readSnapshotPage, readTopAndAt, type Mark } from '../lib/inventoryCheckMarks'
+import { MARKS_FORMAT, fnv1a32, readChanges, readPendingPage, readSnapshotPage, readTopAndAt, type ChangesAnswer, type Mark } from '../lib/inventoryCheckMarks'
 import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
   canSeeStaffIdentity, InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, pickupInventoryCheckTask, releaseInventoryCheckTask, REPLACED_NOTE,
@@ -298,6 +298,8 @@ async function marksStart(c: IcContext): Promise<{ scope: { organization: number
   const branchId = positiveWord(c.req.query('branchId'), 'branchId')
   return { scope: { organization: user.organization_id ?? null, branchId }, permitted: access.fields.stock && await fixStockOn(c), limits: getPlanLimits(c.env) }
 }
+// Waiting is computed for every viewer and removed here, from the signed-in actor of THIS request, for one who may not see it.
+const withoutWaiting = (answer: ChangesAnswer): ChangesAnswer => 'waiting' in answer ? Object.fromEntries(Object.entries(answer).filter(([k]) => k !== 'waiting')) as ChangesAnswer : answer
 type MarksPage = { page: number; buckets: number[]; cursor: number; tag: string; hash: string; rows: Mark[] }
 app.get('/marks', async c => {
   const start = await marksStart(c)
@@ -328,7 +330,8 @@ app.get('/marks/changes', async c => {
   if (!start) return notWired(c)
   const since = nonNegative(c.req.query('since'), 'since'), tag = c.req.query('tag') ?? ''
   if (!/^([0-9a-f]{8})?$/.test(tag) || (since > 0 && tag === '')) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'tag')
-  return c.json(await readChanges(getDb(c.env), start.scope, since, tag, { pageEvents: start.limits.inventoryMarksChangesPageEvents, touchedMax: start.limits.inventoryMarksTouchedMax }, start.permitted))
+  const answer = await readChanges(getDb(c.env), start.scope, since, tag, { pageEvents: start.limits.inventoryMarksChangesPageEvents, touchedMax: start.limits.inventoryMarksTouchedMax })
+  return c.json(start.permitted ? answer : withoutWaiting(answer))
 })
 app.get('/marks/pending', async c => {
   const start = await marksStart(c)

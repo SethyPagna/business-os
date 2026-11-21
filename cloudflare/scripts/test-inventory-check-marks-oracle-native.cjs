@@ -1,8 +1,10 @@
 'use strict'
-// The count marks oracle (invariants I6, I7, I8, I10; spec section 3, S0a). Runs under the native-test lock (Records/Locks/native-tests).
-//   node scripts/test-inventory-check-marks-oracle-native.cjs [--mutants]
-// A simulated device builds its map from /marks pages (+ /marks/pending), then follows /marks/changes; after every writer step the device map must equal the oracle: the latest count of each product by the rule
-// of LATEST_ITEMS_SQL (text copied below so it survives the deletion of the old reader), and the waiting set must equal PENDING_ITEMS_SQL. A device that has not seen the step cannot pass: the oracle changes with every writer.
+// The count marks oracle (invariants I6, I7, I8, I10; spec section 3, S0a; amendment 1.1 F.1, F.2). Runs under the native-test lock (Records/Locks/native-tests).
+//   node scripts/test-inventory-check-marks-oracle-native.cjs [--mutants [--skip-base]]   (--skip-base: only the mutants, when the base run was its own invocation)
+// A simulated device builds its map from /marks pages (+ /marks/pending), then follows /marks/changes; after every writer step the device must equal the oracle: the latest count of each product by the rule
+// of LATEST_ITEMS_SQL (text copied below so it survives the deletion of the old reader), and the waiting lists by session must equal PENDING_ITEMS_SQL grouped by session. A device that has not seen the step cannot pass: the oracle changes with every writer.
+// The device model follows A.4: it holds waitingBySession, builds it ONLY from /marks/pending and the `waiting` field of changes answers, applies the answers of one chain to a STAGED copy and publishes only when the chain ends with more = false.
+// F.1 (a): the oracle is evaluated right after every write the harness makes and kept by the event top after it (the history); a published state with top T must equal history[T].
 // --mutants: the same run on a Worker with one line of lib/inventoryCheckMarks.ts (or the cached-page rule) mutated; every mutant must turn the run red.
 const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
@@ -22,7 +24,7 @@ const countDiffers = (i) => `(${i}.baseline_quantity IS NOT NULL AND (abs(${i}.b
 const waiting = (a, i) => `${a}.status='pending' AND CASE WHEN ${a}.line_set_json IS NULL THEN ${countDiffers(i)} ELSE json_extract(${a}.line_set_json,'$."'||${i}.product_id||'"') IS NOT NULL END
   AND json_extract(${a}.applied_json,'$.lines."'||${i}.product_id||'"') IS NULL AND json_extract(${a}.superseded_json,'$."'||${i}.product_id||'"') IS NULL
   AND json_extract(${a}.line_decisions_json,'$."'||${i}.product_id||'".decision') IS NOT 'reject'`
-const PENDING = `SELECT DISTINCT i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
+const PENDING = `SELECT DISTINCT a.session_id AS session_id, i.product_id AS product_id FROM inventory_check_approvals a JOIN inventory_check_items i ON i.session_id = a.session_id AND i.branch_id = a.branch_id
   WHERE a.organization_id IS ?1 AND a.branch_id = ?2 AND ${waiting('a', 'i')}`
 
 async function counter(world) {
@@ -34,30 +36,38 @@ async function counter(world) {
   return login.setCookie.split(';')[0]
 }
 
+// The oracle: the marks, and the waiting lists by session (only sessions with a waiting line), sorted.
 async function oracle(world, branch) {
   const marks = new Map((await world.all(LATEST, world.orgId, branch)).map((r) => [Number(r.product_id), [Number(r.t), Number(r.s)]]))
-  const pending = new Set((await world.all(PENDING, world.orgId, branch)).map((r) => Number(r.product_id)))
-  return { marks, pending }
+  const bySession = new Map()
+  for (const r of await world.all(PENDING, world.orgId, branch)) { const k = String(r.session_id); bySession.set(k, [...bySession.get(k) ?? [], Number(r.product_id)]) }
+  for (const [k, ids] of bySession) bySession.set(k, ids.sort((x, y) => x - y))
+  return { marks, bySession, pending: new Set([...bySession.values()].flat()) }
 }
 
+// The device model of A.4. `marks` and `waitingBySession` are what the view reads (PUBLISHED); every chain of answers is applied to `staged` and published only when it ends with more = false.
 class Device {
-  constructor(world, branch, opts = {}) { Object.assign(this, { world, branch, marks: new Map(), pending: new Set(), cursor: 0, tag: '', answers: 0, rebuilds: 0, pagesFetched: 0, log: [], miss: opts.miss !== false, caps: null }) }
+  constructor(world, branch, opts = {}) { Object.assign(this, { world, branch, marks: new Map(), waitingBySession: new Map(), staged: null, cursor: 0, tag: '', top: 0, answers: 0, rebuilds: 0, pagesFetched: 0, log: [], miss: opts.miss !== false, caps: null, maxMarks: 0 }) }
+  get pending() { return new Set([...this.waitingBySession.values()].flat()) }
+  begin() { this.staged = { marks: new Map(this.marks), waiting: new Map([...this.waitingBySession].map(([k, v]) => [k, [...v]])) } }
+  putWaiting(entries) { for (const [sid, ids] of entries) { if (ids.length) this.staged.waiting.set(sid, [...ids]); else this.staged.waiting.delete(sid) } }
+  publish() { this.marks = this.staged.marks; this.waitingBySession = this.staged.waiting; this.staged = null }
   async get(url) { const r = await this.world.send('GET', url, undefined, { miss: this.miss }); this.answers++; this.log.push({ url: url.replace(IC, ''), status: r.status, calls: r.calls, rr: r.rr }); return r }
   async build() {
-    const w = this.world
-    this.marks = new Map(); this.pending = new Set(); this.rebuilds += 1
+    this.staged = { marks: new Map(), waiting: new Map() }; this.rebuilds += 1
     const first = await this.get(`${IC}/marks?branchId=${this.branch}&page=0`)
     assert.equal(first.status, 200, 'marks page 0: ' + first.text.slice(0, 200))
     const answers = [first.json]
     for (const page of first.json.buckets) if (page !== 0) { const r = await this.get(`${IC}/marks?branchId=${this.branch}&page=${page}`); assert.equal(r.status, 200, 'marks page ' + page); answers.push(r.json) }
     const cursors = []
-    for (const a of answers) { this.pagesFetched++; cursors.push([a.cursor, a.tag]); for (const [id, t, s] of a.rows ?? []) this.marks.set(id, [t, s]) }
+    for (const a of answers) { this.pagesFetched++; cursors.push([a.cursor, a.tag]); for (const [id, t, s] of a.rows ?? []) this.staged.marks.set(id, [t, s]) }
     let after = ''
     for (;;) {
       const r = await this.get(`${IC}/marks/pending?branchId=${this.branch}${after}`)
       if (r.status === 403) break
       assert.equal(r.status, 200, 'pending: ' + r.text.slice(0, 200))
-      cursors.push([r.json.cursor, r.json.tag]); for (const id of r.json.ids) this.pending.add(id)
+      assert.ok(Array.isArray(r.json.sessions) && r.json.ids === undefined, 'the pending page answers by session')
+      cursors.push([r.json.cursor, r.json.tag]); this.putWaiting(r.json.sessions)
       if (!r.json.next) break
       after = `&afterAt=${encodeURIComponent(r.json.next.afterAt)}&afterId=${encodeURIComponent(r.json.next.afterId)}`
     }
@@ -66,24 +76,32 @@ class Device {
     await this.sync()
   }
   async sync(limit = 200) {
+    if (!this.staged) this.begin()
     for (let n = 0; n < limit; n++) {
       const r = await this.get(`${IC}/marks/changes?branchId=${this.branch}&since=${this.cursor}&tag=${this.tag}`)
       assert.equal(r.status, 200, 'changes: ' + r.text.slice(0, 200))
-      if (r.json.rebuild || (this.catchUp && r.json.top - this.cursor > this.catchUp)) { return this.build() }
-      for (const [id, t, s] of r.json.marks) { if (s === 0) this.marks.delete(id); else this.marks.set(id, [t, s]) }
-      for (const [id, w] of r.json.pending ?? []) { if (w) this.pending.add(id); else this.pending.delete(id) }
+      if (r.json.rebuild || (this.catchUp && r.json.top - this.cursor > this.catchUp)) { this.staged = null; return this.build() }
+      assert.equal(typeof r.json.exact, 'boolean', 'the answer says whether it is exact')
+      assert.equal(r.json.pending, undefined, 'the answer carries waiting by session, not a pending list')
+      this.maxMarks = Math.max(this.maxMarks, r.json.marks.length)
+      for (const [id, t, s] of r.json.marks) { if (s === 0) this.staged.marks.delete(id); else this.staged.marks.set(id, [t, s]) }
+      this.putWaiting(r.json.waiting)
       this.cursor = r.json.cursor; this.tag = r.json.tag; this.top = r.json.top
-      if (!r.json.more) return
+      if (!r.json.more) { assert.equal(r.json.exact, true, 'a chain ends only with an exact answer'); this.publish(); return }
     }
     throw new Error('the change feed did not finish')
   }
 }
 
 const diff = (a, b) => { const out = []; for (const [k, v] of a) if (!b.has(k) || JSON.stringify(b.get(k)) !== JSON.stringify(v)) out.push(`${k}: ${JSON.stringify(v)} vs ${JSON.stringify(b.get(k))}`); for (const k of b.keys()) if (!a.has(k)) out.push(`${k}: missing vs ${JSON.stringify(b.get(k))}`); return out }
+const sortedLists = (m) => new Map([...m].map(([k, v]) => [k, [...v].sort((x, y) => x - y)]))
+const stateDiff = (device, o) => ({ marks: diff(device.marks, o.marks), waiting: diff(sortedLists(device.waitingBySession), o.bySession), pending: diff(new Map([...device.pending].map((x) => [x, 1])), new Map([...o.pending].map((x) => [x, 1]))) })
 async function same(world, device, label) {
   const o = await oracle(world, device.branch)
-  const dm = diff(device.marks, o.marks), dp = diff(new Map([...device.pending].map((x) => [x, 1])), new Map([...o.pending].map((x) => [x, 1])))
-  assert.deepEqual([dm.slice(0, 5), dp.slice(0, 5)], [[], []], `${label}: device vs oracle (${dm.length} mark and ${dp.length} waiting differences)`)
+  const d = stateDiff(device, o)
+  assert.deepEqual([d.marks.slice(0, 5), d.waiting.slice(0, 5), d.pending.slice(0, 5)], [[], [], []], `${label}: device vs oracle (${d.marks.length} mark, ${d.waiting.length} waiting list and ${d.pending.length} waiting product differences)`)
+  const kept = world.history && world.history.get(device.top)
+  if (kept) { const h = stateDiff(device, kept); assert.deepEqual([h.marks.slice(0, 5), h.waiting.slice(0, 5)], [[], []], `${label}: the published state is not the database at its top ${device.top} (F.1 a)`) }
   return o
 }
 
@@ -95,10 +113,13 @@ async function scenario(world, report) {
   const submit = (ps, diffEvery, extra = {}) => must(world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: plain(ps, diffEvery), ...extra }, { cookie: counterCookie }), 'submit')
   const approval = async (sid, decision, extra = {}) => { for (let n = 0; n < 60; n++) { const r = await must(world.send('POST', `${IC}/sessions/${sid}/approval`, { decision, requestId: rid('ap'), ...extra }), 'approval ' + decision); if (r.json.done !== false) return r } throw new Error('approval did not finish') }
   const sessionOf = async (pid) => (await world.all('SELECT i.session_id AS s FROM inventory_check_items i JOIN inventory_check_approvals a ON a.session_id=i.session_id WHERE i.product_id=? ORDER BY i.updated_at DESC LIMIT 1', pid))[0].s
+  world.history = new Map()
+  const snap = async () => { const top = Number((await world.all('SELECT COALESCE(MAX(id), 0) AS top FROM inventory_check_events'))[0].top); world.history.set(top, await oracle(world, 1)) }
   const counterCookie = await counter(world)
   const device = new Device(world, 1)
   await device.build()
-  const step = async (label, fn) => { try { await fn() } catch (e) { report.skipped.push(`${label}: ${String(e.message).slice(0, 120)}`); return } await device.sync(); await same(world, device, label); const fresh = new Device(world, 1); await fresh.build(); await same(world, fresh, label + ' (fresh build)'); report.steps.push(label) }
+  const step = async (label, fn) => { try { await fn() } catch (e) { report.skipped.push(`${label}: ${String(e.message).slice(0, 120)}`); return } await snap(); await device.sync(); await same(world, device, label); const fresh = new Device(world, 1); await fresh.build(); await same(world, fresh, label + ' (fresh build)'); report.steps.push(label) }
+  await snap()
   const empty = await same(world, device, 'empty world'); report.steps.push('empty world (' + empty.marks.size + ' marks)')
   // W1 plain submission (some lines differ: an approval waits)
   const a = await fresh(12)
@@ -158,7 +179,7 @@ async function scenario(world, report) {
     await world.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) VALUES('bx-1',?,1,'{}',1,'{}','done',1,1,1,'2026-11-03T01:00:00.000Z')").bind(g[2].id).run()
     await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES('bx-1',?,1,'observe',?, 'h','{}','{}','{}','2026-11-03T01:00:00.000Z')").bind(g[2].id, rid('bx')).run()
   })
-  // The touched cap (m4): more products in one page of events than inventoryMarksTouchedMax, so the answer stops early and the cursor must be the last event WALKED.
+  // The touched cap: more events in the log than one page holds, every one naming its product (a count changes under a PRODUCT event: a NULL-product event changes no mark). The feed pages without skipping an event.
   const cap = (await world.send('GET', `${IC}/list?branchId=1&page=1&pageSize=1`)).json.capabilities.marks
   report.caps = cap
   device.catchUp = cap.catchUpMaxEvents
@@ -168,9 +189,24 @@ async function scenario(world, report) {
     await device.sync()
     for (const sid of sids) {
       await world.db.prepare("UPDATE inventory_check_items SET state = CASE state WHEN 'done' THEN 'issue' ELSE 'done' END, reason = CASE state WHEN 'done' THEN 'short' ELSE NULL END WHERE session_id=?").bind(sid).run()
-      await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,NULL,1,'close',?, 'h','{}','{}','{}',strftime('%Y-%m-%dT%H:%M:%fZ','now'))").bind(sid, rid('ap')).run()
+      await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) SELECT session_id, product_id, 1, 'observe', ?||'-'||product_id, 'h','{}','{}','{}',strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM inventory_check_items WHERE session_id=?").bind(rid('ap'), sid).run()
     }
   })
+  // The walk's limit on legacy sessions (A.3): two pending approvals with no stored line set, 251 members each, so the second one pushes the walk over the limit (500 on Free): the feed answers them in more than one read and every answer stays within it.
+  const legacyBefore = device.answers
+  await step('legacy sessions are charged their members: the feed walks them a few at a time', async () => {
+    const members = 251, pool = await fresh(members * 2), when = '2026-11-05T01:00:00.000Z'
+    for (const [k, lid] of ['lg-a', 'lg-b'].entries()) {
+      const mine = JSON.stringify(pool.slice(k * members, (k + 1) * members).map((p) => p.id))
+      await world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,1,1,'legacy submission','closed',0,'{}',?,?,?)").bind(lid, world.orgId, when, when, when).run()
+      await world.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) SELECT ?, value, 1, '{}', 1, '{}', 'done', 2, 1, 1, ? FROM json_each(?)").bind(lid, when, mine).run()
+      await world.db.prepare("INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json) VALUES(?,?,1,'pending',?,1,?,'{}',NULL)").bind(lid, world.orgId, members, when).run()
+      await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,NULL,1,NULL,'create',?,'h','{}',?,'{}',?)").bind(lid, rid('lc'), JSON.stringify({ status: 'closed', revision: 0, members }), when).run()
+      await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) SELECT ?, value, 1, NULL, 'observe', ?||'-'||value, 'h','{}','{}','{}', ? FROM json_each(?)").bind(lid, rid('lo'), when, mine).run()
+    }
+  })
+  report.legacyAnswers = device.answers - legacyBefore
+  assert.ok(report.legacyAnswers >= 2, 'the legacy walk needed more than one read (' + report.legacyAnswers + ')')
   // I7: a rolled-back database. The device cursor is past the restored log: its events are replaced by others with the same ids.
   await step('I7 rolled-back database forces a rebuild', async () => {
     const before = device.rebuilds
@@ -186,11 +222,11 @@ async function scenario(world, report) {
   const insertEvents = async (n) => world.db.prepare(`WITH RECURSIVE s(k) AS (SELECT 0 UNION ALL SELECT k+1 FROM s WHERE k < ${n - 1}) INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) SELECT 'bx-1', NULL, 1, 'observe', 'sl-'||hex(randomblob(6))||k, 'h', '{}','{}','{}','2026-11-04T00:00:00.000Z' FROM s`).run()
   const within = Math.floor(cap.catchUpMaxEvents * 0.75)
   const r0 = device.rebuilds, a0 = device.answers
-  await insertEvents(within); await device.sync(); await same(world, device, 'I8 within the threshold')
+  await insertEvents(within); await snap(); await device.sync(); await same(world, device, 'I8 within the threshold')
   report.i8 = { within: { events: within, answers: device.answers - a0, rebuilds: device.rebuilds - r0 } }
   assert.equal(device.rebuilds, r0, 'I8: no rebuild within the threshold')
   const r1 = device.rebuilds
-  await insertEvents(cap.catchUpMaxEvents * 2 + 500); await device.sync(); await same(world, device, 'I8 beyond the threshold')
+  await insertEvents(cap.catchUpMaxEvents * 2 + 500); await snap(); await device.sync(); await same(world, device, 'I8 beyond the threshold')
   report.i8.beyond = { events: cap.catchUpMaxEvents * 2 + 500, rebuilds: device.rebuilds - r1 }
   assert.equal(device.rebuilds - r1, 1, 'I8: beyond the threshold the device rebuilds exactly once')
   assert.ok(device.top - device.cursor <= cap.catchUpMaxEvents / 2, 'I8: the lag after the rebuild is within half the threshold')
@@ -205,7 +241,6 @@ async function scenario(world, report) {
 const MUTANTS = [
   { name: 'm1 drop the session id tie-break', file: 'src/lib/inventoryCheckMarks.ts', from: 'ORDER BY x.updated_at DESC, x.session_id DESC LIMIT 1)', to: 'ORDER BY x.updated_at DESC LIMIT 1)' },
   { name: 'm2 seek only active products', file: 'src/lib/inventoryCheckMarks.ts', from: 'WHERE p.id >= @lo AND p.id < @hi ORDER BY p.id', to: 'WHERE p.id >= @lo AND p.id < @hi AND p.is_active = 1 ORDER BY p.id' },
-  { name: 'm3 drop the NULL-product expansion', file: 'src/lib/inventoryCheckMarks.ts', from: 'approval ? sessionProducts.get(sid) ?? [] : []', to: '[]' },
   { name: 'm4 cursor = the last event of the page, not the last walked', file: 'src/lib/inventoryCheckMarks.ts', from: 'const cursorRow = last as Row', to: 'const cursorRow = list[list.length - 1]' },
   { name: 'm5 skip the tag check', file: 'src/lib/inventoryCheckMarks.ts', from: '(since > 0 && (!atEvent || eventTag(atEvent) !== tag))', to: 'false' },
   { name: 'm6 drop the session branch match', file: 'src/lib/inventoryCheckMarks.ts', from: 'AND sx.organization_id IS @organization AND sx.branch_id = x.branch_id', to: 'AND sx.organization_id IS @organization' },
@@ -221,11 +256,14 @@ async function run(patches) {
 }
 
 if (require.main === module) (async () => {
-  const base = await run([])
-  for (const s of base.steps) console.log('PASS ' + s)
-  for (const s of base.skipped) console.log('SKIPPED (writer did not run) ' + s)
-  console.log('caps ' + JSON.stringify(base.caps) + ' i7 ' + JSON.stringify(base.i7) + ' i8 ' + JSON.stringify(base.i8))
-  let bad = base.skipped.length ? 1 : 0
+  let bad = 0
+  if (!process.argv.includes('--skip-base')) {
+    const base = await run([])
+    for (const s of base.steps) console.log('PASS ' + s)
+    for (const s of base.skipped) console.log('SKIPPED (writer did not run) ' + s)
+    console.log('caps ' + JSON.stringify(base.caps) + ' i7 ' + JSON.stringify(base.i7) + ' i8 ' + JSON.stringify(base.i8) + ' legacyAnswers ' + base.legacyAnswers)
+    bad = base.skipped.length ? 1 : 0
+  }
   if (process.argv.includes('--mutants')) {
     for (const m of MUTANTS) {
       let red = null
