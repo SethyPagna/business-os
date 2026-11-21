@@ -227,6 +227,11 @@ SELECT 'member_codes_unminted', CASE WHEN NOT EXISTS (
   SELECT 1 FROM portal_accounts_0321_new WHERE member_code IS NOT NULL
 ) THEN 1 ELSE 0 END;
 
+-- An AUTOINCREMENT insert that copied no row still leaves a sequence row at 0, which is the same as no row. Remove it
+-- so an empty table leaves the same sqlite_sequence as before (a fresh database stays identical whatever order its
+-- later migrations ran in). Only a 0 row is removed, so a real high-water mark is never touched.
+DELETE FROM sqlite_sequence WHERE name = 'portal_accounts_0321_new' AND seq = 0;
+
 DROP TABLE portal_accounts;
 
 ALTER TABLE portal_accounts_0321_new RENAME TO portal_accounts;
