@@ -7,6 +7,7 @@ import {
   markPortalSignedIn,
   readPortalSignedIn,
   readPortalSignedInValue,
+  type PortalSignedInMarker,
 } from './portalSignedInMarker.ts'
 import {
   mergeBucketItems,
@@ -141,15 +142,22 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
   const [marker, setMarker] = useState(readPortalSignedIn)
   const accountRef = useRef<PortalAccountProfile | null>(null)
   accountRef.current = account
+  // A browser that reads storage but refuses writes (quota full, some private modes) would show "absent" after a failed mark, and the rule
+  // would treat this browser as "no sign-in happened". So the first refused write makes the marker 'unreadable' for the rest of this page
+  // view; a later successful write does not undo it. Every setMarker below goes through observeMarker. Limit: in such a browser no
+  // storage event leaves this tab, so a sign-in in ANOTHER tab cannot be seen here; that cannot be fixed inside this store.
+  const markerWriteFailedRef = useRef(false)
+  const observeMarker = useCallback((): PortalSignedInMarker => (markerWriteFailedRef.current ? 'unreadable' : readPortalSignedIn()), [])
   const markSignedIn = useCallback((): string => {
     const written = markPortalSignedIn()
-    setMarker(readPortalSignedIn())
+    if (written === '') markerWriteFailedRef.current = true
+    setMarker(observeMarker())
     return written
-  }, [])
+  }, [observeMarker])
   const clearSignedIn = useCallback((onlyIfValue?: string) => {
     clearPortalSignedIn(onlyIfValue)
-    setMarker(readPortalSignedIn())
-  }, [])
+    setMarker(observeMarker())
+  }, [observeMarker])
 
   // Initial "am I signed in?" check. `sessionKnown` is true only after a real answer (signed in, signed out, or a live session waiting
   // for the consent renewal): a failed check leaves it false, so translation stays off for that page view. No retry.
@@ -188,7 +196,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
   // Other tabs and a restored or woken page only ever re-read the marker: nothing here may reach the network.
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
-    const refresh = () => setMarker(readPortalSignedIn())
+    const refresh = () => setMarker(observeMarker())
     const onStorage = (event: StorageEvent) => { if (event.key === null || event.key === PORTAL_SIGNED_IN_KEY) refresh() }
     const onVisible = () => { if (document.visibilityState === 'visible') refresh() }
     window.addEventListener('storage', onStorage)
@@ -201,7 +209,7 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike, cop
       document.removeEventListener('visibilitychange', onVisible)
       document.removeEventListener('resume', refresh)
     }
-  }, [])
+  }, [observeMarker])
 
   // Mirror local list changes to the server while signed in and hydrated.
   useEffect(() => {
