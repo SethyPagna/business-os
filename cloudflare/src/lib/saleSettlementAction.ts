@@ -3,7 +3,7 @@ import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { bumpVersion } from './cache'
 import { getDb, type D1Compat } from './db'
-import type { SettlementPlan } from './paymentSettlement'
+import { REFUND_CREDIT_REPLAY_REFUSED_MESSAGE, refundCreditReplayRefused, type SettlementPlan } from './paymentSettlement'
 import { normalizeSearchText } from './searchMatch'
 import { actorSnapshot } from './actorSnapshot'
 import {
@@ -368,6 +368,10 @@ export async function replaySaleSettlementAction(
   const saleId = Number(operation.sale_id)
   const expected = direction === 'undo' ? after : before
   const target = direction === 'undo' ? before : after
+  // A settlement saved before the exchange refund credit was protected holds a damaged after-state: its redo would drop or relabel the credit.
+  if (refundCreditReplayRefused(expected.payment_details, target.payment_details, direction === 'undo')) {
+    throw new SaleSettlementReplayConflict(REFUND_CREDIT_REPLAY_REFUSED_MESSAGE)
+  }
   const current = await readSaleSettlementState(db, saleId)
   if (!current || !sameSettlementState(current, expected)) {
     throw new SaleSettlementReplayConflict('This sale was edited after the settlement. Refresh before reversing it.')

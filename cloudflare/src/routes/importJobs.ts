@@ -1578,7 +1578,7 @@ app.post('/:id/approve', async (c) => {
     UPDATE import_jobs SET status = 'approved', phase = 'approved', policy_json = @policy, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id AND status = 'awaiting_review'
   `).run({ id, policy: JSON.stringify(policy) })
-  if (approval.changes !== 1) {
+  if (!(Number(approval.changes ?? 0) > 0)) {
     return c.json({ success: false, error: 'Import status changed before approval. Refresh and review it again.' }, 409)
   }
   await dispatchImportWork(c.env, { jobId: id, kind: 'apply' })
@@ -1628,6 +1628,7 @@ app.post('/:id/cancel', async (c) => {
   // file goes now. A 'cancelling' job is still running; the engine purges
   // when it honours the cancel.
   if (nextStatus === 'cancelled') await purgeImportIncomingFiles(c.env, db, id)
+  await bumpVersion(c.env, 'products') // a cancelled job leaves the bell's imports section (stamped with this version): the acting device's fresh read must recompute
   const cancelled = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_cancel', id, job, cancelled || null, { source: 'api', cancelSource: 'api' })
   return c.json({ success: true, job: serializeJob(cancelled || job) })
@@ -1674,6 +1675,7 @@ async function handleDelete(c: any) {
   }
   await deleteJobData(c, id)
   await auditImportEvent(c, 'import_job_delete', id, job, null, { source: 'api' })
+  await bumpVersion(c.env, 'products') // the job leaves the bell's imports section (stamped with this version)
   return c.json({ success: true, deleted: true, id })
 }
 
@@ -1741,6 +1743,7 @@ app.post('/:id/retry', async (c) => {
   await dispatchImportWork(c.env, { jobId: id, kind: mode })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_retry', id, job, queued || null, { source: 'api', mode })
+  await bumpVersion(c.env, 'products') // the job leaves the bell's imports section (stamped with this version)
   return c.json({ success: true, job: serializeJob(queued || job) })
 })
 

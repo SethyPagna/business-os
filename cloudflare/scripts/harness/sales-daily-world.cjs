@@ -39,6 +39,8 @@ function createWorld() {
       rawDb = openDb(migrations)
       rawDb.exec("INSERT INTO branches(name) VALUES('LC Store')")
       days.forEach((d, i) => rawDb.exec(saleSql(`S${i}`, `${d} 03:00:00`)))
+      // 0308 is applied on production and frozen: its coverage seed names the kernel it was written for (2). A deployed shop whose code moved past that has been re-covered by the cron's first run (recoverStatements); this world starts there.
+      rawDb.exec(`UPDATE system_flags SET value = json_set(value, '$.kernel', ${T.SALES_DAILY_KERNEL_VERSION}) WHERE key = 'sales_daily_coverage'`)
       return { DB: {}, Business_OS_Analytics: { points: [], writeDataPoint(p) { this.points.push(p) } } }
     },
     rows: () => rawDb.prepare('SELECT * FROM sales_daily_totals ORDER BY business_date').all().map((r) => ({ ...r })),

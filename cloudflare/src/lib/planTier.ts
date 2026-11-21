@@ -448,13 +448,20 @@ export type PlanLimits = {
   // the 300 s the route always had; Free keeps it an hour, because a miss reads every active product.
   possibleDuplicatesCacheSeconds: number
 
+  // routes/products.ts, three lifetimes that were literals (the owner rule: every Free-sized number comes from here). Today's values on both tiers; each is bounded by its own version key or by a hash
+  // check, so a longer value is a later decision. catalogVocabularyCacheSeconds: GET /api/products/filters (the brand/category/unit/supplier/tag/initial lists; the promotion list is read
+  // outside the entry). productListLegacyCacheSeconds: the page payload cache with catalog_ranked_scope OFF. productSearchIndexCacheSeconds: GET /api/products/search-index pages.
+  catalogVocabularyCacheSeconds: number
+  productListLegacyCacheSeconds: number
+  productSearchIndexCacheSeconds: number
+
   // The prefetch window of a paged list that reads the shared ranking (the Inventory Check list tells its client): the current page and the pages ahead it may fetch, so a window of
   // pages costs the rows of those pages (the ranking is shared) and no ranking. Free 3 (a page and 2 ahead); Paid 4 (Paid is not rationed).
   catalogListWindowPages: number
 
-  // routes/notifications.ts: how long the bell's heavy sections (inventory, expiry, supplier credit) may be served from the cache, ignoring the data versions. The owner (11 Nov) accepts a bell up to
-  // 5 minutes old with an "as of" time, so a sale or a product edit on another device no longer forces a recompute (the inventory pass reads every active product); the actor's own write asks
-  // for a fresh answer (?fresh=1). Free keeps it the 5 minutes the owner allowed (reads are what Free rations), Paid 45 s (the lifetime the version-keyed entry had). Never above 300 on either tier.
+  // routes/notifications.ts: how long the bell's cached sections may be served from the cache, ignoring the data versions (the /summary handler's cachedSection calls decide which sections those are). The owner (11 Nov) accepts a bell up to
+  // 5 minutes old with an "as of" time, so a sale or a product edit on another device no longer forces a recompute; the acting device's own write asks for a fresh answer (?fresh=1, or ?fresh=a,b for the sections it resolves).
+  // Both tiers keep it the 5 minutes the owner allowed (Paid was 45 s, the lifetime the version-keyed entry had; 20 Nov it moved to 300 because a Paid shop reads 16M rows a day). Never above 300 on either tier.
   notificationSectionCacheSeconds: number
 
   // ---- Documented platform facts (no behavioural reader) -----------------
@@ -584,8 +591,11 @@ const PAID_LIMITS: PlanLimits = {
   inventoryCheckFilterMaxIds: 10_000,
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
+  catalogVocabularyCacheSeconds: 300,
+  productListLegacyCacheSeconds: 20,
+  productSearchIndexCacheSeconds: 3_600,
   catalogListWindowPages: 4,
-  notificationSectionCacheSeconds: 45,
+  notificationSectionCacheSeconds: 300,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -662,6 +672,9 @@ const FREE_LIMITS: PlanLimits = {
   inventoryCheckFilterMaxIds: 2_000,
   productListCacheSeconds: 3_600,
   possibleDuplicatesCacheSeconds: 3_600,
+  catalogVocabularyCacheSeconds: 300,
+  productListLegacyCacheSeconds: 20,
+  productSearchIndexCacheSeconds: 3_600,
   catalogListWindowPages: 3,
   notificationSectionCacheSeconds: 300,
   d1DailyRowsRead: 5_000_000,

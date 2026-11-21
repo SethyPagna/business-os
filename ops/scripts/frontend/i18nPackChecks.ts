@@ -70,6 +70,7 @@ export const DYNAMIC_KEY_PREFIX_FAMILIES = [
   'selected_conflict_', // ProductDuplicatesTab, SelectedConflictMergeReviewModal: t(`selected_conflict_${code}`), tr(`selected_conflict_basis_${basis}`, ...)
   'cancel_reason_', // BulkSaleCancelModal: translate(`cancel_reason_${reason}`, ...)
   'replace_group_', // BulkImportModal: T(`replace_group_${group.key}`, ...) and the _hint sibling, keys from REPLACE_COLUMN_GROUPS
+  'toast_type_', // App.tsx Notification: t(`toast_type_${kind}`, ...), the pop-up's spoken type label
 ] as const
 
 /**

@@ -190,8 +190,11 @@ const PAID = {
   inventoryCheckFilterMaxIds: 10000,
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
+  catalogVocabularyCacheSeconds: 300,
+  productListLegacyCacheSeconds: 20,
+  productSearchIndexCacheSeconds: 3600,
   catalogListWindowPages: 4,
-  notificationSectionCacheSeconds: 45,
+  notificationSectionCacheSeconds: 300,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -267,6 +270,9 @@ const FREE = {
   inventoryCheckFilterMaxIds: 2000,
   productListCacheSeconds: 3600,
   possibleDuplicatesCacheSeconds: 3600,
+  catalogVocabularyCacheSeconds: 300,
+  productListLegacyCacheSeconds: 20,
+  productSearchIndexCacheSeconds: 3600,
   catalogListWindowPages: 3,
   notificationSectionCacheSeconds: 300,
   d1DailyRowsRead: 5000000,
@@ -307,8 +313,7 @@ const FREE_IS_LONGER = ['productListCacheSeconds', 'possibleDuplicatesCacheSecon
 // lifetimes above, so a lane that names a new lifetime and a lane that names a new page size never edit the same line.
 const FREE_IS_LONGER_PAGE_SIZES = ['paymentMethodScanPageSize']
 // The bell's section lifetime (routes/notifications.ts): owner 11 Nov, up to 5 minutes, so never above 300 on either tier.
-const FREE_IS_LONGER_BELL = ['notificationSectionCacheSeconds']
-const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...FREE_IS_LONGER_BELL]
+const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 
 // Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
 // offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
@@ -320,7 +325,8 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...
 // The stored daily totals' nightly reconcile (lib/salesDailyCron.ts): the last 7 days, once per 20 h, naming up to 3 days in an alert, are rules of the check and not of the plan;
 // only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
 // the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
-const SAME_ON_BOTH_TIERS = ['expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter']
+// 20 Nov: the bell section lifetime is 300 s on both tiers (owner 11 Nov: up to 5 minutes), and the three catalogue lifetimes that were literals keep today's single value on both.
+const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
@@ -485,12 +491,13 @@ check('Inventory Check bounds come from the plan: no numeric literal caps the li
   assert.deepEqual([free.inventoryCheckProductsPerSubmission, paid.inventoryCheckProductsPerSubmission], [40, 500])
 })
 
-check('the bell section lifetime is a plan field, at most the 5 minutes the owner allowed (11 Nov) on both tiers, longer on Free', async () => {
+check('the bell section lifetime is a plan field, at most the 5 minutes the owner allowed (11 Nov) on both tiers, 300 s on both', async () => {
   for (const tier of ['free', 'paid']) {
     const seconds = PLAN_LIMITS_BY_TIER[tier].notificationSectionCacheSeconds
     assert.ok(Number.isInteger(seconds) && seconds > 0 && seconds <= 300, tier + ' lifetime ' + seconds + ' must be 1..300 s')
   }
-  assert.ok(PLAN_LIMITS_BY_TIER.free.notificationSectionCacheSeconds > PLAN_LIMITS_BY_TIER.paid.notificationSectionCacheSeconds)
+  assert.equal(PLAN_LIMITS_BY_TIER.free.notificationSectionCacheSeconds, 300)
+  assert.equal(PLAN_LIMITS_BY_TIER.paid.notificationSectionCacheSeconds, 300)
 })
 
 check('planTier.ts imports nothing at runtime', async () => {

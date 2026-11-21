@@ -318,7 +318,7 @@ async function reclaimStaleStockMutation(db: D1Compat, actorId: number, requestI
        WHERE actor_id=@actor AND request_id=@request AND completed_at IS NULL AND written=0
          AND created_at < datetime('now', @window)`,
   ).run({ actor: actorId, request: requestId, window: `-${STOCK_MUTATION_STALE_SECONDS} seconds` })
-  return Number(result?.changes ?? 0) === 1
+  return Number(result?.changes ?? 0) > 0
 }
 
 async function decideFromStoredReceipt(

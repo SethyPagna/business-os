@@ -76,6 +76,9 @@ const boundaries: Array<[string, string]> = [
   ['api/generalCustomerMembershipRepairTransport.ts', 'backup-reset-tools'],
   ['components/shared/lightboxSwipe.ts', 'image-lightbox'],
   ['components/shared/documentScrollLock.ts', 'app-shell'],
+  // The bell's announcer travels with the bell; the pop-up channel stays in app-shared because AppContext (and the storefront) import it.
+  ['components/shared/notificationAlerts.ts', 'notification-center'],
+  ['components/shared/toastChannel.ts', 'app-shared'],
   ['components/navigation/Sidebar.tsx', 'Sidebar'],
   ['utils/useDebouncedValue.ts', 'shared-ui'],
   ['utils/visibilityPolling.ts', 'admin-shared-utils'],
@@ -97,6 +100,10 @@ for (const [relative, expected] of boundaries) {
 for (const icon of ['loader-2', 'arrow-left', 'shield-check', 'download', 'copy', 'minus', 'grip-vertical', 'heart', 'user', 'sliders-horizontal', 'rotate-cw', 'tags', 'layers', 'list', 'arrow-down-wide-narrow']) {
   assert.equal(chunkFor(`/fixture/node_modules/lucide-react/dist/esm/icons/${icon}.js`), 'shared-ui', icon)
 }
+// The pop-up stack hook is drawn by App.tsx alone: natural placement (App.tsx's chunk), never the storefront-preloaded app-shell catch-all.
+assert.equal(chunkFor(path.join(frontend, 'src', 'app/useToastStack.ts')), undefined)
+assert.equal(chunkFor(path.join(frontend, 'src', 'app/useToastStack.ts').replace(/\//g, '\\')), undefined, 'Windows: app/useToastStack.ts')
+assert.equal(chunkFor(path.join(frontend, 'src', 'app/appShellUtils.ts')), 'app-shell')
 assert.equal(neutralPrimitiveChunk('/fixture/src/components/catalog/CatalogPage.tsx'), undefined)
 assert.equal(neutralPrimitiveChunk('/fixture/node_modules/example/src/utils/workDrafts.ts'), undefined)
 assert.equal(chunkFor('/fixture/src/components/catalog/CatalogProductsSection.tsx'), 'catalog-products')

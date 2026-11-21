@@ -13,6 +13,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../app/AppContextCore.tsx'
+import { announceFreshAlerts, browserAlertStore, isSectionComplete, popUpAlerts, sectionsSwitchedOff, summaryCameFromWorker } from './notificationAlerts.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -20,7 +21,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
-import { requestFreshBell } from '../../api/bellFreshness.ts'
+import { createBellFollowUp, getSectionLifetimeSeconds, onBellResolved, requestFreshBell } from '../../api/bellFreshness.ts'
 import { olderAsOf, stockAsOfText } from '../dashboard/stockAsOf.ts'
 import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
 import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
@@ -34,6 +35,7 @@ import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
 import { getStatusBadgeLabel } from '../sales/StatusBadge.tsx'
 import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
+import { usePageVisible } from '../../utils/usePageVisible.ts'
 
 type Tone = 'danger' | 'warning' | 'success' | 'info'
 type ToneFilter = Tone | 'all'
@@ -122,6 +124,8 @@ type NotificationSummary = {
   generatedAt?: string
   unavailable?: boolean
   cooldownUntil?: number
+  // True once a summary was really loaded (the first state is empty only because nothing was asked yet).
+  loaded?: boolean
 }
 
 type AppContextValue = {
@@ -130,6 +134,7 @@ type AppContextValue = {
   saveSettings: (settings: Record<string, string>) => Promise<unknown>
   settings: Record<string, unknown>
   t: (key: string) => string
+  user?: { id?: unknown } | null
 }
 
 type SyncContextValue = {
@@ -479,7 +484,7 @@ function NotificationSeverityIcon({ tone = 'info', label }: NotificationSeverity
 }
 
 export default function NotificationCenter({ compact = false, openRequestId = 0, visibility = 'always' }: NotificationCenterProps) {
-  const { navigateTo, notify, saveSettings, settings, t } = useApp()
+  const { navigateTo, notify, saveSettings, settings, t, user } = useApp()
   const { syncChannel } = useSync()
   const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
   const tr = useCallback((key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
@@ -504,6 +509,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const [itemLimit, setItemLimit] = useState(20)
   const [sectionPages, setSectionPages] = useState<Record<string, number>>({})
   const [visibilityActive, setVisibilityActive] = useState(() => matchesVisibilityMode(visibility))
+  const pageVisible = usePageVisible()
   const [seenSecurityIds, setSeenSecurityIds] = useState<Set<string>>(() => (
     typeof window === 'undefined' ? new Set() : readSeenSecurityIds()
   ))
@@ -531,6 +537,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   // genuinely different data sources.
   const [importJobsSection, setImportJobsSection] = useState<NotificationSection | null>(null)
   const [reportJobId, setReportJobId] = useState<string | null>(null)
+  // The bell item a pop-up sent the person to: scrolled to, focused and ringed once the panel is open.
+  const [focusItemId, setFocusItemId] = useState('')
   // Bumped to force `badgeVisibleCount` to recompute once a suppressed
   // alert's realert window elapses -- see the scheduling effect below.
   // Carries no data of its own.
@@ -625,6 +633,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
           generatedAt: typeof result?.generatedAt === 'string' ? result.generatedAt : undefined,
           unavailable: !!result?.unavailable,
           cooldownUntil: result?.cooldownUntil,
+          loaded: summaryCameFromWorker(result),
         }
       })
       // A section the person expanded stays complete across refreshes; one that no longer needs a
@@ -748,6 +757,28 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     }
   }, [tr, visibilityActive])
 
+  // After a reload a sync event caused, ONE plain reload one section lifetime (plus slack) later on a timer of its own: a device whose reload was served
+  // an entry older than the event is correct again by then. loadSummary's idle timer never replaces it.
+  const bellFollowUpRef = useRef<ReturnType<typeof createBellFollowUp> | null>(null)
+  useEffect(() => {
+    if (!visibilityActive) return undefined
+    const followUp = createBellFollowUp({
+      lifetimeSeconds: getSectionLifetimeSeconds,
+      setTimer: (run, delayMs) => window.setTimeout(run, delayMs),
+      clearTimer: (handle) => window.clearTimeout(handle as number),
+      isHidden: () => document.visibilityState === 'hidden',
+      reload: () => { if (aliveRef.current) void loadSummary(true) },
+    })
+    bellFollowUpRef.current = followUp
+    const onVisible = () => followUp.onVisible()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      followUp.dispose()
+      if (bellFollowUpRef.current === followUp) bellFollowUpRef.current = null
+    }
+  }, [loadSummary, visibilityActive])
+
   useEffect(() => {
     if (!visibilityActive) return
     if (!syncChannel?.channel) return
@@ -763,7 +794,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     // decisions (routes/devices.ts) -- previously missing even though
     // it's the one channel semantically built for this exact component,
     // so a device approve/deny elsewhere never refreshed the bell live.
-    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
+    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings', 'portalSubmissions'].includes(syncChannel.channel)) {
       const plan = planThrottledSyncReload(
         syncChannel.channel,
         Date.now() - lastSummaryLoadAtRef.current,
@@ -773,8 +804,24 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       // The trailing reload replaces the idle timer; loadSummary re-arms it.
       if (plan.runNow) void loadSummary(true)
       else scheduleRefresh(plan.delayMs)
+      bellFollowUpRef.current?.armAfterEvent()
     }
   }, [loadSummary, scheduleRefresh, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts, visibilityActive])
+
+  // This device's own write that resolves bell items (a sale status or payment, a portal review, an import cancel): re-read at once. The write left the
+  // sections it names pending in bellFreshness, so the read below carries them (`?fresh=sales`) and the expanded lists it reloads do too.
+  useEffect(() => {
+    if (!visibilityActive) return undefined
+    let timer: number | null = null
+    const stop = onBellResolved(() => {
+      if (timer !== null) return
+      timer = window.setTimeout(() => { timer = null; void loadSummary(true) }, 0)
+    })
+    return () => {
+      stop()
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [loadSummary, visibilityActive])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
@@ -798,6 +845,14 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     return typeof renderer === 'function' ? renderer(params || {}, t) : (fallback || '')
   }, [isKhmer, t])
 
+  // The one place a row's title and detail are built: the bell rows and the bell-item pop-ups both use it.
+  const itemText = useCallback((item: NotificationItem): { displayLabel: string; displayMeta: string } => ({
+    displayLabel: item.labelKey ? tr(item.labelKey, item.label || '') : (item.label || ''),
+    displayMeta: item.metaKey
+      ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
+      : (item.meta || ''),
+  }), [renderStructuredCopy, tr])
+
   const normalizedNotificationSearch = notificationSearch.trim().toLowerCase()
 
   const effectiveSections = useMemo<EffectiveNotificationSection[]>(() => (
@@ -810,13 +865,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         : (section.summary || '')
       const sectionItems = fullSectionItems[section.id] || section.items
       const decoratedItems: DecoratedNotificationItem[] = Array.isArray(sectionItems)
-        ? sectionItems.map((item) => ({
-          ...item,
-          displayLabel: item.labelKey ? tr(item.labelKey, item.label || '') : (item.label || ''),
-          displayMeta: item.metaKey
-            ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
-            : (item.meta || ''),
-        }))
+        ? sectionItems.map((item) => ({ ...item, ...itemText(item) }))
         : []
       const filteredItems = decoratedItems.filter((item) => {
         if (toneFilter !== 'all' && item.tone !== toneFilter) return false
@@ -855,7 +904,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       }
     }).filter((section) => section.filteredItemCount > 0 || (toneFilter === 'all' && !normalizedNotificationSearch))
       .sort((a, b) => (a.id === 'security' ? -1 : b.id === 'security' ? 1 : 0))
-  ), [fullSectionItems, importJobsSection, itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
+  ), [fullSectionItems, importJobsSection, itemLimit, itemText, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
 
   // Silent indicator: a pending device approve/reject/revoke request (or a
   // new-country sign-in on an already-approved device) that this admin's
@@ -942,6 +991,63 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   ), [fullSectionItems, summary.sections])
 
   const realertMinutes = Math.max(1, Number(summary.preferences?.realertMinutes) || 10)
+
+  // A warning or danger bell item this device has not announced pops up once, in full, for ten seconds (an
+  // alert pop-up is never stored anywhere), and never again while it stays unresolved: the badge carries it
+  // from then on. More than three new ones in one load become a single "N alerts need attention".
+  useEffect(() => {
+    const blocked = !visibilityActive || open || !!summary.unavailable || !pageVisible
+    const rows = (summary.sections || []).flatMap((section) => (section.items || []).map((item) => ({ item, sectionId: section.id })))
+    // An alert that left a fully listed section is forgotten after it stayed away for the repeat interval, so one that
+    // comes back later pops again. A cut-down (truncated) section, a section the summary lacks, and a failed or
+    // unavailable summary (blocked above) change nothing.
+    const plan = announceFreshAlerts({
+      rows: rows.map((row) => ({ item: row.item, sectionId: row.sectionId })),
+      sections: (summary.sections || []).map((section) => ({ id: section.id, complete: isSectionComplete(section) })),
+      // The Worker leaves out a section with no items, so after a real load an omitted section is empty, unless Settings switched it off.
+      omittedAreEmpty: !!summary.loaded,
+      switchedOff: sectionsSwitchedOff(summary.preferences),
+      blocked,
+      seenTimes: seenAlertTimes,
+      skipIds: seenSecurityIds,
+      now: Date.now(),
+      quietMs: realertMinutes * 60000,
+      store: browserAlertStore(user?.id),
+    })
+    if (plan.kind === 'none') return
+    popUpAlerts(plan, {
+      itemMessage: (item) => {
+        const { displayLabel, displayMeta } = itemText(item)
+        return [displayLabel, displayMeta].filter(Boolean).join(': ')
+      },
+      manyMessage: (count) => formatCopy('notification_alerts_need_attention', { count }, `${count} alerts need attention`, `មានការជូនដំណឹង ${count} ត្រូវដោះស្រាយ`),
+      open: (item) => {
+        setToneFilter('all')
+        setNotificationSearch('')
+        const sectionId = item ? rows.find((row) => row.item.id === item.id)?.sectionId : undefined
+        if (sectionId) setCollapsed((current) => ({ ...current, [sectionId]: false }))
+        setFocusItemId(item?.id || '')
+        setOpen(true)
+        void loadSummary(true)
+      },
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary.sections, visibilityActive, pageVisible])
+
+  useEffect(() => {
+    if (!open) {
+      if (focusItemId) setFocusItemId('')
+      return undefined
+    }
+    if (!focusItemId) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const target = Array.from(document.querySelectorAll<HTMLElement>('[data-notification-item-id]')).find((node) => node.dataset.notificationItemId === focusItemId)
+      target?.scrollIntoView({ block: 'center' })
+      target?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, focusItemId])
 
   // "Opening notifications clears the badge" (Settings.tsx copy): stamp
   // every currently-listed alert with "seen now" once the panel opens.
@@ -1233,6 +1339,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                             <button
                               key={item.id}
                               type="button"
+                              data-notification-item-id={item.id}
                               onClick={() => {
                                 if (item.kind === 'import_job' && item.importJobId) {
                                   setReportJobId(item.importJobId)
@@ -1242,7 +1349,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                                 navigateTo(item.pageId || section.pageId || 'dashboard', item.anchor)
                                 setOpen(false)
                               }}
-                              className="flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                              className={`flex w-full items-start gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800 ${focusItemId === item.id ? 'ring-2 ring-blue-400' : ''}`}
                             >
                               {(() => {
                                 const itemTone = item.tone || 'info'
@@ -1255,6 +1362,17 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                                 <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">{item.displayLabel}</span>
                                 <span className="block text-xs text-slate-500 dark:text-slate-400">{item.displayMeta}</span>
                               </span>
+                              {(item.tone === 'danger' || item.tone === 'warning') && section.id !== 'imports' && item.kind !== 'import_job' ? (
+                                <span
+                                  data-notification-pin
+                                  role="img"
+                                  className="mt-0.5 inline-flex shrink-0 text-slate-400 dark:text-slate-500"
+                                  title={tr('notification_pinned_hint', 'Stays until fixed', 'នៅរហូតដល់បានដោះស្រាយ')}
+                                  aria-label={tr('notification_pinned_hint', 'Stays until fixed', 'នៅរហូតដល់បានដោះស្រាយ')}
+                                >
+                                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 17v5" /><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" /></svg>
+                                </span>
+                              ) : null}
                               <ExternalLink className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-300" />
                             </button>
                           ))}

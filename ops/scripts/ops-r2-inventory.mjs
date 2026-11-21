@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // r2-inventory job of .github/workflows/ops.yml: a read-only census of the app's two R2 buckets, the live
-// business-os-assets-apac and the old business-os-assets (eeur, kept until the owner deletes it by hand).
+// business-os-assets-apac and the old business-os-assets (eeur, being retired by the r2-old-retire task).
 //
 //   OPS_OUT_DIR  where r2-inventory-<run>.enc.json is written
 //   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID

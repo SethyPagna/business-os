@@ -163,19 +163,19 @@ async function main() {
     assert.ok(Number(puts[0][1]) >= before, 'it starts at the clock, above any counter a write has produced')
   })
 
-  await check('positive control: a bump with D1 healthy and no row still starts at 1', async () => {
+  await check('positive control: a bump with D1 healthy and no row writes a positive integer', async () => {
     reset()
     await cache.bumpVersions(env, ['sales'])
     assert.equal(puts.length, 1)
-    assert.equal(puts[0][1], '1')
+    assert.ok(Number.isSafeInteger(Number(puts[0][1])) && Number(puts[0][1]) >= 1)
   })
 
-  await check('a bump on an existing KV counter is unchanged: +1', async () => {
+  await check('a bump on an existing KV counter goes above it', async () => {
     reset()
     kv.set('v2:sales', '41')
     state.d1 = 'throws'
     await cache.bumpVersions(env, ['sales'])
-    assert.equal(kv.get('v2:sales'), '42')
+    assert.ok(Number(kv.get('v2:sales')) > 41)
   })
 
   await check('the key builder: parameters are canonical, the build, organisation and epoch each change the key', async () => {

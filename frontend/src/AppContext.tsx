@@ -39,6 +39,7 @@ import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
 import { isOwnSettingsWrite, sendChangedSettings } from './utils/settingsSave.ts'
+import { clearToasts, emitToast, getNotificationDuration, userChangeClearsToasts } from './components/shared/toastChannel.ts'
 import { presentWriteError, type WriteErrorDetail } from './utils/writeErrorPresentation.ts'
 import { changeSessionDuration as applySessionDurationChange, normalizeSessionDuration, sessionDurationRefusalMessage, type SessionDurationOutcome } from './utils/sessionDurationChange.ts'
 import type { SettingsWriteOptions } from './types/settingsContracts.ts'
@@ -2065,7 +2066,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [user])
 
   // Notifications.
-  const notify = useCallback((message: unknown, type: NotificationKind | string = 'success', duration = 3500) => {
+  const notify = useCallback((message: unknown, type: NotificationKind | string = 'success', duration?: number) => {
     const normalizedMessage = String(message || '').trim()
     const now = Date.now()
     const last = lastNotificationRef.current
@@ -2078,10 +2079,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       return
     }
     lastNotificationRef.current = { message: normalizedMessage, type, at: now }
-    setNotification({ message: normalizedMessage, type, id: now })
-    setTimeout(() => {
-      setNotification((current) => (current?.id === now ? null : current))
-    }, duration)
+    // An alert is shown in full for ten seconds and is then gone; nothing about it is stored.
+    emitToast({ message: normalizedMessage, type, duration: getNotificationDuration(type, duration) })
+    // As before, a pop-up raised through notify replaces whatever the context's own slot was showing.
+    setNotification(null)
   }, [])
 
   const dismissNotification = useCallback(() => {
@@ -2127,6 +2128,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       setStoragePersisted(persisted)
     })
     return () => { cancelled = true }
+  }, [user?.id])
+
+  // One pop-up channel for the whole app lives at module level, so one user's pop-ups (a Not Paid sale, a device
+  // approval) must not outlive them: cleared on sign-out and when another account takes over, here and nowhere else.
+  const toastUserIdRef = useRef<unknown>(user?.id)
+  useEffect(() => {
+    const previousId = toastUserIdRef.current
+    toastUserIdRef.current = user?.id
+    if (userChangeClearsToasts(previousId, user?.id)) clearToasts()
   }, [user?.id])
 
   const dismissWriteConflict = useCallback(() => {

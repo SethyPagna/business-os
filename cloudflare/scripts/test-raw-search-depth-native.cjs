@@ -19,7 +19,7 @@ const legacyBody = `export function foldDiacriticsSql(expr: string): string {
 }`
 const legacy = load(source.replace(/export function foldDiacriticsSql\(expr: string\): string \{[\s\S]*?\n\}/, legacyBody))
 const settingsSource = fs.readFileSync(path.join(__dirname, '../src/routes/settings.ts'), 'utf8')
-const settingsSqlSource = settingsSource.slice(settingsSource.indexOf('const VALID_PAYMENT_DETAILS_SQL ='), settingsSource.indexOf('const PAYMENT_METHOD_MALFORMED_RELEVANT_SQL ='))
+const settingsSqlSource = settingsSource.slice(settingsSource.indexOf('const VALID_PAYMENT_DETAILS_SQL ='), settingsSource.indexOf('const PAYMENT_METHOD_CREDIT_ONLY_SQL ='))
 function paymentSql(search) {
   const out = ts.transpileModule(settingsSqlSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   return new Function('normalizedHaystackSql', out + '\nreturn PAYMENT_METHOD_SEARCH_SQL;')(search.normalizedHaystackSql)

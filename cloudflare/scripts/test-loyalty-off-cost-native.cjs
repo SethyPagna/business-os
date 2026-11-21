@@ -95,7 +95,8 @@ async function main() {
     assert.equal(offNote.status, 200, JSON.stringify(offNote.body))
     assert.equal(offNote.body.sections.find(s => s.id === 'loyalty'), undefined, 'no loyalty notice while off')
     assert.deepEqual(offNote.log.filter(isLedger).map(e => e.sql.slice(0, 80)), [], 'no ledger statement while off')
-    assert.deepEqual(offNote.log.filter(e => readsVersion(e, ['sales', 'returns', 'customers'])).map(e => e.params), [], 'the notice is not keyed on sales/returns/customers while off')
+    // 'sales' and 'customers' are read for the sales, imports and portal sections (one combined statement); 'returns' is read only by the loyalty notice.
+    assert.deepEqual(offNote.log.filter(e => readsVersion(e, ['returns'])).map(e => e.params), [], 'the notice is not keyed on returns while off')
     assert.deepEqual(offNote.log.filter(e => /customer_portal_points_basis/.test(e.sql)).map(e => e.sql.slice(0, 60)), [], 'no loyalty config read while off')
     const offRows = offNote.log.reduce((n, e) => n + e.rows, 0)
     const offList = await request('/api/customers?search=LC-9901')
@@ -116,6 +117,7 @@ async function main() {
     assert.equal(onNote.status, 200, JSON.stringify(onNote.body))
     assert.equal(onNote.body.sections.find(s => s.id === 'loyalty'), undefined, 'turning on does not retro-accrue the off-born sale')
     assert.ok(onNote.log.some(isLedger), 'positive control: on walks the ledger')
+    assert.ok(onNote.log.some(e => readsVersion(e, ['returns'])), 'positive control: on keys the notice on the returns version')
     const onList = await request('/api/customers?search=LC-9901')
     assert.equal(Number(customerRows(onList.body).find(r => r.id === 9901).points_balance), 0, 'history stays at zero after enabling')
     assert.ok(onList.log.some(isLedger), 'positive control: the on-state list reads the ledger')

@@ -23,6 +23,50 @@ export type NativeTenderRow = {
   method: string
   amount_usd: number
   amount_khr: number
+  /** The exchange's refund credit row (returnExchange.ts): not money the customer handed over; an exchange cancel removes it. */
+  refund_credit?: true
+}
+
+/**
+ * The keys of a stored tender row beyond method and amounts (refund_credit, and any marker a later writer adds).
+ * A recorded row that a settlement repeats keeps them: dropping one silently turns an exchange's refund credit into
+ * a cash payment that an exchange cancel can no longer find.
+ */
+export function tenderRowMarkers(row: Record<string, unknown>): Record<string, unknown> {
+  const markers: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(row)) if (key !== 'method' && key !== 'amount_usd' && key !== 'amount_khr') markers[key] = value
+  return markers
+}
+
+export const REFUND_CREDIT_REPLAY_REFUSED_MESSAGE =
+  'This record was saved before exchange refund credits were protected. Replaying it would drop or relabel the exchange refund credit, so nothing was changed.'
+
+function flaggedCreditRows(raw: unknown): Array<{ method: string; usd: number; khr: number }> {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return []
+    try { parsed = JSON.parse(raw) } catch { return [] }
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row) && (row as Record<string, unknown>).refund_credit === true)
+    .map((row) => ({ method: String(row.method ?? ''), usd: Number(row.amount_usd ?? 0) || 0, khr: Number(row.amount_khr ?? 0) || 0 }))
+}
+
+/**
+ * Whether replaying a saved payment change (settle, correction, bulk relabel) would take an exchange refund credit row out of the sale or
+ * give it another amount. Every source credit row must reappear in the target, flagged and with the same amounts; a changed METHOD is refused
+ * too unless the caller is reversing a change (allowRelabel), because undoing a pre-fix relabel is how the damage is repaired.
+ * Records saved before the credit was protected carry the damaged after-state, so their redo would re-apply it.
+ */
+export function refundCreditReplayRefused(sourceRaw: unknown, targetRaw: unknown, allowRelabel = false): boolean {
+  const remaining = flaggedCreditRows(targetRaw)
+  for (const credit of flaggedCreditRows(sourceRaw)) {
+    const index = remaining.findIndex((row) => row.usd === credit.usd && row.khr === credit.khr && (allowRelabel || paymentMethodKey(row.method) === paymentMethodKey(credit.method)))
+    if (index < 0) return true
+    remaining.splice(index, 1)
+  }
+  return false
 }
 
 export type SettlementErrorCode =
@@ -35,6 +79,7 @@ export type SettlementErrorCode =
   | 'stored_payment_invalid'
   | 'partial_payment_reduced'
   | 'insufficient_payment'
+  | 'refund_credit_row_required'
   | typeof RIEL_CASH_NOT_HUNDREDS
 
 export class SettlementValidationError extends Error {
@@ -112,6 +157,12 @@ export function planSaleSettlement(input: {
   existingPaidKhr: unknown
   existingPaymentDetailsRaw?: unknown
   existingPaymentMethodRaw?: unknown
+  /**
+   * The sale's stored payment_details, read ONLY for its refund credit rows. A payment correction replaces the whole tender
+   * (existing* are empty), so the credit row is carried through unchanged from here: it must be repeated exactly (same method,
+   * same amounts, same flag) and is not asked for an active method or cents. Omit it and a correction behaves as it always did.
+   */
+  recordedRefundCreditRaw?: unknown
   totalUsd: unknown
   exchangeRate: unknown
   changeExchangeRateRaw?: unknown
@@ -139,7 +190,7 @@ export function planSaleSettlement(input: {
   } catch {
     fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid')
   }
-  type ExistingRow = { key: string; method: string; usdUnits: bigint; khrUnits: bigint; matched: boolean }
+  type ExistingRow = { key: string; method: string; usdUnits: bigint; khrUnits: bigint; matched: boolean; markers: Record<string, unknown> }
   const existingRows: ExistingRow[] = []
   let storedDetails: unknown = input.existingPaymentDetailsRaw
   const storedDetailsSupplied = Array.isArray(storedDetails) || (typeof storedDetails === 'string' && Boolean(storedDetails.trim()))
@@ -165,6 +216,7 @@ export function planSaleSettlement(input: {
           usdUnits: financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput),
           khrUnits: financialCalculationUnits((detail.amount_khr ?? 0) as FinancialDecimalInput),
           matched: false,
+          markers: tenderRowMarkers(detail),
         }
         if (row.usdUnits < 0n || row.khrUnits < 0n) throw new Error('negative')
         existingRows.push(row)
@@ -191,11 +243,38 @@ export function planSaleSettlement(input: {
         existingRows.push({
           key: paymentMethodKey(tokens[0]), method: tokens[0],
           usdUnits: existingUsdUnits,
-          khrUnits: existingKhrUnits, matched: false,
+          khrUnits: existingKhrUnits, matched: false, markers: {},
         })
       } catch { fail('The sale has invalid stored payment totals and cannot be settled safely.', 'stored_payment_invalid') }
     }
   }
+  // A correction's carried credit rows (recordedRefundCreditRaw): matched like recorded rows, but never part of the stored totals.
+  const carriedCredit: ExistingRow[] = []
+  if (input.recordedRefundCreditRaw != null) {
+    let carried: unknown = input.recordedRefundCreditRaw
+    // Absent or empty means no credit. Anything else that is not a readable array could hide a credit row, so it refuses like a bad stored row.
+    const unreadableCredit = () => fail('The sale has unreadable stored payment details and cannot be settled safely.', 'stored_payment_invalid')
+    if (typeof carried === 'string') {
+      if (!carried.trim()) carried = null
+      else { try { carried = JSON.parse(carried) } catch { unreadableCredit() } }
+    }
+    if (carried != null && !Array.isArray(carried)) unreadableCredit()
+    if (Array.isArray(carried)) {
+      for (const raw of carried) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw) || (raw as Record<string, unknown>).refund_credit !== true) continue
+        const detail = raw as Record<string, unknown>
+        const method = String(detail.method ?? '').trim()
+        try {
+          carriedCredit.push({
+            key: paymentMethodKey(method), method, matched: false, markers: tenderRowMarkers(detail),
+            usdUnits: financialCalculationUnits((detail.amount_usd ?? 0) as FinancialDecimalInput),
+            khrUnits: financialCalculationUnits((detail.amount_khr ?? 0) as FinancialDecimalInput),
+          })
+        } catch { fail('The sale has invalid stored payment details and cannot be settled safely.', 'stored_payment_invalid') }
+      }
+    }
+  }
+  const creditChecked = carriedCredit.length > 0 || existingRows.some((row) => row.markers.refund_credit === true)
   const paymentDetails: NativeTenderRow[] = []
   let paidUsdUnits = 0n
   let paidKhrUnits = 0n
@@ -219,7 +298,13 @@ export function planSaleSettlement(input: {
     } catch {
       fail(`Payment row ${index + 1} has an invalid amount.`, 'invalid_payment_amount')
     }
-    const preserved = existingRows.find((row) => !row.matched && row.key === key && row.usdUnits === comparisonUsd && row.khrUnits === khrUnits)
+    // The credit flag is part of a row's identity: a customer's own cash row of the same size is matched first, and only a flagged
+    // row takes the credit. A request that repeats the credit WITHOUT the flag (a screen opened before this rule) still lands on it,
+    // after every customer row, and the stored flag is kept.
+    const submittedCredit = detail.refund_credit === true
+    const sameSize = [...existingRows, ...carriedCredit].filter((row) => !row.matched && row.key === key && row.usdUnits === comparisonUsd && row.khrUnits === khrUnits)
+    const preserved = sameSize.find((row) => (row.markers.refund_credit === true) === submittedCredit) ?? (submittedCredit ? undefined : sameSize[0])
+    if (submittedCredit && !preserved && creditChecked) fail('The exchange refund credit must stay in the payment unchanged. Change only the money the customer paid.', 'refund_credit_row_required')
     let method: string
     let usdUnits: bigint
     if (preserved) {
@@ -252,12 +337,17 @@ export function planSaleSettlement(input: {
     paidUsdUnits += usdUnits
     paidKhrUnits += khrUnits
     paymentDetails.push({
+      ...(preserved ? preserved.markers : {}),
       method,
       amount_usd: calculationUnitsValue(usdUnits),
       amount_khr: calculationUnitsValue(khrUnits),
     })
   }
 
+  // The refund credit is not money the customer handed over: a settlement or a correction carries it through unchanged and replaces only the customer's rows.
+  if ([...existingRows, ...carriedCredit].some((row) => !row.matched && row.markers.refund_credit === true)) {
+    fail('The exchange refund credit must stay in the payment unchanged. Change only the money the customer paid.', 'refund_credit_row_required')
+  }
   if (existingRows.some((row) => !row.matched && (row.usdUnits !== 0n || row.khrUnits !== 0n))) {
     fail('Every previously recorded payment row must remain in the settlement unchanged.', 'partial_payment_reduced')
   }
@@ -363,6 +453,7 @@ export function renameSalePaymentMethod(
   paymentDetailsRaw: unknown,
   from: string,
   target: string,
+  renameCredits = false,
 ): PaymentRenameResult {
   const fromKey = paymentMethodKey(from)
   const originalDetails = paymentDetailsRaw == null ? '' : String(paymentDetailsRaw)
@@ -406,8 +497,10 @@ export function renameSalePaymentMethod(
   const next = parsed.map((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry
     const detail = { ...(entry as Record<string, unknown>) }
-    if (paymentMethodKey(detail.method) === fromKey) {
-      detailMatches += 1
+    // An exchange refund credit keeps the method it was booked under unless the rename keeps the drawer kind (renameCredits); its SQL twin does the same.
+    if (paymentMethodKey(detail.method) === fromKey && (renameCredits || detail.refund_credit !== true)) {
+      // Counted like the SQL write and the audit row: a row already spelled as the target is not a line the rename writes.
+      if (String(detail.method ?? '').trim() !== target) detailMatches += 1
       if (String(detail.method ?? '') !== target) detailsChanged = true
       detail.method = target
     }
