@@ -70,6 +70,7 @@ const CACHE_API_USERS = {
   'lib/r2.ts': '/uploads read-through: immutable stored names, 1 year, no staff data',
   'lib/imageVariantStore.ts': '/uploads variants: immutable stored names',
   'lib/rankedScope.ts': 'ranked Products scope + promotion edge (INV-A S7): cacheKeyRequest with build + epoch + scope + canonical params (no page) + products/promotions/IC versions; results only',
+  'routes/inventoryChecks.ts': 'count-list marks page (ic_marks): cacheKeyRequest with build + org + epoch + canonical params (org, branch, page, format) + the marks version; one answer for all viewers (id, time, state triples only), re-validated against the log on every hit',
 }
 
 async function main() {
