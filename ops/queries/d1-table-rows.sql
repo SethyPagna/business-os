@@ -196,5 +196,6 @@ SELECT
     'sales_daily_totals', (SELECT COUNT(*) FROM sales_daily_totals),
     'telegram_shift_report_sends', (SELECT COUNT(*) FROM telegram_shift_report_sends),
     'cost_4dp_repair_0313', (SELECT COUNT(*) FROM cost_4dp_repair_0313),
-    'inventory_population_token', (SELECT COUNT(*) FROM inventory_population_token)
+    'inventory_population_token', (SELECT COUNT(*) FROM inventory_population_token),
+    'portal_telegram_pending', (SELECT COUNT(*) FROM portal_telegram_pending)
   ) AS rows_11;

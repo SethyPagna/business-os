@@ -31,6 +31,7 @@ const EXCLUDED = {
   login_lockouts: 'auth ephemera',
   rate_limit_events: 'auth ephemera / throwaway rate-limit telemetry',
   portal_sessions: 'storefront auth ephemera',
+  portal_telegram_pending: 'storefront auth ephemera (Telegram starts)',
   portal_auth_lockouts: 'storefront auth ephemera',
   portal_password_resets: 'storefront auth ephemera (reset tokens)',
   password_reset_requests: '0203 transient admin password-reset requests; a restore must not resurrect stale ones',

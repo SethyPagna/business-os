@@ -87,7 +87,7 @@ Masked by default (kept with `--include-pii`):
 | delivery_contacts | name, phone, address, notes |
 | suppliers | phone, email, address, contact_person, notes |
 | users | username, name, phone, phone_lookup, email, google_email, google_subject |
-| portal_accounts | name, phone, email |
+| portal_accounts | name, phone, email, telegram_user_id |
 | branches | manager |
 | verification_codes | target (the phone/email a code was sent to), requester_ip |
 | user_sessions | device_name, device_id, user_agent, last_ip |
@@ -125,6 +125,7 @@ Always dropped (every mode):
 | portal_accounts | password_hash |
 | verification_codes | code_hash |
 | user_sessions, portal_sessions, portal_password_resets | token_hash |
+| portal_telegram_pending | ticket_hash |
 | ai_provider_configs | api_key_encrypted |
 | google_drive_sync_entries | upload_session_url (a resumable-upload bearer URL) |
 | settings | value of any key matching the Worker's secret rule (`cloudflare/src/lib/settingsSensitive.ts`: `_refresh_token`, `_access_token`, `_secret`, `_api_key`, `_password`) or containing token/secret/password/api_key/private_key/credential — e.g. `drive_sync_refresh_token` |

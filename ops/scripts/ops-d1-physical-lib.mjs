@@ -50,7 +50,7 @@ export const MASTER_COLUMNS = Object.freeze(['type', 'name', 'tbl_name', 'sql'])
 
 // Definitions are exported, rows are not: live credentials, one-time codes and lock-out counters.
 export const OMITTED_ROW_TABLES = Object.freeze([
-  'user_sessions', 'portal_sessions', 'verification_codes', 'portal_password_resets', 'login_lockouts', 'portal_auth_lockouts',
+  'user_sessions', 'portal_sessions', 'portal_telegram_pending', 'verification_codes', 'portal_password_resets', 'login_lockouts', 'portal_auth_lockouts',
 ])
 
 // Settings keys the Worker never hands out (cloudflare/src/lib/settingsSensitive.ts isSensitiveSettingKey), plus every

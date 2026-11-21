@@ -105,7 +105,7 @@ check('the portal customer-account tables from 0087 exist with their uniqueness 
   const tables = new Set(
     sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name),
   )
-  for (const t of ['portal_accounts', 'portal_sessions', 'portal_password_resets', 'portal_auth_lockouts']) {
+  for (const t of ['portal_accounts', 'portal_sessions', 'portal_password_resets', 'portal_auth_lockouts', 'portal_telegram_pending']) {
     assert.ok(tables.has(t), `missing portal table: ${t}`)
   }
   // phone is the one-account-per-number gate; membership_id is case-insensitively unique.

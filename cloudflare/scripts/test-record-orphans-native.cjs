@@ -90,6 +90,8 @@ const NOT_A_REFERENCE = new Set([
   // expired or revoked sessions, so the sign-in row can be gone while a session
   // re-issued from it is still live -- a plain orphan join would report that.
   'limit_family',
+  // portal_accounts.telegram_user_id (migration 0322) is a Telegram user id: it names no row in this database.
+  'telegram_user',
 ])
 /**
  * Columns that record an id a row ONCE had, deliberately outliving the row.

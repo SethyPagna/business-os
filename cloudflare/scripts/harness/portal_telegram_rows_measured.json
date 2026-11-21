@@ -1,0 +1,131 @@
+{
+  "migration": {
+    "empty": {
+      "per_statement": [
+        {
+          "rows_written": 1,
+          "rows_read": 801,
+          "changes": 0
+        },
+        {
+          "rows_written": 1,
+          "rows_read": 801,
+          "changes": 0
+        },
+        {
+          "rows_written": 1,
+          "rows_read": 2,
+          "changes": 0
+        },
+        {
+          "rows_written": 2,
+          "rows_read": 1,
+          "changes": 0
+        },
+        {
+          "rows_written": 1,
+          "rows_read": 0,
+          "changes": 0
+        }
+      ],
+      "rows_written_total": 6,
+      "rows_read_total": 1605
+    },
+    "fixture": {
+      "per_statement": [
+        {
+          "rows_written": 1,
+          "rows_read": 801,
+          "changes": 0
+        },
+        {
+          "rows_written": 1,
+          "rows_read": 801,
+          "changes": 0
+        },
+        {
+          "rows_written": 1,
+          "rows_read": 4,
+          "changes": 0
+        },
+        {
+          "rows_written": 2,
+          "rows_read": 1,
+          "changes": 0
+        },
+        {
+          "rows_written": 1,
+          "rows_read": 0,
+          "changes": 0
+        }
+      ],
+      "rows_written_total": 6,
+      "rows_read_total": 1607
+    }
+  },
+  "statements": [
+    {
+      "label": "S-J2 member INSERT (new shopper)",
+      "rows_written": 7,
+      "rows_read": 21,
+      "changes": 1
+    },
+    {
+      "label": "S-C3 ticket INSERT (member 111)",
+      "rows_written": 4,
+      "rows_read": 18,
+      "changes": 1
+    },
+    {
+      "label": "S-P1 pending INSERT (first start)",
+      "rows_written": 1,
+      "rows_read": 1,
+      "changes": 1
+    },
+    {
+      "label": "S-P1 pending UPDATE (second start, same window)",
+      "rows_written": 1,
+      "rows_read": 1,
+      "changes": 1
+    },
+    {
+      "label": "S-C1 claim (ticket becomes a session)",
+      "rows_written": 2,
+      "rows_read": 5,
+      "changes": 1
+    },
+    {
+      "label": "S-S2 hourly stamp (due)",
+      "rows_written": 1,
+      "rows_read": 1,
+      "changes": 1
+    },
+    {
+      "label": "close, outer UPDATE sets status only (trigger fires)",
+      "rows_written": 3,
+      "rows_read": 3,
+      "changes": 2
+    },
+    {
+      "label": "close, outer UPDATE also clears phone and Telegram id (trigger WHEN false)",
+      "rows_written": 2,
+      "rows_read": 2,
+      "changes": 1
+    }
+  ],
+  "notes": {
+    "telegram_user_id_binding": {
+      "js_number_777": "accepted",
+      "js_number_0": "refused (CHECK)",
+      "js_number_minus_1": "refused (CHECK)",
+      "js_number_2_pow_52": "refused (CHECK)",
+      "js_number_2_pow_52_minus_1": "accepted",
+      "js_number_5_5": "refused (CHECK)",
+      "text_5": "accepted",
+      "text_x5": "refused (CHECK)"
+    },
+    "recursive_triggers": {
+      "recursive_triggers": 0
+    }
+  }
+}

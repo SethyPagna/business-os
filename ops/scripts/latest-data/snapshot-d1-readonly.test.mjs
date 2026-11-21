@@ -234,7 +234,7 @@ const REQUIRED_PII = {
   delivery_contacts: ['phone', 'address', 'name'],
   suppliers: ['phone', 'email', 'address', 'contact_person'],
   users: ['phone', 'email', 'google_email'],
-  portal_accounts: ['phone', 'email'],
+  portal_accounts: ['phone', 'email', 'telegram_user_id'],
   verification_codes: ['target', 'requester_ip'],
   user_sessions: ['last_ip', 'device_name'],
   portal_sessions: ['last_ip'],
@@ -251,6 +251,7 @@ const REQUIRED_SECRET = {
   verification_codes: ['code_hash'],
   user_sessions: ['token_hash'],
   portal_sessions: ['token_hash'],
+  portal_telegram_pending: ['ticket_hash'],
   portal_password_resets: ['token_hash'],
 }
 check('column map covers every column the brief names', () => {
@@ -262,7 +263,7 @@ check('column map covers every column the brief names', () => {
 const MAPPED_BEYOND_CLASSIFIER = [
   'contact_duplicate_dismissals.cluster_value', 'customer_share_submissions.note',
   'customers.company', 'customers.name', 'customers.notes', 'delivery_contacts.name', 'delivery_contacts.notes',
-  'legacy_deleted_sale_items.deleted_by', 'portal_accounts.name', 'portal_auth_lockouts.key',
+  'legacy_deleted_sale_items.deleted_by', 'portal_accounts.name', 'portal_accounts.telegram_user_id', 'portal_auth_lockouts.key',
   'rate_limit_events.client_key', 'returns.notes', 'sales.notes', 'suppliers.notes', 'users.name',
   'verification_codes.target',
 ]
@@ -449,9 +450,27 @@ check('end-to-end --include-pii run: names kept, secrets still absent, manifest 
   assert.ok(containsAnywhere(bytes, 'Sok Dara'))
   for (const v of SECRET_VALUES) assert.ok(!containsAnywhere(bytes, v), `include-pii output leaked secret ${v}`)
 })
+check('rebuild: a Telegram member and a pending start come out masked and dropped despite the 0322 CHECKs', () => {
+  const TG_ID = 123456789
+  const TICKET = `tg1:${'b'.repeat(64)}`
+  const { db, runner } = fakeProduction()
+  db.prepare("INSERT INTO portal_accounts (id, name, member_code, status, telegram_user_id, telegram_verified_at) VALUES (901, 'Tg Member', 'W-7KQ4-TGAA', 'active', ?, '2026-11-21T01:02:03.456Z')").run(TG_ID)
+  const T = '2026-11-21T01:02:03.456Z'
+  db.prepare('INSERT INTO portal_telegram_pending (id, ticket_hash, flags, attempts, window_started_at, created_at, expires_at) VALUES (?, ?, 0, 1, ?, ?, ?)').run(TG_ID, TICKET, T, T, T)
+  const outDir = path.join(TMP_ROOT, 'd1-snapshot-telegram')
+  assert.equal(main([outDir], { runner, wranglerVersion: 'test', log: quietLog() }), 0)
+  const snap = new DatabaseSync(path.join(outDir, 'snapshot.sqlite'), { readOnly: true })
+  const member = snap.prepare('SELECT telegram_user_id FROM portal_accounts WHERE id = 901').get()
+  assert.match(String(member.telegram_user_id), /^pii_/)
+  assert.notEqual(member.telegram_user_id, TG_ID)
+  const pending = snap.prepare('SELECT ticket_hash FROM portal_telegram_pending').get()
+  assert.match(pending.ticket_hash, /^\[dropped\]#\d+$/)
+  snap.close()
+  assert.ok(!containsAnywhere(allOutputBytes(outDir), TICKET), 'ticket hash leaked')
+})
 
 // snapshot.sqlite is made read-only by the tool; make it writable so cleanup works on Windows too.
-for (const dir of ['d1-snapshot-redacted', 'd1-snapshot-included']) {
+for (const dir of ['d1-snapshot-redacted', 'd1-snapshot-included', 'd1-snapshot-telegram']) {
   const f = path.join(TMP_ROOT, dir, 'snapshot.sqlite')
   if (fs.existsSync(f)) fs.chmodSync(f, 0o644)
 }
