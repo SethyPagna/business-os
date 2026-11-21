@@ -190,6 +190,7 @@ async function main() {
   const routes = Object.fromEntries([...indexSource.matchAll(/import \w+ from '(\.\/routes\/[^']+)'/g)].map(([, name]) => [name, { __esModule: true, default: new Hono() }]))
   const worker = load('index.ts', {
     './lib/productStockGuard': load('lib/productStockGuard.ts'),
+    './lib/db': { guardEnvDatabases: (env) => env },
     ...routes,
     './routes/portal': { __esModule: true, default: portal },
     './routes/backups': backups,

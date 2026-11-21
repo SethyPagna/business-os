@@ -84,6 +84,7 @@ import './lib/buildShare'
 import { installReviewAlerts } from './lib/reviewAlert'
 import { PendingActionIdempotencyError } from './lib/pendingActions'
 import { d1DailyLimitBody } from './lib/d1DailyLimit'
+import { guardEnvDatabases } from './lib/db'
 
 export type Env = {
   DB: D1Database
@@ -731,12 +732,14 @@ export function cronHeavySteps(env: Env, label: (name: string, step: () => Promi
 }
 
 export default {
-  fetch: app.fetch,
+  // Every database the Worker touches is wrapped here, so no path (raw env.DB included) can send a statement that replaces a product_batches row (lib/db.ts guardD1).
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) => app.fetch(request, guardEnvDatabases(env), ctx),
   // Cloudflare routes a queue message batch here based on which queue it
   // came from (wrangler.toml's [[queues.consumers]] entries), not by name
   // collision -- both consumers are declared, so we dispatch on the queue's
   // own name off the batch itself.
-  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+  async queue(batch: MessageBatch<unknown>, rawEnv: Env): Promise<void> {
+    const env = guardEnvDatabases(rawEnv)
     if (batch.queue === 'business-os-import') {
       await handleImportQueue(batch as MessageBatch<{ jobId: string; kind: 'analyze' | 'apply' | 'bulk-delete' }>, env)
     } else if (batch.queue === 'business-os-import-dlq') {
@@ -783,7 +786,8 @@ export default {
       >, env)
     }
   },
-  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(controller: ScheduledController, rawEnv: Env, ctx: ExecutionContext): Promise<void> {
+    const env = guardEnvDatabases(rawEnv)
     ctx.waitUntil((async () => {
       // Restore maintenance: skip the whole tick. A scheduled backup taken
       // DURING a restore would snapshot the half-restored database as if it

@@ -1,0 +1,38 @@
+-- Drop the per-insert (0155) orphan scan on product_batches. Nothing else changes: no rows, no other trigger, no index.
+--
+-- Why: positive_lot_reject_parent_insert_orphan_0155 (AFTER INSERT ON product_batches) scanned every positive branch_batch_stock
+-- entry and probed product_batches for each: about 45,000 rows read on EVERY new lot. Fast stock-in, product create, transfers,
+-- returns and an import (one lot per row) paid it; one 200-row import read about 9M rows, more than a whole Free day (5M).
+-- The trigger existed for one case only: a REPLACE of a lot row (REPLACE INTO or INSERT OR REPLACE), whose implicit delete fires no
+-- delete trigger and can leave stock pointing at a lot that no longer exists. No code uses that statement. Owner decision
+-- (20 Nov 2026): the Worker now refuses the statement before it is sent (lib/db.ts guardD1, zero reads) and the gate refuses it in
+-- code (scripts/test-lot-replace-sweep-pure.cjs); the scan goes. The guards below stay exactly as 0155 made them:
+--   positive_lot_reject_parent_delete_0155, positive_lot_reject_parent_update_orphan_0155, positive_lot_reject_parent_id_update_0155
+--   and the partial index idx_branch_batch_stock_positive_batch_0155 (the update trigger and the invariant query use it).
+--
+-- Preflight and postflight (both must return no rows): positive stock whose lot is missing or inactive.
+-- SELECT bbs.id, bbs.batch_id, bbs.branch_id, bbs.quantity
+-- FROM branch_batch_stock bbs LEFT JOIN product_batches pb ON pb.id=bbs.batch_id
+-- WHERE bbs.quantity>0 AND (pb.id IS NULL OR pb.is_active IS NOT 1);
+-- (ops/queries/positive-stock-orphan-lots.sql runs the same check read-only after every deploy and weekly.)
+-- Also both before and after: sqlite_master holds, by name, the three remaining triggers and the partial index:
+--   positive_lot_reject_parent_delete_0155, positive_lot_reject_parent_update_orphan_0155, positive_lot_reject_parent_id_update_0155
+--   (type trigger) and idx_branch_batch_stock_positive_batch_0155 (type index), and after, no trigger named
+--   positive_lot_reject_parent_insert_orphan_0155 remains.
+--
+-- Recovery: no data changes, nothing to roll back. To restore the scan, run this exact statement (copied from
+-- 0155_positive_lot_parent_identity_guard.sql):
+--   CREATE TRIGGER positive_lot_reject_parent_insert_orphan_0155
+--   AFTER INSERT ON product_batches
+--   WHEN EXISTS (
+--     SELECT 1 FROM branch_batch_stock bbs INDEXED BY idx_branch_batch_stock_positive_batch_0155
+--     WHERE bbs.quantity>0 AND NOT EXISTS (SELECT 1 FROM product_batches WHERE id=bbs.batch_id)
+--   )
+--   BEGIN
+--     SELECT RAISE(ABORT,'Cannot orphan positive branch stock by replacing a received lot');
+--   END;
+-- Re-creating it brings back the per-insert read cost (about 45,000 rows per new lot), so only do it together with removing the
+-- reason the Worker guard exists.
+-- After a rollback of the Worker to a commit without the guard, run ops/queries/positive-stock-orphan-lots.sql, and run
+-- scripts/test-lot-replace-sweep-pure.cjs on any branch older than this lane before merging it.
+DROP TRIGGER IF EXISTS positive_lot_reject_parent_insert_orphan_0155;

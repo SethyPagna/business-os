@@ -49,6 +49,7 @@ Module._load = function(request, parent, isMain) {
   }
   if (request === '../lib/permissions') return require('./harness/permissions_stub.cjs').permissionsWith({ getActionTier: () => 'full', isAdminControlUser: () => true })
   if (request === '../lib/db') return { getDb: () => ({}) }
+  if (request === './lib/db' && parent?.filename === path.join(root, 'src', 'index.ts')) return { getDb: () => ({}), guardEnvDatabases: (env) => env }
   if (request === '../lib/saleTotals') return { round2: (value) => Math.round(Number(value) * 100) / 100 }
   if (request === '../lib/businessDateWindow') return new Proxy({}, { get: () => harmless })
   if (request === '../lib/salesAnalytics') {

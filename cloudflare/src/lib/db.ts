@@ -161,6 +161,93 @@ function metered<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[], 
 const metaOf = (result: { meta?: unknown }) => [result?.meta]
 const metasOf = (results: Array<{ meta?: unknown }>) => (Array.isArray(results) ? results.map((result) => result?.meta) : [])
 
+// ---------------------------------------------------------------------------
+// product_batches replace guard (owner decision 20 Nov 2026, deploy 11).
+//
+// REPLACE INTO / INSERT OR REPLACE INTO / UPDATE OR REPLACE on product_batches
+// deletes a conflicting lot row WITHOUT running delete triggers (SQLite's
+// recursive_triggers is off), which can leave positive branch_batch_stock
+// pointing at a lot that no longer exists. Migration 0155 once guarded this with
+// an AFTER INSERT trigger that scanned all positive stock on EVERY new lot
+// (about 45,000 rows read per lot); 0320 drops that trigger and this guard takes
+// its place at zero reads: the statement is refused before it is sent. The
+// DELETE, id-update and orphaning-update triggers of 0155 stay.
+//
+// Every D1 statement of the Worker passes through a database object wrapped by
+// guardD1(): D1Compat wraps its binding in its constructor, and the Worker's
+// fetch/queue/scheduled entry points wrap env.DB and env.IMPORT_DB, so the raw
+// env.DB.prepare()/batch()/exec() paths (restore, product writes, stock
+// transactions, dataset operations) are covered too. A restore uses plain INSERT
+// after clearing the tables, so it is unaffected. scripts/test-lot-replace-guard-pure.cjs
+// pins this and sweeps the repository for any statement that would reach it.
+// ---------------------------------------------------------------------------
+export class ProductBatchesReplaceRefusedError extends Error {
+  constructor() {
+    super('Refused: a statement that replaces a product_batches row (REPLACE INTO, INSERT OR REPLACE, UPDATE OR REPLACE) can orphan positive branch stock. Nothing was written. Use INSERT, INSERT OR IGNORE or an upsert (ON CONFLICT DO UPDATE).')
+    this.name = 'ProductBatchesReplaceRefusedError'
+  }
+}
+
+const SQL_NOISE = /'((?:[^']|'')*)'|--[^\r\n]*|\/\*[\s\S]*?\*\/|"((?:[^"]|"")*)"|`((?:[^`]|``)*)`|\[([^\]]*)\]/g
+const LOT_TABLE = '(?:[A-Za-z_]\\w*\\s*\\.\\s*)?product_batches\\b'
+const LOT_REPLACE = new RegExp('\\b(?:INSERT\\s+OR\\s+REPLACE|REPLACE)\\s+INTO\\s+' + LOT_TABLE + '|\\bUPDATE\\s+OR\\s+REPLACE\\s+' + LOT_TABLE, 'i')
+
+/** True when the SQL text would replace a product_batches row, in any case and spacing, with or without a schema prefix or identifier quotes. Comments and string literals are ignored. */
+export function replacesProductBatchesRow(sql: string): boolean {
+  if (typeof sql !== 'string') return false
+  const flat = sql.replace(SQL_NOISE, (_match, sq: string | undefined, dq: string | undefined, bt: string | undefined, br: string | undefined) => {
+    const ident = sq ?? dq ?? bt ?? br
+    return ident !== undefined && /^\w+$/.test(ident) ? ` ${ident} ` : ' '
+  })
+  return LOT_REPLACE.test(flat)
+}
+
+export function assertNoProductBatchesReplace(sql: string): void {
+  if (replacesProductBatchesRow(sql)) throw new ProductBatchesReplaceRefusedError()
+}
+
+const D1_GUARDED = Symbol.for('business-os.product-batches-replace-guard.v1')
+
+const GUARDED_D1 = new WeakMap<object, object>()
+
+/** The same D1 database, refusing a product_batches replace at prepare()/exec(). Idempotent; a missing database is returned as is. The wrapper of one binding is always the same object: module caches key a WeakMap on env.DB, and a fresh wrapper per access would miss them and repeat their probes. */
+export function guardD1<T extends object | undefined | null>(d1: T): T {
+  if (!d1 || (d1 as Record<symbol, unknown>)[D1_GUARDED]) return d1
+  const known = GUARDED_D1.get(d1 as object)
+  if (known) return known as T
+  const guardSession = (session: object): object => new Proxy(session, { get: (target, prop) => {
+    const value = Reflect.get(target, prop, target)
+    if (typeof value !== 'function') return value
+    if (prop === 'prepare') return (sql: string) => { assertNoProductBatchesReplace(sql); return value.call(target, sql) }
+    return value.bind(target)
+  } })
+  const guarded = new Proxy(d1 as object, { get: (target, prop) => {
+    if (prop === D1_GUARDED) return true
+    const value = Reflect.get(target, prop, target)
+    if (typeof value !== 'function') return value
+    if (prop === 'prepare' || prop === 'exec') return (sql: string, ...rest: unknown[]) => { assertNoProductBatchesReplace(sql); return value.call(target, sql, ...rest) }
+    if (prop === 'withSession') return (...args: unknown[]) => guardSession(value.apply(target, args))
+    return value.bind(target)
+  } })
+  GUARDED_D1.set(d1 as object, guarded)
+  return guarded as T
+}
+
+const GUARDED_ENVS = new WeakMap<object, object>()
+
+/** env with DB and IMPORT_DB wrapped by guardD1, for the Worker's entry points. Every other binding is returned untouched. */
+export function guardEnvDatabases<E extends object>(env: E): E {
+  if (!env || typeof env !== 'object') return env
+  const cached = GUARDED_ENVS.get(env)
+  if (cached) return cached as E
+  const wrapped = new Proxy(env, { get: (target, prop) => {
+    const value = Reflect.get(target, prop, target)
+    return (prop === 'DB' || prop === 'IMPORT_DB') && value && typeof value === 'object' ? guardD1(value) : value
+  } })
+  GUARDED_ENVS.set(env, wrapped)
+  return wrapped
+}
+
 class D1CompatStatement {
   constructor(private readonly db: D1Database, private readonly sql: string) {}
 
@@ -221,7 +308,10 @@ export class D1Compat {
   // import_auto_merges deliberately stay on the main DB for that reason).
   staging: D1Compat
 
-  constructor(private readonly d1: D1Database) {
+  private readonly d1: D1Database
+
+  constructor(d1: D1Database) {
+    this.d1 = guardD1(d1)
     this.staging = this
   }
 

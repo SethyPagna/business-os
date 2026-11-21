@@ -473,7 +473,12 @@ if (emitAt >= 0) {
     'sale_item_batch_allocations', 'product_cost_entries', 'undo_snapshots', 'audit_logs', 'catalog_cost_repair_0195_backup']) {
     for (const r of fresh.prepare(`SELECT * FROM ${t}`).all()) {
       const cols = Object.keys(r)
-      out.push(`INSERT OR REPLACE INTO ${t}(${cols.join(', ')}) VALUES (${cols.map((c) => lit(r[c])).join(', ')});`)
+      const values = cols.map((c) => lit(r[c])).join(', ')
+      // product_batches is never written with REPLACE (it deletes a lot row without firing delete triggers; the Worker refuses it,
+      // see test-lot-replace-sweep-pure.cjs): the same final rows by an upsert on the primary key.
+      out.push(t === 'product_batches'
+        ? `INSERT INTO ${t}(${cols.join(', ')}) VALUES (${values}) ON CONFLICT(id) DO UPDATE SET ${cols.filter((c) => c !== 'id').map((c) => `${c}=excluded.${c}`).join(', ')};`
+        : `INSERT OR REPLACE INTO ${t}(${cols.join(', ')}) VALUES (${values});`)
     }
   }
   fs.mkdirSync(dir, { recursive: true })
