@@ -476,7 +476,7 @@ runTest('the storefront declares header / nav / main landmarks', () => {
   assert.match(surface, /<header\b/, 'the business-name row is a banner')
   assert.match(surface, /<nav\b/, 'the section tab row is navigation')
   assert.match(surface, /<nav\s+aria-labelledby=\{navLabelId\}/, 'and the nav is named by a hidden label (an aria-label on it would stop Google translating the search added later)')
-  assert.match(surface, /<PortalHiddenLabel id=\{navLabelId\}>\{copy\('publicNavigation', 'Section navigation'\)\}<\/PortalHiddenLabel>/, 'with the same copy text as before')
+  assert.match(surface, /<span id=\{navLabelId\} className="sr-only">\{copy\('publicNavigation', 'Section navigation'\)\}<\/span>/, 'with the same copy text as before')
   assert.match(surface, /<main\b/, 'the tab content is the main landmark')
   assert.match(surface, /id="portal-main-content"/, 'which the skip link targets')
 })

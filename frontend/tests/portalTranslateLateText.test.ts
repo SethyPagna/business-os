@@ -94,7 +94,6 @@ function containsSearchSlot(node: ts.Node, source: ts.SourceFile): boolean {
 function isHiddenLabel(node: ts.Node, source: ts.SourceFile): node is ts.JsxElement {
   if (!ts.isJsxElement(node)) return false
   const tag = node.openingElement.tagName.getText(source)
-  if (tag === 'PortalHiddenLabel') return true
   const className = findAttribute(node.openingElement, 'className', source)
   return tag === 'span' && !!className && /\bsr-only\b/.test(className.getText(source))
 }
@@ -148,7 +147,7 @@ export function headerNavProblems(source: ts.SourceFile): string[] {
 
 const HEADER_OK = `const x = (
   <nav aria-labelledby={navLabelId} className="sticky">
-    <PortalHiddenLabel id={navLabelId}>{copy('publicNavigation', 'Section navigation')}</PortalHiddenLabel>
+    <span id={navLabelId} className="sr-only">{copy('publicNavigation', 'Section navigation')}</span>
     <div data-portal-nav-search-slot="true" />
   </nav>
 )`
@@ -163,7 +162,7 @@ runTest('header pin control: the correct shape is green', () => {
 })
 
 runTest('header pin control: the label as the preceding sibling is green', () => {
-  const code = `const x = (<><PortalHiddenLabel id={navLabelId}>{copy('publicNavigation', 'Section navigation')}</PortalHiddenLabel><nav aria-labelledby={navLabelId}><div data-portal-nav-search-slot="true" /></nav></>)`
+  const code = `const x = (<><span id={navLabelId} className="sr-only">{copy('publicNavigation', 'Section navigation')}</span><nav aria-labelledby={navLabelId}><div data-portal-nav-search-slot="true" /></nav></>)`
   assert.deepEqual(headerNavProblems(inlineSource(code)), [])
 })
 
@@ -179,12 +178,16 @@ runTest('header pin control: a nav with a title is red', () => {
 })
 
 runTest('header pin control: aria-labelledby pointing at an id nothing in the render has is red', () => {
-  const problems = headerNavProblems(inlineSource(HEADER_OK.replace('id={navLabelId}>', 'id={otherId}>')))
+  const dangling = HEADER_OK.replace('<span id={navLabelId}', '<span id={otherId}')
+  assert.notEqual(dangling, HEADER_OK, 'the control changed the label id')
+  const problems = headerNavProblems(inlineSource(dangling))
   assert.ok(problems.some((problem) => problem.includes('no hidden label with id={navLabelId}')), problems.join('; '))
 })
 
 runTest('header pin control: a string aria-labelledby is red', () => {
-  assert.ok(headerNavProblems(inlineSource(HEADER_OK.replace('{navLabelId} className', '"navLabel" className'))).length > 0)
+  const stringId = HEADER_OK.replace('aria-labelledby={navLabelId}', 'aria-labelledby="navLabel"')
+  assert.notEqual(stringId, HEADER_OK, 'the control changed aria-labelledby')
+  assert.ok(headerNavProblems(inlineSource(stringId)).some((problem) => problem.includes('needs aria-labelledby={identifier}')))
 })
 
 runTest('header pin control: a hidden label with a different copy key is red', () => {
@@ -276,7 +279,7 @@ runTest('no new container with aria-label or title and late children appears in 
     const known = KNOWN_NOT_YET_CONVERTED[key]
     if (!known || count > known.count) fresh.push(`${key} x${count}`)
   }
-  assert.deepEqual(fresh, [], 'name it with aria-labelledby and a PortalHiddenLabel (or its visible heading) instead; see the header of this file')
+  assert.deepEqual(fresh, [], 'name it with aria-labelledby and an sr-only label (or its visible heading) instead; see the header of this file')
 })
 
 runTest('every KNOWN_NOT_YET_CONVERTED entry still matches something (the list only shrinks)', () => {

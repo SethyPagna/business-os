@@ -13,7 +13,6 @@ import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import PortalContactMenu from './PortalContactMenu.tsx'
-import PortalHiddenLabel from './PortalHiddenLabel.tsx'
 import { PORTAL_PRIMARY_COLORS } from './portalButtons.ts'
 import CatalogProductImage from './catalogImages'
 import { PortalNavSearchSlotContext } from './portalNavSearchSlot.ts'
@@ -331,7 +330,7 @@ export default function CatalogPreviewSurface({
     zIndex: 40,
   } : undefined
 
-  // The header nav gains its search field and Filters button after mount, so it is named by a hidden label, never aria-label: see PortalHiddenLabel.
+  // The header nav gains its search field and Filters button after mount, so it is named by a hidden label, never aria-label: Google never translates text added later inside an element that carries aria-label or title (measured 21 Nov 2026).
   const navLabelId = useId()
 
   return (
@@ -587,7 +586,7 @@ export default function CatalogPreviewSurface({
               className={publicView ? 'sticky top-0 z-40' : ''}
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
             >
-              <PortalHiddenLabel id={navLabelId}>{copy('publicNavigation', 'Section navigation')}</PortalHiddenLabel>
+              <span id={navLabelId} className="sr-only">{copy('publicNavigation', 'Section navigation')}</span>
               <div
                 className={`portal-nav-shell border-b border-stone-300 bg-[#f4f1ea] dark:border-neutral-800 dark:bg-[#0b0b0c] ${publicView && !publicPortalNavPinned ? NAV_FULL_BLEED_CLASS : ''}`}
                 style={pinnedNavStyle}
