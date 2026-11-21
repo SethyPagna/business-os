@@ -50,7 +50,7 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGal
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import InstallAppButton from '../install/InstallAppButton.tsx'
 import { installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
-import { clearPortalReopenAccount, consumePortalReopenAccount, isGoogleLanguageChoice, markPortalReopenAccount, markPortalGoogleAsked, normalizePortalChoice, portalCopyLanguage, portalTranslateAllowed, portalGoogleWasAsked, readPublicStorefrontChoice, storePortalLanguage } from './portalLanguageOptions.ts'
+import { clearPortalReopenAccount, consumePortalReopenAccount, isGoogleLanguageChoice, markPortalReopenAccount, markPortalGoogleAsked, normalizePortalChoice, portalCopyLanguage, portalTranslateAllowed, portalGoogleWasAsked, readPublicStorefrontChoice, settlePortalReopenAccount, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
 import { aiProviderState } from './legal/aiProviderDisclosure.ts'
 import { PORTAL_DARK_SURFACE, PORTAL_LIGHT_SURFACE } from './portalContrast.ts'
@@ -544,8 +544,10 @@ export default function PublicCatalogPage() {
   // cart bucket drawer below.
   // G38 P0 (owner 27 Sep): on the shop host /login is the customer sign-in,
   // never the staff app, so arriving there opens this drawer.
-  // consumePortalReopenAccount is read-and-delete: a sheet that was open when Google's translation was taken off by a reload comes back once.
+  // A sheet that was open when Google's translation was taken off by a reload comes back once: the flag is deleted at the first read and the
+  // answer is kept for this page until it is on screen (React may run this initializer again before the first commit).
   const [accountOpen, setAccountOpen] = useState(() => typeof window !== 'undefined' && (isStorefrontSignInPath(window.location?.pathname) || consumePortalReopenAccount()))
+  useEffect(() => { settlePortalReopenAccount() }, [])
   // Saved and List are one full page inside the storefront (spec section 4), not drawers. Opening it pushes one history entry, so the browser's
   // Back returns the visitor to where they were (the tab, and how far down the page they had scrolled). Tabs themselves are plain state.
   const [listView, setListView] = useState<PortalListSegment | null>(null)
