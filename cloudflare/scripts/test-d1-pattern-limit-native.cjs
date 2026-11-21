@@ -64,7 +64,7 @@ if (process.argv.includes('--print-migration-patch')) {
 } else if (require.main === module) {
   const run = process.argv.includes('--routes-only')
     ? verifyRealSettlementRoute(fs.readFileSync(path.join(migrations,migrationName),'utf8'))
-    : main()
+    : process.argv.includes('--schema-only') ? verifyWholeChainWithinPatternLimit() : main()
   run.catch(e => { console.error(e); process.exitCode = 1 })
 }
 
@@ -128,6 +128,36 @@ async function main() {
   } finally { original.close(); await mf.dispose() }
   await verifyRealSettlementRoute(migration)
   await verifyWranglerMigration(migration)
+  await verifyWholeChainWithinPatternLimit()
+}
+
+// 0321 (G38) and every migration after 0156: no ACTIVE schema object may carry a LIKE/GLOB literal over 50 bytes.
+// A single long member_code GLOB is accepted by SQLite and refused by native D1 on every INSERT/UPDATE, which would
+// fail every sign-up, sign-in and /auth/me. The control runs that shape and the shipped CHECK on workerd side by side.
+async function verifyWholeChainWithinPatternLimit() {
+  const db = new Database(':memory:')
+  const files = fs.readdirSync(migrations).filter(f => f.endsWith('.sql')).sort()
+  assert.ok(files.includes('0321_portal_members_separation.sql'), '0321 is in the chain')
+  for (const file of files) db.exec(fs.readFileSync(path.join(migrations, file), 'utf8'))
+  const objects = db.prepare('SELECT name,tbl_name,type,sql FROM sqlite_master WHERE sql IS NOT NULL').all()
+  db.close()
+  const tooLong = objects.filter(o => /\b(?:LIKE|GLOB)\s+'[^']{51,}'/i.test(o.sql)).map(o => o.name)
+  assert.deepEqual(tooLong, [], 'every active table/index/trigger pattern must fit native D1 (50 bytes)')
+  const shipped = objects.find(o => o.name === 'portal_accounts').sql
+  const C = '[0-9A-HJKMNP-TV-Z]'
+  const longShape = `CREATE TABLE portal_accounts_long_shape (member_code TEXT CHECK (member_code IS NULL OR member_code GLOB 'W-${C.repeat(4)}-${C.repeat(4)}'))`
+  const mf = new Miniflare({ modules: true, script: '', d1Databases: ['DB'] })
+  try {
+    const d1 = await mf.getD1Database('DB')
+    await d1.batch([d1.prepare(shipped), d1.prepare(longShape)])
+    await assert.rejects(d1.prepare("INSERT INTO portal_accounts_long_shape VALUES ('W-7KQ4-M9XD')").run(), /LIKE or GLOB pattern too complex/)
+    await d1.prepare("INSERT INTO portal_accounts (name, member_code) VALUES ('ok', 'W-7KQ4-M9XD')").run()
+    await d1.prepare("UPDATE portal_accounts SET member_code = 'W-0000-0000' WHERE name = 'ok'").run()
+    for (const bad of ['W-7KQ4-M9XI', 'w-7kq4-m9xd', 'W-7KQ4M9XD', 'W-7KQ4-M9XDD']) {
+      await assert.rejects(d1.prepare("INSERT INTO portal_accounts (name, member_code) VALUES ('bad', ?)").bind(bad).run(), /CHECK constraint/, bad)
+    }
+  } finally { await mf.dispose() }
+  console.log('PASS whole chain (incl. 0321) keeps every active LIKE/GLOB within 50 bytes; on workerd the single long member_code GLOB aborts and the shipped CHECK commits')
 }
 
 async function verifyWranglerMigration(migration) {

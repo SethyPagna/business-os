@@ -949,7 +949,7 @@ app.get('/customers/membership/:membershipNumber', async (c) => {
 // Lets admin Contacts badge a contact that has signed up and show the
 // membership id it registered under. Chunked to stay within D1's bound-param
 // limit, same as computeCustomerPointsMap.
-type PortalAccountFlag = { membershipId: string; createdAt: string | null }
+type PortalAccountFlag = { membershipId: string | null; memberCode: string | null; createdAt: string | null }
 async function computePortalAccountMap(env: Env, contactIds: number[]): Promise<Map<number, PortalAccountFlag>> {
   const result = new Map<number, PortalAccountFlag>()
   if (contactIds.length === 0) return result
@@ -957,11 +957,11 @@ async function computePortalAccountMap(env: Env, contactIds: number[]): Promise<
   for (const idChunk of chunkForBinding(contactIds)) {
     const placeholders = idChunk.map(() => '?').join(',')
     const rows = await db.prepare(
-      `SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (${placeholders})`,
-    ).all<{ contact_id: number; membership_id: string; created_at: string | null }>(idChunk)
+      `SELECT contact_id, membership_id, member_code, created_at FROM portal_accounts WHERE contact_id IN (${placeholders})`,
+    ).all<{ contact_id: number; membership_id: string | null; member_code: string | null; created_at: string | null }>(idChunk)
     for (const row of rows) {
       if (row.contact_id == null) continue
-      result.set(Number(row.contact_id), { membershipId: row.membership_id, createdAt: row.created_at ?? null })
+      result.set(Number(row.contact_id), { membershipId: row.membership_id ?? null, memberCode: row.member_code ?? null, createdAt: row.created_at ?? null })
     }
   }
   return result
