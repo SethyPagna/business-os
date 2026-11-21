@@ -102,7 +102,9 @@ const OTHER_SCREENS = ['inventory_check_revision_required', 'inventory_check_sch
   'inventory_check_stock_schema_unavailable', 'inventory_check_invalid_title', 'inventory_check_invalid_scope', 'inventory_check_invalid_state', 'inventory_check_reason_required', 'inventory_check_item_not_found',
   'inventory_check_session_final', 'inventory_check_invalid_query', 'inventory_check_view_required', 'invalid_session',
   // the list and product-read routes (raised in other files, shown by the Inventory list in its own words or as a failed read)
-  'inventory_check_field_hidden', 'inventory_check_filter_too_large', 'inventory_check_family_page_too_large']
+  'inventory_check_field_hidden', 'inventory_check_filter_too_large', 'inventory_check_family_page_too_large',
+  // the marks routes (ic_marks, OFF) answer only the count-list device, which is not built yet; that device's screen slice adds the sentence
+  'inventory_check_fix_stock_required']
 // A code the error handlers answer with when an error carries none (routes/inventoryChecks.ts, which also answers /approval and /approval/lines, and routes/inventoryCheckProducts.ts). The panel does not read it as
 // an unknown outcome and shows its generic failure text, so it is no refusal with a sentence of its own: named here with that reason, and kept out of the codes that need one.
 const FALLBACK_CODES: Record<string, string> = { inventory_check_unavailable: 'what the error handlers answer when an error carries no code; shown with the generic failure text' }
