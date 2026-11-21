@@ -85,25 +85,14 @@ export function deriveWhatsappLink(value: string): string {
   return digits ? `https://wa.me/${digits}` : ''
 }
 
-/**
- * Given a phone number (or an existing tel: link), returns a normalized
- * tel: deep link so it opens the device's dialer, or '' if nothing usable
- * was given.
- */
-export function derivePhoneCallLink(value: string): string {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-  if (/^tel:/i.test(raw)) return raw
-  const digits = raw.replace(/[^\d+]/g, '')
-  return digits ? `tel:${digits}` : ''
-}
-
 // No whitespace, control character or character that could add a header, a second address or a query to a mailto: link.
 const MAILTO_UNSAFE = '\\s\\u0000-\\u001f\\u007f@?&,;%<>"\'\\\\'
 const SAFE_EMAIL = new RegExp(`^[^${MAILTO_UNSAFE}]+@[^${MAILTO_UNSAFE}]+\\.[^${MAILTO_UNSAFE}]+$`)
 
 /** The one rule for a public tel:/mailto: href: a link only when the value can safely make one, else ''. */
-export function contactHref(kind: 'tel' | 'mailto', value?: string | null): string {
+export function contactHref(kind: 'tel' | 'mailto', rawValue?: string | null): string {
+  // A saved value with a leading or trailing space still makes a link (the Contact menu already trimmed; About did not).
+  const value = String(rawValue ?? '').trim()
   if (!value) return ''
   if (kind === 'tel') {
     const digits = value.replace(/[^\d+]/g, '')

@@ -22,6 +22,26 @@ function runCase(name: string, fn: () => void): void {
   }
 }
 
+runCase('tel: the Contact menu helper rebuilds the link from digits (moved from derivePhoneCallLink)', () => {
+  assert.equal(contactHref('tel', '+855 12 345 678'), 'tel:+85512345678')
+  assert.equal(contactHref('tel', 'tel:+85512345678'), 'tel:+85512345678')
+  assert.equal(contactHref('tel', ''), '')
+  assert.equal(contactHref('tel', '12345'), '')
+})
+
+runCase('tel: the Contact menu row and the About link agree on a short or tel:-prefixed value', () => {
+  const rows = (phone: string) => buildPortalContactEntries({ phone }).filter((entry) => entry.platform === 'phone')
+  assert.equal(rows('12345').length, 0, 'fewer than 6 digits: no menu row')
+  assert.equal(rows('tel:+85512345678')[0]?.href, 'tel:+85512345678')
+})
+
+runCase('contactHref trims the value first for both kinds', () => {
+  assert.equal(contactHref('mailto', ' shop@example.com '), 'mailto:shop@example.com')
+  assert.equal(contactHref('tel', '  012 345 678 '), 'tel:012345678')
+  assert.equal(contactHref('mailto', 'shop @example.com'), '', 'a space inside still makes no link')
+  assert.equal(contactHref('mailto', '   '), '')
+})
+
 runCase('mailto: ordinary addresses keep a link', () => {
   assert.equal(contactHref('mailto', 'shop@example.com'), 'mailto:shop@example.com')
   assert.equal(contactHref('mailto', 'first.last+tag@sub-domain.example.co'), 'mailto:first.last+tag@sub-domain.example.co')
