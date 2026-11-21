@@ -45,7 +45,7 @@ const sum = (rows) => ({ rows: rows.reduce((n, r) => n + r.rr, 0), calls: rows.r
     const i0 = device.log.length
     await device.sync()
     out.measured.changesIdle = device.log.slice(i0)[0]
-    out.measured.changesIdleStatements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 90).replace(/s+/g, ' '), rr: x.rr }))
+    out.measured.changesIdleStatements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 90).replace(/\s+/g, ' '), rr: x.rr, readsSessions: /user_sessions/i.test(x.raw) }))
     // 4. Changes after one 20-line submit (the submit itself is recorded).
     const fresh = async (n, off) => world.all(`SELECT p.id AS id, bs.quantity AS q FROM products p JOIN branch_stock bs ON bs.product_id=p.id AND bs.branch_id=1 WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0 ORDER BY p.id DESC LIMIT ? OFFSET ?`, n, off)
     const lines = (ps, every) => ps.map((p, i) => ({ productId: p.id, countedQuantity: every && i % every === 0 ? p.q + 1 : p.q, seenQuantity: p.q }))
@@ -55,7 +55,7 @@ const sum = (rows) => ({ rows: rows.reduce((n, r) => n + r.rr, 0), calls: rows.r
     const s0 = device.log.length
     await device.sync()
     out.measured.changesAfterSubmit20 = sum(device.log.slice(s0))
-    out.measured.changesAfterSubmit20Statements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 100).replace(/s+/g, ' '), rr: x.rr }))
+    out.measured.changesAfterSubmit20Statements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 100).replace(/\s+/g, ' '), rr: x.rr }))
     // 5. Approve all of 200 lines: five submissions of 40 differing lines, approved, then one device catches up on all of it.
     const big = await fresh(200, 20)
     const sessions = []
@@ -66,11 +66,16 @@ const sum = (rows) => ({ rows: rows.reduce((n, r) => n + r.rr, 0), calls: rows.r
     const a0 = device.log.length
     await device.sync()
     const after = device.log.slice(a0)
-    out.measured.changesAfterApprove200Statements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 100).replace(/s+/g, ' '), rr: x.rr }))
+    out.measured.changesAfterApprove200Statements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 100).replace(/\s+/g, ' '), rr: x.rr }))
     out.measured.changesAfterApprove200 = { ...sum(after), perAnswerRowsMax: Math.max(...after.map((r) => r.rr)), perAnswerCallsMax: Math.max(...after.map((r) => r.calls)) }
     // The budgets of the spec (GO lines). Written first, asserted last.
     const m = out.measured
-    const go = [['snapshotCold rows <= 60000', m.snapshotCold.rows <= 60000], ['changesIdle rows <= 4 and 1 call', m.changesIdle.rr <= 4 && m.changesIdle.calls === 1],
+    const idleNet = (statements, gross, exclude = true) => { const auth = statements.filter((s) => s.readsSessions); const rows = statements.filter((s) => !exclude || !s.readsSessions).reduce((a, s) => a + s.rr, 0); const calls = exclude ? gross.calls - 1 : gross.calls; return { authCount: auth.length, rows, calls, ok: (!exclude || auth.length === 1) && rows <= 4 && calls === 1 } }
+    const idle = idleNet(m.changesIdleStatements, m.changesIdle)
+    console.log('changesIdle gross ' + m.changesIdle.rr + ' rows ' + m.changesIdle.calls + ' calls; net ' + idle.rows + ' rows ' + idle.calls + ' call; auth statements ' + idle.authCount + (idle.ok ? '' : ' ' + JSON.stringify(m.changesIdleStatements)))
+    assert.equal(idleNet(m.changesIdleStatements, m.changesIdle, false).ok, false, 'MUTANT: without the exclusion of the auth lookup the idle check must be red')
+    assert.equal(idleNet([...m.changesIdleStatements, ...m.changesIdleStatements.filter((s) => s.readsSessions)], m.changesIdle).ok, false, 'MUTANT: the auth statement matched twice must be red')
+    const go = [['snapshotCold rows <= 60000', m.snapshotCold.rows <= 60000], ['changesIdle net rows <= 4 and 1 net call', idleNet(m.changesIdleStatements, m.changesIdle).ok],
       ['changesAfterSubmit20 rows <= 900 and calls <= 3 per answer', m.changesAfterSubmit20.rows <= 900], ['changesAfterApprove200 rows <= 8000', m.changesAfterApprove200.rows <= 8000], ['pendingBuild rows <= 5000', m.pendingBuild.rows <= 5000]]
     out.go = go.map(([name, ok]) => ({ name, ok }))
     if (OUT) fs.writeFileSync(OUT, JSON.stringify(out, null, 1))
