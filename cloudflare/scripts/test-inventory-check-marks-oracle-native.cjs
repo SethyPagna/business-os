@@ -258,6 +258,7 @@ async function scenario(world, report, patches) {
   // W6 approve whole / W7 line decisions / W8 reject / W9 close
   const b = await fresh(9)
   await submit(b, 3); const bs = await sessionOf(b[0].id)
+  await device.sync()
   await step('W7 line reject', async () => { await must(world.send('POST', `${IC}/sessions/${bs}/approval/lines`, { requestId: rid('ln'), productId: b[0].id, action: 'reject' }), 'line reject') })
   await step('W7 line reopen', async () => { await must(world.send('POST', `${IC}/sessions/${bs}/approval/lines`, { requestId: rid('ln'), productId: b[0].id, action: 'reopen' }), 'line reopen') })
   await step('W6 approve whole', () => approval(bs, 'approve'))
@@ -493,7 +494,7 @@ const MUTANTS = [
   { name: 'mw12 the device publishes each answer as it arrives', model: { publishEach: true }, red: 'W3c' },
   { name: 'mA1 an observe walks too (every event is set-changing)', worlds: ['r4b'], file: LIB, from: "row.action === 'create' || Number(row.decides) === 1", to: "row.action !== 'close'", red: 'A1d 500-line chain' },
   { name: 'mA2 no walk on create', file: LIB, from: "row.action === 'create' || Number(row.decides) === 1", to: 'Number(row.decides) === 1', red: 'W1 plain submission' },
-  { name: 'mA3 no walk on a line decision', file: LIB, from: "json_extract(after_json,'$.approval') IS NOT NULL ELSE 1 END AS decides", to: "json_extract(after_json,'$.approval') IS NOT NULL AND json_extract(after_json,'$.counted_quantity') IS NULL ELSE 1 END AS decides", red: 'W7 line reject' },
+  { name: 'mA3 no walk on a line decision', file: LIB, from: "json_extract(after_json,'$.approval') IS NOT NULL ELSE 1 END AS decides", to: "json_extract(after_json,'$.approval') IS NOT NULL AND (product_id IS NULL OR json_extract(after_json,'$.state') IS NOT NULL OR json_extract(after_json,'$.superseded_by') IS NOT NULL) ELSE 1 END AS decides", red: 'W7 line reject' },
   { name: 'mA4 the device drops a held list between answers', model: { dropHeld: true }, worlds: ['r4b'], red: 'A1d unrelated answer keeps the held list' },
   { name: 'mw14 legacy without a.status = pending', file: LIB, from: "a.line_set_json IS NULL AND a.session_id IS NOT NULL AND a.status = 'pending' AS legacy", to: 'a.line_set_json IS NULL AND a.session_id IS NOT NULL AS legacy', red: 'L2' },
 ]
