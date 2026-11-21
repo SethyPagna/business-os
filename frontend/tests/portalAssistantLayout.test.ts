@@ -119,6 +119,15 @@ run('a recommendation is one compact solid row: image, name, stock badge, Add; n
   assert.deepEqual(tabs.match(solid) || [], [], 'no opacity suffix, blur or transparent fill anywhere in CatalogSecondaryTabs.tsx')
 })
 
+run('the reset button clears the question as well as the answer, as its name says', () => {
+  assert.ok(tabs.includes("copy('assistantReset', 'Clear the question and answer')"), 'the button is named for the question and the answer')
+  const start = page.indexOf('const clearAssistantState = () => {')
+  assert.ok(start > 0, 'the storefront page defines clearAssistantState')
+  const body = page.slice(start, page.indexOf('\n  }', start))
+  assert.ok(body.includes("setAssistantQuestion('')"), 'it empties the question box')
+  assert.ok(body.includes('setAssistantResponse(null)') && body.includes("setAssistantError('')"), 'and still clears the answer and the error')
+})
+
 if (failed) {
   console.error(`\n${failed} assistant check(s) failed`)
   process.exit(1)

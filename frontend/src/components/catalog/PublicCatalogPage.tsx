@@ -1059,6 +1059,7 @@ export default function PublicCatalogPage() {
     setPortalImageView({ open: true, title, images: cleanImages, index: Math.max(0, Math.min(index, cleanImages.length - 1)) })
   }
   const clearAssistantState = () => {
+    setAssistantQuestion('')
     setAssistantError('')
     setAssistantResponse(null)
   }
