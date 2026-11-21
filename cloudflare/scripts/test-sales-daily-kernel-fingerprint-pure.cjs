@@ -168,6 +168,10 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
     assert.notDeepEqual(names({ reexports: false }), want, 'MUTANT: a walker that ignores re-exports')
     assert.ok(!names({ reexports: false }).includes('src/lib/fxStar.ts') && !names({ reexports: false }).includes('src/lib/fxNamed.ts'))
     // the real tree: the dynamic edge of salesAnalytics (the legacy/atomic switch) and what it imports are in the kernel
+    const walked = F.fingerprint(fixture)
+    assert.ok(walked.refusals.some((r) => /^src\/lib\/salesAnalytics\.ts:\d+: refused: dynamic import with a computed specifier/.test(r)), `a computed import() in the walk is a refusal, not a silent skip: ${walked.refusals.join('|')}`)
+    const hidden = F.fingerprint(new Map([[E, "export async function g() { return import('./sale' + 'X') }"], ['src/lib/saleX.ts', 'export const x = 1']]))
+    assert.ok(hidden.refusals.length >= 1 && !('src/lib/saleX.ts' in hidden.files), 'MUTANT: a computed import of a new module is refused, never silently skipped')
     const real = Object.keys(F.fingerprint(new Map()).files)
     for (const f of ['src/lib/reportAtomicSwitch.ts', 'src/lib/analytics.ts', 'src/lib/planTier.ts', 'src/lib/readSwitches.ts']) assert.ok(real.includes(f), f)
   })
@@ -257,6 +261,10 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
       ['compound assignment (13)', 'export const a = (env: Env) => { getPlanLimits(env).x += 1 }', 'writes getPlanLimits\\(\\.\\.\\.\\)\\.x'],
       ['increment (13)', 'export const a = (env: Env) => { getPlanLimits(env).x++ }', 'writes getPlanLimits\\(\\.\\.\\.\\)\\.x'],
       ['delete (13)', 'export const a = (env: Env) => { delete getPlanLimits(env).x }', 'writes getPlanLimits\\(\\.\\.\\.\\)\\.x'],
+      ['computed import, concatenation (M2a)', "export async function bellOf(env: Env): Promise<number> { const m = await import('./plan' + 'Tier'); return (m as any)['getPlanLimits'](env)['notificationSectionCacheSeconds'] }", 'dynamic import with a computed specifier', ''],
+      ['computed import, variable', 'export const a = (n: string) => import(n)', 'dynamic import with a computed specifier', ''],
+      ['computed import, template with a substitution', 'export const a = (n: string) => import(`./plan${n}`)', 'dynamic import with a computed specifier', ''],
+      ['require call', "export const a = () => require('./planTier')", 'require\\(\\) call', ''],
       ['PlanLimits as a parameter type (14)', 'export function f(l: PlanLimits) { return l.x }', 'PlanLimits used other than', "import type { PlanLimits } from './planTier'\n"],
       ['PlanLimits import (14)', 'export const a = 1', 'imports PlanLimits', "import type { PlanLimits } from './planTier'\n"],
       ['PLAN_LIMITS_BY_TIER import (15)', 'export const a = 1', 'imports PLAN_LIMITS_BY_TIER', "import { PLAN_LIMITS_BY_TIER } from './planTier'\n"],
@@ -267,6 +275,8 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
       assert.ok(r.refusals.some((l) => new RegExp(`^src/lib/fxRead\\.ts:\\d+: refused: ${reason}`).test(l)), `${name}: ${JSON.stringify(r)}`)
       assert.deepEqual(r.keys, [], `${name}: no key is counted from a refused form`)
     }
+    const literalImport = F.limitReads("export const a = async () => import('./reportAtomicSwitch')", 'src/lib/fxRead.ts')
+    assert.deepEqual([literalImport.keys, literalImport.refusals], [[], []], 'positive control: the one real dynamic import form (a string literal) stays allowed')
     const used = F.limitReads(`${MINI_PLAN}export function f() { return PAID_LIMITS.a }\n`, PLAN)
     assert.ok(refusedLine(used.refusals, PLAN, 'PAID_LIMITS used outside its place'), `case 16: ${JSON.stringify(used)}`)
     const line45 = read(READ).split(/\r?\n/).find((l) => l.includes('getPlanLimits(env).readSwitchMemoSeconds'))
@@ -334,6 +344,8 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
       ['alias variable', READ, (t) => `${t}\nexport const m = (env: Env) => { const l = getPlanLimits(env); return l.${KEY} }\n`, 'getPlanLimits used other than'],
       ['element access', READ, (t) => `${t}\nexport const m = (env: Env) => getPlanLimits(env)['${KEY}']\n`, 'getPlanLimits used other than'],
       ['namespace import', READ, (t) => `import * as P from './planTier'\n${t}\nexport const m = (env: Env) => P.getPlanLimits(env).${KEY}\n`, 'default or namespace import of planTier'],
+      ['M2a computed import in salesAnalytics', F.ENTRY, (t) => `${t}\nexport async function bellOf(env: Env): Promise<number> { const m = await import('./plan' + 'Tier'); return (m as any)['getPlanLimits'](env)['notificationSectionCacheSeconds'] }\n`, 'dynamic import with a computed specifier'],
+      ['require in the kernel', READ, (t) => `${t}\nexport const r = () => require('./planTier')\n`, 'require\\(\\) call'],
       ['re-export from salesAnalytics', F.ENTRY, (t) => `${t}\nexport { getPlanLimits } from './planTier'\n`, 're-exports planTier'],
     ]
     for (const [name, rel, edit, reason] of forms) {
@@ -368,6 +380,9 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
       ['computed key', (t) => addProp(t, 'PAID_LIMITS', '[k]: 1'), 'PAID_LIMITS: property .* is not a plain name: value'],
       ['duplicate key', (t) => addProp(t, 'FREE_LIMITS', 'catalogListWindowPages: 9'), 'FREE_LIMITS\\.catalogListWindowPages appears twice'],
       ['unread value not a constant', (t) => setProp(t, 'FREE_LIMITS', 'catalogListWindowPages', 'Date.now()'), 'FREE_LIMITS\\.catalogListWindowPages is not a constant'],
+      ['M1a getter returns a derived object', (t) => t.replace('return PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]', 'const t = PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]; return { ...t, readSwitchMemoSeconds: t.notificationSectionCacheSeconds }'), 'PLAN_LIMITS_BY_TIER used outside its place'],
+      ['getter returns the table through a local variable', (t) => t.replace('return PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]', 'const t = PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]; return t'), 'PLAN_LIMITS_BY_TIER used outside its place'],
+      ['getter stores the table elsewhere', (t) => t.replace('return PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]', '(globalThis as any).__l = PLAN_LIMITS_BY_TIER[resolvePlanTier(env)]'), 'PLAN_LIMITS_BY_TIER used outside its place'],
       ['const -> let', (t) => t.replace('const PAID_LIMITS:', 'let PAID_LIMITS:'), 'PAID_LIMITS is not a single const with an object literal'],
       ['as-wrapper', (t) => { const sf = ts.createSourceFile('p.ts', t, ts.ScriptTarget.ES2022, true); const end = tableObject(sf, 'PAID_LIMITS').initializer.getEnd(); return splice(t, end, end, ' as PlanLimits') }, 'PAID_LIMITS is not a single const with an object literal'],
     ]
