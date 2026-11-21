@@ -13,9 +13,8 @@ import { resolvePlanTier, type PlanTier } from './planTier'
 //                      reopens a task and is never refused by this cap, so a branch can hold more than maxOpenTasks open (the list is bounded by history, not by the cap).
 //   tasksClosedShown   the most recently CLOSED tasks it adds after them.
 //
-// Why this is not in planTier.ts with the other limits: the file is inside the fingerprint of the sales-daily money kernel (scripts/sales-daily-kernel-pin.json: salesAnalytics imports getPlanLimits), and the pin
-// refuses ANY change to PAID_LIMITS / FREE_LIMITS, or any new statement, without bumping SALES_DAILY_KERNEL_VERSION, which re-covers and re-computes every stored day. Three numbers that no sales figure reads are not a
-// reason to do that. They move into PlanLimits the next time that version is bumped for another reason; the callers change only their import.
+// Why this is not in planTier.ts with the other limits: it was written as its own module while the kernel fingerprint hashed the whole limit tables. The sales-daily kernel fingerprint (scripts/sales-daily-kernel-pin.json) hashes only the plan-limit keys that kernel code reads
+// (today readSwitchMemoSeconds), so these three numbers, which no sales figure reads, can move into PlanLimits without a kernel version bump; that move is its own lane.
 export type InventoryCheckTaskLimits = { maxProducts: number; maxOpenTasks: number; tasksClosedShown: number }
 
 export const INVENTORY_CHECK_TASK_LIMITS_BY_TIER: Record<PlanTier, InventoryCheckTaskLimits> = {

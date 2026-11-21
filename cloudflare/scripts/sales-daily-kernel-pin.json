@@ -1,6 +1,6 @@
 {
- "version": 4,
- "aggregate": "2399ccc3a193ea8cf9c9",
+ "version": 6,
+ "aggregate": "cda86a72797044a9dd46",
  "history": [
   {
    "version": 1,
@@ -17,6 +17,14 @@
   {
    "version": 4,
    "aggregate": "2399ccc3a193ea8cf9c9"
+  },
+  {
+   "version": 5,
+   "aggregate": "8624d772d0f89952f034"
+  },
+  {
+   "version": 6,
+   "aggregate": "cda86a72797044a9dd46"
   }
  ],
  "files": {
@@ -148,9 +156,12 @@
   "src/lib/planTier.ts": {
    "imports": "cfc19ad7ce0a9947195b",
    "decls": {
-    "const PAID_LIMITS": "87903c34376e9d7910b0",
-    "const FREE_LIMITS": "567429450349180d354c",
-    "const PLAN_LIMITS_BY_TIER": "57ef4f47a0b3f78fa6b5",
+    "function deepFreeze": "5254d30307921e2356c1",
+    "const PAID_LIMITS": "430c7bf7ac1868b9263b",
+    "const PAID_LIMITS.readSwitchMemoSeconds": "64de7b5948ec616b1cfa",
+    "const FREE_LIMITS": "9e4d59d0c32ad86da10e",
+    "const FREE_LIMITS.readSwitchMemoSeconds": "3c41496ccef0ad7c1f03",
+    "const PLAN_LIMITS_BY_TIER": "f1bd3ccb0d8e44abf432",
     "const cachedTier": "613785f4b27076d31cf4",
     "function resolvePlanTier": "bbec11cf79e71df458fe",
     "function getPlanLimits": "94495ff90f5bf6ebef1e",

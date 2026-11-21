@@ -78,6 +78,21 @@ const overrides = {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
 }
 const modules = new Map()
+// The plan limit tables are frozen, so a sentinel limit is never written into them: the routes get a wrapper of planTier whose getPlanLimits returns a COPY of the real table with the sentinel on top.
+let planSentinels = {}
+const realPlanTier = (() => {
+  const real = ts.transpileModule(fs.readFileSync(path.join(SRC, 'lib/planTier.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: path.join(SRC, 'lib/planTier.ts') }).outputText
+  const m = { exports: {} }
+  new Function('require', 'module', 'exports', real)(require, m, m.exports)
+  return m.exports
+})()
+const planTierWithSentinels = {
+  ...realPlanTier,
+  getPlanLimits: (e) => { const limits = realPlanTier.getPlanLimits(e); return limits.tier in planSentinels ? { ...limits, notificationSectionCacheSeconds: planSentinels[limits.tier] } : limits },
+}
+overrides['../lib/planTier'] = planTierWithSentinels
+overrides['./planTier'] = planTierWithSentinels
+modules.set('lib/planTier.ts', { exports: realPlanTier })
 function load(rel) {
   if (modules.has(rel)) return modules.get(rel).exports
   const output = ts.transpileModule(fs.readFileSync(path.join(SRC, rel), 'utf8'), {
@@ -515,16 +530,14 @@ async function main() {
   await check('the answer carries sectionLifetimeSeconds from the plan limit on Free and on Paid, and generatedAt and sections are unchanged by it', async () => {
     const savedTier = env.PLAN_TIER
     try {
-      const planTier = load('lib/planTier.ts')
+      const planTier = planTierWithSentinels
       const limits = planTier.getPlanLimits
       // The real limits first, then a distinct sentinel per tier, so a literal in the Worker fails whatever the two real values are.
       const sentinels = { free: 17, paid: 23 }
-      const originals = {}
       try {
         for (const tier of ['free', 'paid']) {
           for (const sentinel of [null, sentinels[tier]]) {
-            const limitsForTier = planTier.PLAN_LIMITS_BY_TIER[tier]
-            if (sentinel !== null) { originals[tier] = limitsForTier.notificationSectionCacheSeconds; limitsForTier.notificationSectionCacheSeconds = sentinel }
+            planSentinels = sentinel === null ? {} : { [tier]: sentinel }
             env.PLAN_TIER = tier
             planTier.__resetPlanTierCacheForTests()
             const body = await summary(ADMIN)
@@ -537,7 +550,7 @@ async function main() {
           }
         }
       } finally {
-        for (const tier of Object.keys(originals)) planTier.PLAN_LIMITS_BY_TIER[tier].notificationSectionCacheSeconds = originals[tier]
+        planSentinels = {}
       }
     } finally { env.PLAN_TIER = savedTier; load('lib/planTier.ts').__resetPlanTierCacheForTests() }
   })
