@@ -10,10 +10,9 @@ import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import User from 'lucide-react/dist/esm/icons/user.js'
-import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { ProtectedText } from './legal/LegalPages.tsx'
 import { legalCopy } from './legal/legalContent.ts'
-import PortalContactMenu from './PortalContactMenu.tsx'
+import PortalContactMenu, { FocusReturnMenu } from './PortalContactMenu.tsx'
 import { PortalContactRows } from './PortalSocialRow.tsx'
 import { PORTAL_PRIMARY_COLORS } from './portalButtons.ts'
 import type { PortalLanguageOption } from './portalLanguageOptions.ts'
@@ -182,7 +181,7 @@ export default function PortalDock(props: PortalDockProps) {
 
   const menuButton = (
     <div data-portal-dock-small="" className={`pointer-events-auto ${frame ? '' : 'min-[1888px]:hidden'}`}>
-      <LazyPortalMenu
+      <FocusReturnMenu
         align="right"
         trigger={(
           <button type="button" data-portal-dock-button="menu" className={ROUND_SMALL} aria-label={copy('dockMenu', 'Menu', 'ម៉ឺនុយ')}>
@@ -212,7 +211,7 @@ export default function PortalDock(props: PortalDockProps) {
       {/* From 1888 px: the stack, beside the content. The Contact button is the only filled one. */}
       <div data-portal-dock-wide="" className="pointer-events-auto hidden flex-col items-end gap-2 min-[1888px]:flex">
         {languageEnabled ? (
-          <LazyPortalMenu
+          <FocusReturnMenu
             align="right"
             trigger={(
               <button type="button" data-portal-dock-button="language" className={ROUND_WIDE} aria-label={copy('publicTranslation', 'Language tools')}>
