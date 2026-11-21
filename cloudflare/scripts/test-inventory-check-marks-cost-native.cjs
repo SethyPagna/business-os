@@ -15,14 +15,19 @@ const WORLD = process.env.WORLD || 'A'
 const OUT = process.argv[2]
 const rid = (p) => `${p}-${crypto.randomBytes(8).toString('hex')}`
 const sum = (rows) => ({ rows: rows.reduce((n, r) => n + r.rr, 0), calls: rows.reduce((n, r) => n + r.calls, 0), requests: rows.length })
-// C.1: rows = 3 (auth) + 2 (TOP, AT) + e + 2S + g + 7P + L + lambda + 1 (exactness TOP), for one answer that fetched events.
-const formulaRows = (t) => 3 + 2 + t.e + 2 * t.S + t.g + 7 * t.P + t.L + t.lambda + 1
+// C.1 as corrected by the A1d ruling: rows = 3 (auth) + 2 (TOP, AT) + e + 2S + g + 7P + L + lambda + 1 (exactness TOP) + K, for one answer that fetched events.
+// K = the line-set keys of the pending sessions the answer walks: a session is walked only when a fetched event of it can change its waiting set (a create event, or an after_json that carries "approval").
+const formulaRows = (t) => 3 + 2 + t.e + 2 * t.S + t.g + 7 * t.P + t.L + t.lambda + 1 + t.K
+// A1d mutants, applied to the Worker source of this run (MUTANT=walk-on-observe: every observe walks, as the tip did): the 500-line pin must turn red.
+const PATCHES = { 'walk-on-observe': { name: 'walk on observe', file: 'src/lib/inventoryCheckMarks.ts', from: "row.action === 'create' || Number(row.decides) === 1", to: "row.action !== 'close'" } }
+const MUTANT = process.env.MUTANT || ''
+if (MUTANT && !PATCHES[MUTANT]) throw new Error('unknown MUTANT ' + MUTANT)
 // Pins: [name, limit of rows, limit of calls or null]. A pin is within when the figure is at most its limit; the self-check below proves each one turns red one above.
 const within = (value, limit) => value <= limit
 
 ;(async () => {
   const limits = limitsOf('free')
-  const world = await bootWorld({ tier: 'free', seedVariant: 'base', switches: { ic_simple: 'on', ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' } })
+  const world = await bootWorld({ tier: 'free', seedVariant: 'base', patches: MUTANT ? [PATCHES[MUTANT]] : [], switches: { ic_simple: 'on', ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' } })
   const out = { world: WORLD, command: `WORLD=${WORLD} node scripts/test-inventory-check-marks-cost-native.cjs`, measured: {}, notMeasured: ['CPU of a snapshot page and of a changes answer (Node, median of 5)', 'S0b parity'] }
   try {
     const days = WORLD === 'C' ? 365 : WORLD === 'B' ? 30 : 0
@@ -36,19 +41,21 @@ const within = (value, limit) => value <= limit
     out.measured.authBaseline = { status: base0.status, rr: base0.rr, calls: base0.calls }
     // The terms of C.1 for one logged changes answer, read back from the event log it fetched (events are immutable, so the log is read after the fact).
     const legacyOf = async (ids) => (ids.length ? (await world.all(`SELECT COUNT(*) AS g, COALESCE(SUM(a.lines), 0) AS l FROM inventory_check_approvals a WHERE a.status='pending' AND a.line_set_json IS NULL AND a.session_id IN (SELECT value FROM json_each(?))`, JSON.stringify(ids)))[0] : { g: 0, l: 0 })
+    const keysOf = async (ids) => (ids.length ? Number((await world.all("SELECT COALESCE(SUM((SELECT COUNT(*) FROM json_each(a.line_set_json))), 0) AS k FROM inventory_check_approvals a WHERE a.status='pending' AND a.line_set_json IS NOT NULL AND a.session_id IN (SELECT value FROM json_each(?))", JSON.stringify(ids)))[0].k) : 0)
     const termsOf = async (entry) => {
-      const fetched = await world.all('SELECT id, session_id, product_id FROM inventory_check_events WHERE id > ? AND id <= ? ORDER BY id LIMIT ?', entry.chg.since, entry.chg.top, limits.inventoryMarksChangesPageEvents)
-      if (!fetched.length) return { e: 0, S: 0, P: 0, g: 0, L: 0, lambda: 0, idle: true }
+      const fetched = await world.all("SELECT id, session_id, product_id, action, CASE WHEN json_valid(after_json) THEN json_extract(after_json,'$.approval') IS NOT NULL ELSE 1 END AS decides FROM inventory_check_events WHERE id > ? AND id <= ? ORDER BY id LIMIT ?", entry.chg.since, entry.chg.top, limits.inventoryMarksChangesPageEvents)
+      if (!fetched.length) return { e: 0, S: 0, P: 0, g: 0, L: 0, lambda: 0, K: 0, idle: true }
       const sessionsOf = [...new Set(fetched.map((r) => r.session_id))]
+      const changing = [...new Set(fetched.filter((r) => r.action === 'create' || Number(r.decides) === 1).map((r) => r.session_id))]
       const walked = fetched.filter((r) => r.id <= entry.chg.cursor)
       const legacy = await legacyOf([...new Set(walked.map((r) => r.session_id))])
-      return { e: fetched.length, S: sessionsOf.length, P: new Set(walked.filter((r) => r.product_id != null).map((r) => r.product_id)).size, g: Number(legacy.g), L: Number(legacy.l), lambda: 0 }
+      return { e: fetched.length, S: sessionsOf.length, P: new Set(walked.filter((r) => r.product_id != null).map((r) => r.product_id)).size, g: Number(legacy.g), L: Number(legacy.l), lambda: 0, K: await keysOf(changing) }
     }
     const chainOf = async (entries) => {
       const answers = []
       for (const entry of entries.filter((x) => x.chg)) { const t = await termsOf(entry); answers.push({ since: entry.chg.since, cursor: entry.chg.cursor, more: entry.chg.more, rows: entry.rr, calls: entry.calls, ...t, formula: t.idle ? 5 : formulaRows(t) }) }
       const total = sum(entries)
-      return { rows: total.rows, calls: total.calls, reads: answers.length, formula: answers.reduce((n, a) => n + a.formula, 0), e: answers.reduce((n, a) => n + a.e, 0), S: answers.reduce((n, a) => n + a.S, 0), P: answers.reduce((n, a) => n + a.P, 0), answers }
+      return { rows: total.rows, calls: total.calls, reads: answers.length, formula: answers.reduce((n, a) => n + a.formula, 0), e: answers.reduce((n, a) => n + a.e, 0), S: answers.reduce((n, a) => n + a.S, 0), P: answers.reduce((n, a) => n + a.P, 0), K: answers.reduce((n, a) => n + a.K, 0), answers }
     }
     // 1. Snapshot, every occupied page cold (cache bypassed), and the pending build.
     const t0 = device.log.length
@@ -114,6 +121,7 @@ const within = (value, limit) => value <= limit
     const p0 = device.log.length
     await device.sync()
     out.measured.changesAfterPlain500 = await chainOf(device.log.slice(p0))
+    out.measured.plain500Reads = out.measured.changesAfterPlain500.answers.map((a, k) => 'READ ' + (k + 1) + ' (' + MUTANT + ' world ' + WORLD + '): rows ' + a.rows + ', calls ' + a.calls + ', K ' + a.K + ', formula ' + a.formula + ' = 5 + e ' + a.e + ' + 2S ' + 2 * a.S + ' + 7P ' + 7 * a.P + ' + 1 + K ' + a.K + ' (g ' + a.g + ', L ' + a.L + ', lambda ' + a.lambda + '), 1.1 x formula ' + Math.floor(1.1 * a.formula) + ', more ' + a.more)
     // The proof of the 500-line excess (lead's request): per statement of each read, the events each read fetched by session and product, and the waiting entries each answer sent.
     out.measured.plain500Trace = []
     for (const entry of device.log.slice(p0).filter((x) => x.chg)) {
@@ -133,11 +141,19 @@ const within = (value, limit) => value <= limit
     ]
     for (const pin of pins) assert.equal(within(pin.limit + 1, pin.limit), false, 'MUTANT: a figure one above ' + pin.name + ' must be red')
     const over = (chain, name) => ({ name: name + ' within 10 percent of its formula', ok: chain.rows <= Math.floor(1.1 * chain.formula), value: chain.rows, limit: Math.floor(1.1 * chain.formula) })
-    const formulaChecks = [over(m.changesAfterSubmit20, 'changesAfterSubmit20'), over(m.changesAfterApprove200, 'changesAfterApprove200'), over(m.changesAfterSubmitsAndApprovals200, 'changesAfterSubmitsAndApprovals200')]
+    // The 500-line chain (A1d): the whole chain and each read within 1.1 x its formula (K included), and read 2 walks no line set: its scope statement reads 3 rows for its one session (session row, approval row, one key of the session list).
+    const scopeRows = (trace) => (trace.statements || []).filter((x) => x.sql.includes('AS approval')).reduce((n, x) => n + x.rr, 0)
+    const plainReads = m.changesAfterPlain500.answers.map((a, k) => ({ name: 'changesAfterPlain500 read ' + (k + 1) + ' within 10 percent of its formula', ok: a.rows <= Math.floor(1.1 * a.formula), value: a.rows, limit: Math.floor(1.1 * a.formula) }))
+    const secondScope = m.plain500Trace.length > 1 ? scopeRows(m.plain500Trace[1]) : 0
+    const secondS = m.changesAfterPlain500.answers.length > 1 ? m.changesAfterPlain500.answers[1].S : 0
+    const formulaChecks = [over(m.changesAfterSubmit20, 'changesAfterSubmit20'), over(m.changesAfterApprove200, 'changesAfterApprove200'), over(m.changesAfterSubmitsAndApprovals200, 'changesAfterSubmitsAndApprovals200'),
+      over(m.changesAfterPlain500, 'changesAfterPlain500'), ...plainReads,
+      { name: 'changesAfterPlain500 read 2 scope statement rows <= 1.1 x (3 x S)', ok: secondScope <= Math.floor(1.1 * 3 * secondS), value: secondScope, limit: Math.floor(1.1 * 3 * secondS) }]
     const go = [{ name: 'snapshotCold rows <= 60000 (the spike\'s check, left as it is: A4 sets the page size)', ok: m.snapshotCold.rows <= 60000, value: m.snapshotCold.rows, limit: 60000 }, ...pins, ...formulaChecks]
     out.go = go
     if (OUT) fs.writeFileSync(OUT, JSON.stringify(out, null, 1))
     console.log(JSON.stringify(out, null, 1))
+    for (const line of m.plain500Reads) console.log(line)
     for (const g of out.go) console.log((g.ok ? 'PASS ' : 'OVER ') + g.name + ' (' + g.value + ' vs ' + g.limit + ')')
     process.exitCode = out.go.every((g) => g.ok) ? 0 : 1
   } finally { await world.dispose() }
