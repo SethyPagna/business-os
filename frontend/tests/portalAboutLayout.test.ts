@@ -128,7 +128,7 @@ run('the details card sits beside the map on a large screen and stacks on a phon
 run('the map is live with no consent click: 16:9 wide, 4:3 on a phone, lazy, safe referrer, one Open in Maps button', () => {
   assert.doesNotMatch(tabs, /PortalEmbedConsent|mapFallbackHref|useEffect\(\(\) => \{ setGranted/, 'no click-to-load gate is used by About')
   assert.match(about, /<div className="aspect-\[4\/3\] w-full[^"]*sm:aspect-video[^"]*">\s*<iframe\s+src=\{mapEmbedUrl \|\| ''\}/, '4:3 on a phone, 16:9 from sm, the iframe fills it')
-  assert.match(about, /loading="lazy"\s+referrerPolicy="no-referrer-when-downgrade"/)
+  assert.match(about, /loading="lazy"\s+referrerPolicy="strict-origin-when-cross-origin"/)
   assert.match(about, /title=\{copy\('portal_a11y_map_title'/, 'the title is kept')
   assert.match(about, /copy\('openInMaps', 'Open in Maps', 'បើកក្នុងផែនទី'\)/, 'one button, icon and the words Open in Maps')
   assert.match(about, /portalMapOpenHref\(addressFact\?\.href, addressText\)/, 'to the shop link, else a maps search for the address')

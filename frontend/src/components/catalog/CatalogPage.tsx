@@ -3258,6 +3258,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     openPortalImage,
     mapEmbedUrl,
     addressFact,
+    emailText: displayConfig.showEmail ? String(displayConfig.businessEmail || '') : '',
     contactEntries,
     accountEntries,
     versionedBusinessLogo,

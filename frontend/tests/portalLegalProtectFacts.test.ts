@@ -52,6 +52,9 @@ runTest('the shop\'s own details are protected wherever a sentence repeats them;
   assert.deepEqual(protectedParts(text, shop), ['Leang Beauty', 'Leang Beauty Co., Ltd.', 'KH-0001', 'Street 271, Phnom Penh', '012 345 678', 'hello@example.com'])
   assert.deepEqual(protectedParts('Answers come from Groq and Mistral AI.', ['Groq', 'Mistral AI']), ['Groq', 'Mistral AI'])
   assert.deepEqual(protectedParts('a b', ['a']), [], 'a one-letter literal is ignored')
+  assert.deepEqual(protectedParts('Open at 16 or 160', ['16']), [], 'a two-character literal is ignored')
+  assert.deepEqual(protectedParts('Leangkor sells, Leang Beauty too.', ['Leang', 'Leang Beauty']), ['Leang Beauty'], 'a literal inside a longer word is not the shop detail')
+  assert.deepEqual(protectedParts('Write to hello@example.com.', ['hello@example.com']), ['hello@example.com'], 'a detail ending a sentence is still whole')
   assert.deepEqual(protectedParts(text, []), [], 'control: without the literals nothing is protected')
 })
 

@@ -90,10 +90,20 @@ for (const language of ['en', 'km'] as const) {
     assert.ok(rowsIn(aboutHtml(language, { contactEntries: [] })).includes('telegram'))
   })
 
+  check(`${language}: the shop's e-mail is a row on the card when the owner shows it (Show email), and absent when not`, () => {
+    const shown = aboutHtml(language, { emailText: 'hello@leang.example' })
+    const card = shown.slice(shown.indexOf('data-portal-contact-tray="true"'), shown.indexOf('data-portal-map-card="true"'))
+    assert.match(card, /<a href="mailto:hello@leang\.example"[^>]*data-portal-about-email=""/)
+    assert.match(card, /<span translate="no" class="notranslate[^"]*">hello@leang\.example<\/span>/, 'the address is never translated')
+    assert.equal(aboutHtml(language).includes('data-portal-about-email'), false, 'control: no e-mail, no row')
+    // the e-mail alone is enough to draw the card
+    assert.ok(aboutHtml(language, { contactEntries: [], accountEntries: [], addressFact: null, mapEmbedUrl: '', emailText: 'hello@leang.example' }).includes('data-portal-about-email'))
+  })
+
   check(`${language}: the live map is an iframe at first paint (no consent click), lazy, with the address line and one Open in Maps button`, () => {
     const html = aboutHtml(language)
     assert.ok(/<iframe[^>]*src="https:\/\/www\.google\.com\/maps\/embed\?pb=!1m18"/.test(html), 'the map iframe is in the first markup')
-    assert.ok(/<iframe[^>]*referrerPolicy="no-referrer-when-downgrade"/.test(html), 'referrer policy')
+    assert.ok(/<iframe[^>]*referrerPolicy="strict-origin-when-cross-origin"/.test(html), 'referrer policy')
     assert.ok(/<iframe[^>]*title="[^"]+"/.test(html), 'title kept')
     assert.ok(/<iframe[^>]*loading="lazy"/.test(html), 'lazy')
     assert.ok(html.includes('aspect-[4/3]') && html.includes('sm:aspect-video'), '4:3 on a phone, 16:9 wide')

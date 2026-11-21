@@ -477,21 +477,26 @@ export function interpolateLegal(text: string, details: LegalBusinessDetails, ye
 // ---------------------------------------------------------------------------
 export type LegalTextSegment = { text: string; protect: boolean }
 
+const WORD_CHAR = /[A-Za-z0-9]/
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Cuts `text` into segments, each either plain text or one of the `literals` (the shop's details, the AI provider names),
- * which are protected wherever they occur; the longest literal wins where two start at the same place. The segments
+ * which are protected wherever they occur as whole words (3 characters or more); the longest literal wins where two start at the same place. The segments
  * always join back to `text`.
  */
 export function protectLegalFacts(text: string, literals: readonly string[] = []): LegalTextSegment[] {
   const source = String(text ?? '')
   const found: Array<{ start: number; end: number }> = []
   for (const value of literals) {
-    if (value.trim().length < 2) continue
+    if (value.trim().length < 3) continue
     for (const match of source.matchAll(new RegExp(escapeRegExp(value), 'g'))) {
       const start = match.index ?? 0
-      found.push({ start, end: start + match[0].length })
+      const end = start + match[0].length
+      // A whole word only: 'Leang' inside 'Leangkor' or '16' inside '160' is not the shop's detail (no look-behind, for older Safari).
+      if (WORD_CHAR.test(value.charAt(0)) && WORD_CHAR.test(source.charAt(start - 1))) continue
+      if (WORD_CHAR.test(value.charAt(value.length - 1)) && WORD_CHAR.test(source.charAt(end))) continue
+      found.push({ start, end })
     }
   }
   found.sort((a, b) => a.start - b.start || b.end - a.end)

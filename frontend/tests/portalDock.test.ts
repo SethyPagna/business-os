@@ -142,13 +142,14 @@ for (const language of ['en', 'km'] as const) {
     const html = renderToStaticMarkup(React.createElement(LanguageOptions, { copy, options: PUBLIC_STOREFRONT_LANGUAGE_OPTIONS, active: 'km', onPick: noop }))
     assert.equal((html.match(/<button/g) || []).length, 6, 'six options, and the note is no button')
     assert.equal((html.slice(0, html.indexOf('data-portal-google-note')).match(/>Google</g) || []).length, 4, 'the four Google tags stay')
-    // The note is the policy pages' official-text notice (legal/legalContent.ts), one source for both; Google is not translated.
+    // The note is the policy pages' official-text notice (legal/legalContent.ts), one source for both. Nothing in it is wrapped:
+    // Google translates a sentence cut by an untranslated span piece by piece, and the pieces lose their meaning.
     const note = PORTAL_LEGAL_EN.portal_legal_official_notice
     const noteHtml = /<p data-portal-google-note=""[^>]*>([\s\S]*?)<\/p>/.exec(html)?.[1] ?? ''
     const visibleNote = noteHtml.replace(/<\/?span\b[^>]*>/g, '')
     const expected = language === 'en' ? note : PORTAL_LEGAL_KM.portal_legal_official_notice
     assert.equal(visibleNote, expected, 'the note is the official-text notice, byte for byte')
-    assert.ok(noteHtml.includes('<span translate="no" class="notranslate">Google</span>'), 'Google is not translated')
+    assert.equal(noteHtml.includes('translate="no"'), false, 'the note reaches the translator as whole sentences')
     assert.ok(html.lastIndexOf('data-portal-google-note') > html.lastIndexOf('</button>'), 'the note is under the options')
     assert.match(html, /<p data-portal-google-note=""/, 'a paragraph, not a control')
     assert.notEqual(PORTAL_LEGAL_EN.portal_legal_official_notice, PORTAL_LEGAL_KM.portal_legal_official_notice, 'the note changes with the language')

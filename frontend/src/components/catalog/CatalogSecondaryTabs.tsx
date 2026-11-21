@@ -5,6 +5,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
+import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
@@ -21,7 +22,6 @@ import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
 import { PORTAL_CONTACT_ROW_INLINE, PortalContactRows } from './PortalSocialRow.tsx'
-import { PRODUCT_INSET_CLASS } from './portalProductSurfaces.ts'
 import { portalAccountsNotShown } from './portalSocialLinks.ts'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 import { assistantRowNames } from './portalProductNames.ts'
@@ -32,6 +32,7 @@ import { defaultConfigText } from './portalLanguagePacks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { aiConsentGiven, fillAiProviderTemplate, saveAiConsent } from './legal/aiProviderDisclosure.ts'
 import type { AiDisclosureLanguage, AiProviderState } from './legal/aiProviderDisclosure.ts'
+import { contactHref } from '../../utils/socialLinks.ts'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -88,6 +89,8 @@ interface CatalogAboutSectionProps {
   previewConfig: PreviewConfig
   mapEmbedUrl?: string
   addressFact?: BusinessFact | null
+  /** The shop's e-mail when the owner shows it (Show email), else empty. */
+  emailText?: string
   // The chat entries (Phone, Messenger, Telegram, WhatsApp) and the account entries (Facebook, Instagram, TikTok, Telegram channel, Website): the
   // details card under the story lists both, as tappable rows with the real names.
   contactEntries?: readonly PortalContactEntry[]
@@ -304,7 +307,7 @@ export function portalMapOpenHref(addressLink: unknown, address: unknown): strin
 }
 
 // The address row of the details card: the brass pin, the real address, the whole row a link to the map. It wears the same recipe as a contact row.
-function AboutAddressRow({ item, copy }: { item: BusinessFact; copy: CopyFn }) {
+function AboutAddressRow({ item }: { item: BusinessFact }) {
   const href = portalMapOpenHref(item.href, item.value)
   const body = (
     <>
@@ -323,12 +326,25 @@ function AboutAddressRow({ item, copy }: { item: BusinessFact; copy: CopyFn }) {
   )
 }
 
+function AboutEmailRow({ email, copy }: { email: string; copy: CopyFn }) {
+  const label = copy('email', 'Email')
+  const href = contactHref('mailto', email)
+  if (!href) return null
+  return (
+    <a href={href} className={PORTAL_CONTACT_ROW_INLINE} data-portal-about-email="" aria-label={`${label}: ${email}`}>
+      <Mail aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
+      <span translate="no" className="notranslate min-w-0 flex-1 break-all leading-6">{email}</span>
+    </a>
+  )
+}
+
 function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const {
     copy,
     previewConfig,
     mapEmbedUrl,
     addressFact,
+    emailText = '',
     contactEntries = [],
     accountEntries = [],
     versionedBusinessLogo,
@@ -372,7 +388,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   // The details card: Address, then the chat rows (Phone first), then the account rows; an account already listed as a chat row is not repeated.
   const detailRows = [...contactEntries, ...portalAccountsNotShown(accountEntries, contactEntries)]
   const addressText = String(addressFact?.value || '').trim()
-  const hasFacts = Boolean(addressText) || detailRows.length > 0
+  const aboutEmail = String(emailText || '').trim()
+  const hasFacts = Boolean(addressText) || Boolean(aboutEmail) || detailRows.length > 0
   const hasMap = Boolean(mapEmbedUrl)
   const mapOpenHref = portalMapOpenHref(addressFact?.href, addressText)
   const storyInColumns = storyText.length > ABOUT_STORY_TWO_COLUMN_FROM
@@ -489,20 +506,21 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         <div data-portal-about-details="true" className={`grid gap-4 ${hasFacts && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start' : ''}`}>
           {hasFacts ? (
             <div data-portal-contact-tray="true" className={`space-y-2 rounded-2xl p-3 ${SURFACE}`}>
-              {addressText ? <AboutAddressRow item={{ ...addressFact, key: 'address', label: addressFact?.label || copy('address', 'Address'), value: addressText }} copy={copy} /> : null}
+              {addressText ? <AboutAddressRow item={{ ...addressFact, key: 'address', label: addressFact?.label || copy('address', 'Address'), value: addressText }} /> : null}
               <PortalContactRows inline entries={detailRows} copy={copy} className="space-y-2" />
+              {aboutEmail ? <AboutEmailRow email={aboutEmail} copy={copy} /> : null}
             </div>
           ) : null}
 
           {hasMap ? (
             <div data-portal-map-card="true" className={`flex flex-col overflow-hidden rounded-2xl ${SURFACE}`}>
-              {/* The live map loads as soon as this tab is shown (no click): 16:9 on a wide screen, 4:3 on a phone, lazy-loaded, no referrer sent beyond the origin. */}
+              {/* The live map loads as soon as this tab is shown (no click): 16:9 on a wide screen, 4:3 on a phone, lazy-loaded; Google gets the origin only, never the page path. */}
               <div className="aspect-[4/3] w-full bg-[#f6ece0] sm:aspect-video dark:bg-neutral-800">
                 <iframe
                   src={mapEmbedUrl || ''}
                   title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
                   loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
+                  referrerPolicy="strict-origin-when-cross-origin"
                   className="block h-full w-full border-0"
                   allowFullScreen
                 />

@@ -615,8 +615,9 @@ export function AiProviderParagraphs({ body, state, text, fill, pick, literals =
   pick: (en: string, km: string) => string
   literals?: readonly string[]
 }) {
-  if (state.kind === 'off') return <p className="mt-2"><ProtectedText text={fill('portal_legal_privacy_ai_off')} literals={literals} /></p>
-  if (state.kind === 'unknown') return <p className="mt-2"><ProtectedText text={fill(body)} literals={literals} /></p>
+  // Keyed by state: Google may already have translated the other sentence in place, and React would patch the stale text.
+  if (state.kind === 'off') return <p key="ai-off" className="mt-2"><ProtectedText text={fill('portal_legal_privacy_ai_off')} literals={literals} /></p>
+  if (state.kind === 'unknown') return <p key="ai-unknown" className="mt-2"><ProtectedText text={fill(body)} literals={literals} /></p>
   // The provider names are runtime data: each one is a fact the translator must not touch.
   const withProviders = [...literals, ...state.providers.map((provider) => provider.displayName)]
   return (

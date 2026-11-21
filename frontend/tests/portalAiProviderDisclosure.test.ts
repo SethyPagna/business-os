@@ -151,10 +151,12 @@ for (const language of ['en', 'km'] as const) {
     runTest(`privacy policy names ${id}, its retention and its terms link (${language})`, () => {
       const html = policyHtml(language, { providers: [{ id }] })
       const entry = AI_PROVIDER_DISCLOSURE[id]
-      // The protected facts (provider names, numbers with their unit) sit in translate="no" spans; the visible text is unchanged.
+      // The provider names sit in translate="no" spans; numbers stay in their sentence; the visible text is unchanged.
       const visible = html.replace(/<\/?span\b[^>]*>/g, '')
       assert.ok(visible.includes(entry.displayName))
-      assert.ok(html.includes(`<span translate="no" class="notranslate">${entry.displayName}</span>`), 'the provider name is not translated')
+      // The spaces next to the name sit inside its span (padProtectedSegments).
+      assert.match(html, new RegExp(`<span translate="no" class="notranslate">\\s*${entry.displayName}\\s*</span>`), 'the provider name is not translated')
+      assert.doesNotMatch(html, new RegExp(`<span translate="no" class="notranslate">\\s*\\d+ days`), 'a number with its unit stays in its sentence')
       assert.ok(visible.includes(entry.retention[language].replace(/&/g, '&amp;')))
       assert.ok(html.includes(`href="${entry.policyUrl}"`))
       assert.match(html, /rel="noopener noreferrer"/)
@@ -178,7 +180,7 @@ runTest('several providers are all named and all described, since the chat fails
   const html = policyHtml('en', { providers: ids.map((id) => ({ id })) })
   for (const id of ids) assert.ok(html.includes(`data-portal-ai-provider="${id}"`), `${id} paragraph`)
   assert.ok(plain(html).includes('Groq, Mistral AI, Cerebras and Google AI'))
-  for (const name of ['Groq', 'Mistral AI', 'Cerebras', 'Google AI']) assert.ok(html.includes(`<span translate="no" class="notranslate">${name}</span>`), `${name} is not translated`)
+  for (const name of ['Groq', 'Mistral AI', 'Cerebras', 'Google AI']) assert.match(html, new RegExp(`<span translate="no" class="notranslate">\\s*${name}\\s*</span>`), `${name} is not translated`)
 })
 
 runTest('template fill leaves neither a placeholder nor stray spacing in the neutral case', () => {

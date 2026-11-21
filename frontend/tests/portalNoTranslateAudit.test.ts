@@ -26,7 +26,8 @@ check('header: business name, tagline and the brand label are marked', () => {
 })
 
 check('language menu: every label is marked, so a page translator never rewrites a language name', () => {
-  assert.match(read('CatalogPreviewSurface.tsx'), /<span translate="no" className="notranslate">\{option\.label\}<\/span>/)
+  // The language menu moved into the bottom-right dock (6.0.2898).
+  assert.match(read('PortalDock.tsx'), /<span translate="no" className="notranslate">\{option\.label\}<\/span>/)
 })
 
 check('product card: name, brand chip and price are marked', () => {

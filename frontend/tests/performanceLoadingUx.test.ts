@@ -688,7 +688,10 @@ for (const [name, source] of [
   )
 }
 assert.doesNotMatch(catalogPreviewSurface, /const PortalMenu = lazy\(\(\) => import\('\.\.\/shared\/PortalMenu'\)\)/, 'public catalog preview should not render PortalMenu through React.lazy during first route load')
-assert.match(fs.readFileSync(new URL('../src/components/catalog/PortalDock.tsx', import.meta.url), 'utf8'), /import LazyPortalMenu from '\.\.\/shared\/LazyPortalMenu'/, 'the dock language menu should load PortalMenu only after language-menu intent')
+// The dock's menus go through FocusReturnMenu (PortalContactMenu.tsx), a thin wrapper that hands focus back on close and renders LazyPortalMenu.
+assert.match(fs.readFileSync(new URL('../src/components/catalog/PortalDock.tsx', import.meta.url), 'utf8'), /import PortalContactMenu, \{ FocusReturnMenu \} from '\.\/PortalContactMenu\.tsx'/, 'the dock menus should go through the focus-returning wrapper')
+assert.doesNotMatch(fs.readFileSync(new URL('../src/components/catalog/PortalDock.tsx', import.meta.url), 'utf8'), /import PortalMenu from/, 'the dock should never import PortalMenu directly')
+assert.match(fs.readFileSync(new URL('../src/components/catalog/PortalContactMenu.tsx', import.meta.url), 'utf8'), /import LazyPortalMenu from '\.\.\/shared\/LazyPortalMenu'[\s\S]*<LazyPortalMenu \{\.\.\.props\}/, 'the dock language menu should load PortalMenu only after language-menu intent')
 assert.doesNotMatch(catalogPreviewSurface, /from '\.\.\/shared\/(?:Lazy)?PortalMenu'/, 'the surface itself mounts no menu any more')
 assert.doesNotMatch(pos, /from '\.\.\/contacts\/CustomersTab'/, 'POS should not import the whole CustomersTab chunk just to parse customer contact options')
 assert.doesNotMatch(pos, /import \{ parseStoredContactOptions \} from '\.\.\/contacts\/contactOptionUtils'/, 'POS should not load contact option parsers before customer selection intent')

@@ -1285,6 +1285,7 @@ export default function PublicCatalogPage() {
         openPortalImage={openPortalImage}
         mapEmbedUrl={mapEmbedUrl}
         addressFact={addressFact}
+        emailText={displayConfig.showEmail ? String(displayConfig.businessEmail || '') : ''}
         accountEntries={accountEntries}
         versionedBusinessLogo={businessLogoUrl}
         versionedBusinessCover={coverState === 'failed' ? '' : businessCoverUrl}
