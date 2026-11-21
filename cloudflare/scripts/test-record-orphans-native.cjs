@@ -127,6 +127,7 @@ const HISTORICAL_REFERENCE = {
   // loser is deleted, the map/pairs keep its id. Pinned by test-migration-0174-pure.cjs.
   'product_merge_map_0174.loser_id': 'the merged product is deleted by 0174; the map keeps its id as provenance',
   'product_merge_pairs_0174.loser_id': 'the seed pair names a product 0174 goes on to delete; kept for provenance/idempotence',
+  'portal_accounts.created_contact_id': 'provenance: the customer the old sign-up created; a merge can delete it',
   'cost_4dp_repair_0313.row_id': '0313 rounding ledger: row_id names a product, lot or cost entry by the table in its entity column; a ledger entry outlives its row and is read only by hand',
 }
 /** Leading qualifiers that describe a ROLE, not a different kind of parent. */

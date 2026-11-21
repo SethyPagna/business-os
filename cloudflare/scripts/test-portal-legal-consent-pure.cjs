@@ -105,6 +105,7 @@ function buildAccounts(rawDb) {
     './anonymousCustomer': anonymousCustomer,
     './passwordHash': loadRealPasswordHash(),
     './failedSignInCost': loadRealFailedSignInCost(),
+    './memberCode': loadReal('lib/memberCode.ts'),
   })
 }
 
@@ -178,7 +179,8 @@ async function run() {
   })
 
   await check('signup fails closed BEFORE migration 0130 is applied', async () => {
-    const preDb = openDb(migrationSql((f) => f !== CONSENT_MIGRATION))
+    // 0321 rebuilds portal_accounts FROM the consent columns, so the chain before 0130 stops short of it.
+    const preDb = openDb(migrationSql((f) => f !== CONSENT_MIGRATION && f < '0321'))
     const columns = preDb.prepare('PRAGMA table_info("portal_accounts")').all().map((r) => r.name)
     assert.ok(!columns.includes('consent_version'), 'the pre-migration fixture already has the column')
     const preAccounts = buildAccounts(preDb)
