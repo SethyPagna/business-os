@@ -39,7 +39,10 @@
 -- RECOVERY
 --   A stop part-way (remote D1 may run statements one by one): applying the file again fails on the first ALTER that
 --   already ran ("duplicate column name") and changes nothing. Finish by hand with the remaining statements of this
---   file, in order; each later statement is IF NOT EXISTS.
+--   file, in order; each later statement is IF NOT EXISTS. After a hand finish, also record this file's name
+--   (0322_portal_telegram_lean.sql) in d1_migrations through the ops tool; otherwise every later deploy with
+--   run_migrations=true re-runs 0322 and stops at the first ALTER ("duplicate column name"). (On D1 a failed
+--   migration is normally rolled back whole, as 0321's note says, so a hand finish should rarely be needed.)
 --   Rollback after a full apply: (1) roll the Worker back first (the previous Worker never reads the new objects);
 --   (2) export the Telegram members first (id, member_code, name, created_at, telegram_verified_at, no Telegram id)
 --   and decide with the owner: once members exist, dropping the column strands every Telegram-only member (no
