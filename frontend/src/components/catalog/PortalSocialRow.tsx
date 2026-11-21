@@ -30,7 +30,8 @@ export function PortalSocialText({ text, latin, className = '' }: { text: string
 }
 
 /** One inline contact row: the inset tone with its border, the band tone on hover. The About address row wears the same recipe. */
-export const PORTAL_CONTACT_ROW_INLINE = `flex min-h-11 items-center gap-3 rounded-xl px-4 py-2 text-sm text-[#23201b] transition hover:bg-[#f6ece0] dark:text-neutral-100 dark:hover:bg-neutral-700 ${PRODUCT_INSET_CLASS}`
+const ROW = 'flex min-h-11 items-center gap-3 px-4 py-2 text-sm text-[#23201b] transition hover:bg-[#f6ece0] dark:text-neutral-100 dark:hover:bg-neutral-700'
+export const PORTAL_CONTACT_ROW_INLINE = `${ROW} rounded-xl ${PRODUCT_INSET_CLASS}`
 
 /**
  * The rows themselves: one tappable 44 px row per entry (brand icon, then the real account name or number; the platform word is only the
@@ -39,9 +40,7 @@ export const PORTAL_CONTACT_ROW_INLINE = `flex min-h-11 items-center gap-3 round
  */
 export function PortalContactRows({ entries, copy, onNavigate, className = '', inline = false }: { entries: readonly PortalContactEntry[]; copy: CopyFn; onNavigate?: () => void; className?: string; inline?: boolean }) {
   if (!entries.length) return null
-  const rowClass = inline
-    ? PORTAL_CONTACT_ROW_INLINE
-    : 'flex min-h-11 items-center gap-3 px-4 py-2 text-sm text-[#23201b] transition hover:bg-stone-100 dark:text-neutral-100 dark:hover:bg-neutral-800'
+  const rowClass = inline ? PORTAL_CONTACT_ROW_INLINE : ROW
   return (
     <ul className={className} aria-label={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')} data-portal-contact-menu={inline ? undefined : 'true'} data-portal-contact-inline={inline ? 'true' : undefined}>
       {entries.map((entry) => {

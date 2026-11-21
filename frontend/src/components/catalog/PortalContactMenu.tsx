@@ -2,10 +2,25 @@ import { useCallback, useRef } from 'react'
 import type { ReactNode } from 'react'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { PortalContactRows } from './PortalSocialRow.tsx'
-import { resolveContactFocusTarget } from './portalSocialLinks.ts'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
+
+type ContactFocusNode = { isConnected: boolean; focus: () => void }
+type ContactFocusHost = { querySelector: (selector: string) => unknown }
+
+export const PORTAL_CONTACT_TRIGGER_SELECTOR = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+
+/**
+ * Where focus goes when the Contact menu closes: nowhere if the visitor already put focus on something else, else the element that
+ * opened the menu if it is still on the page, else the trigger now inside the menu's host.
+ */
+export function resolveContactFocusTarget<T extends ContactFocusNode>(opener: T | null, host: ContactFocusHost | null, active: unknown, body: unknown): T | null {
+  const focusIsFree = !active || active === body || (active as ContactFocusNode).isConnected === false
+  if (!focusIsFree) return null
+  if (opener?.isConnected) return opener
+  return (host?.querySelector(PORTAL_CONTACT_TRIGGER_SELECTOR) as T | null | undefined) ?? null
+}
 
 /**
  * The Contact panel behind the dock's Contact button: no title row, the chat entries only (Phone, Messenger, Telegram, WhatsApp), each the

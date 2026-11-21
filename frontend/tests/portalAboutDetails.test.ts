@@ -13,7 +13,7 @@ import { buildSync } from 'esbuild'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { getPortalLanguageText, resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
-import { buildPortalContactEntries, buildPortalSocialFromConfig, portalMapOpenHref } from '../src/components/catalog/portalSocialLinks.ts'
+import { buildPortalContactEntries, buildPortalSocialFromConfig } from '../src/components/catalog/portalSocialLinks.ts'
 import { SRC, storefrontTranslator } from './storefrontCopyScan.ts'
 
 const requireActual = createRequire(import.meta.url)
@@ -41,7 +41,9 @@ function loadModule(relative: string) {
   new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(requireActual, module, module.exports)
   return module.exports
 }
-const Tabs = loadModule('components/catalog/CatalogSecondaryTabs.tsx').default as React.ComponentType<Record<string, unknown>>
+const tabsModule = loadModule('components/catalog/CatalogSecondaryTabs.tsx')
+const Tabs = tabsModule.default as React.ComponentType<Record<string, unknown>>
+const portalMapOpenHref = tabsModule.portalMapOpenHref as (link: unknown, address: unknown) => string
 
 const CONFIG = {
   links: { website: 'https://leang.example', facebook: 'https://facebook.com/leangcosmetics', instagram: 'https://instagram.com/leanggirlactik', telegram: 'https://t.me/Leangcosmetic?direct' },

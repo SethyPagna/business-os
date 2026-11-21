@@ -163,7 +163,7 @@ check('hidden: the dock draws nothing while a sheet is open', () => {
 
 check('the surface mounts the dock for the live page only, and hides it behind every sheet', () => {
   const surface = read('components/catalog/CatalogPreviewSurface.tsx')
-  assert.match(surface, /\{publicView \? \(\s*<PortalDock/, 'the Website Editor preview (publicView false) draws no dock')
+  assert.match(surface, /<PortalDock\s+placement=\{publicView \? 'viewport' : 'frame'\}/, 'the live page gets the fixed dock; the Website Editor preview gets the frame dock')
   assert.match(surface, /hidden=\{dockHidden \|\| Boolean\(productGalleryView\.open \|\| portalImageView\.open \|\| productDetailView\?\.open\)\}/)
   const page = read('components/catalog/PublicCatalogPage.tsx')
   assert.match(page, /dockHidden=\{accountOpen \|\| !!portalAccount\.consentRenewal\}/)
@@ -184,7 +184,8 @@ check('the header holds none of the six controls and nothing at the top is stick
   assert.doesNotMatch(dockSource, /ClipboardList/, 'one shop icon for List and Saved, not the clipboard')
 
   assert.doesNotMatch(surface, /className=[^\n]*\bsticky\b|position: 'fixed'|publicPortalNavPinned/, 'nothing at the top is sticky or pinned')
-  assert.match(surface, /pb-\[calc\(7\.5rem\+env\(safe-area-inset-bottom\)\)\][^'`]*md:pb-\[calc\(19rem\+env\(safe-area-inset-bottom\)\)\]/, 'the page ends above the wide stack (tests/storefrontFooterClearance.test.ts holds the arithmetic)')
+  assert.match(surface, /pb-\[calc\(8rem\+env\(safe-area-inset-bottom\)\)\]/, 'the page ends the tallest floating control plus 1 rem above the safe area (tests/storefrontFooterClearance.test.ts holds the arithmetic)')
+  assert.doesNotMatch(surface, /md:pb-\[calc/, 'and there is no blank band under the footer on a desktop')
 })
 
 check('the new keys have Khmer in the storefront pack, equal to the call-site text', () => {
@@ -193,6 +194,22 @@ check('the new keys have Khmer in the storefront pack, equal to the call-site te
     assert.match(pack, new RegExp('\n    ' + key + ": '[^']*[ក-៿]"), key + ' has Khmer in portalLanguagePacks.ts')
   }
   assert.doesNotMatch(read('components/catalog/PortalDock.tsx'), /\bt\('/, 'the dock never reaches the admin pack')
+})
+
+check('breakpoint: the five-button stack appears only from 1888 px; below it one round button at every width', () => {
+  const html = renderDock('en')
+  assert.match(html, /data-portal-dock-wide="" class="[^"]*\bhidden\b[^"]*min-\[1888px\]:flex"/, 'hidden until 1888 px')
+  assert.match(html, /data-portal-dock-small="" class="pointer-events-auto min-\[1888px\]:hidden"/, 'the one button hides only from 1888 px')
+  assert.doesNotMatch(html, /\bmd:(?:flex|hidden)\b/, 'control: the old 768 px switch is gone')
+})
+
+check('the Website Editor preview gets the dock too: a sticky zero-height row inside the frame with the one button, never the fixed dock', () => {
+  const html = renderDock('en', { placement: 'frame' })
+  assert.match(html, /data-portal-dock="frame" class="pointer-events-none sticky bottom-4 z-\[55\] h-0"/)
+  assert.match(html, /<div class="absolute bottom-0 right-4">/)
+  assert.equal(orderOf(html).join(','), 'menu', 'only the menu button')
+  assert.doesNotMatch(html, /\bfixed\b/, 'nothing fixed to the admin window')
+  assert.match(renderDock('en'), /\bfixed\b/, 'control: the live dock is fixed')
 })
 
 console.log('portalDock: ' + passed + ' checks passed')

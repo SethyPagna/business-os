@@ -353,9 +353,9 @@ export default function CatalogPreviewSurface({
           column) actually uses the space instead of floating in a wide
           gutter on ordinary desktop widths. */}
       {announcement ? <PortalAnnouncementStrip announcement={announcement} copy={copy} onDismiss={onDismissAnnouncement} onHeight={publicView ? onAnnouncementHeight : undefined} /> : null}
-      {/* The bottom padding clears the floating buttons (the dock on the right, the scroll buttons on the left), so at the page end none covers the footer. */}
+      {/* The bottom padding is the tallest floating control (the scroll buttons, 7 rem up from the bottom at sm) plus 1 rem, so at the page end none covers the footer, the pager or a card's Add button. */}
       <div
-        className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))] md:pb-[calc(19rem+env(safe-area-inset-bottom))]' : ''} data-[portal-announcement-shown=true]:pt-3 sm:data-[portal-announcement-shown=true]:pt-4`}
+        className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(8rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(8rem+env(safe-area-inset-bottom))]' : ''} data-[portal-announcement-shown=true]:pt-3 sm:data-[portal-announcement-shown=true]:pt-4`}
         data-portal-announcement-shown={announcement ? 'true' : undefined}
       >
         <div className="space-y-0">
@@ -516,26 +516,26 @@ export default function CatalogPreviewSurface({
           </button>
         </div>
       ) : null}
-      {publicView ? (
-        <PortalDock
-          copy={copy}
-          darkMode={darkMode}
-          hidden={dockHidden || Boolean(productGalleryView.open || portalImageView.open || productDetailView?.open)}
-          contactEntries={contactEntries}
-          onOpenAccount={onOpenAccount}
-          accountSignedIn={accountSignedIn}
-          accountName={accountName}
-          onOpenList={onOpenList}
-          onOpenWishlist={onOpenWishlist}
-          listCount={listCount}
-          wishlistCount={wishlistCount}
-          languageEnabled={Boolean(displayConfig.translateWidgetEnabled)}
-          languageOptions={languageOptions}
-          activeLanguage={pageLanguageChoice ?? pageLanguage}
-          changePageLanguage={changePageLanguage}
-          toggleTheme={toggleTheme}
-        />
-      ) : null}
+      <PortalDock
+        placement={publicView ? 'viewport' : 'frame'}
+        copy={copy}
+        darkMode={darkMode}
+        hidden={dockHidden || Boolean(productGalleryView.open || portalImageView.open || productDetailView?.open)}
+        contactEntries={contactEntries}
+        onOpenAccount={onOpenAccount}
+        accountSignedIn={accountSignedIn}
+        accountName={accountName}
+        onOpenList={onOpenList}
+        onOpenWishlist={onOpenWishlist}
+        listCount={listCount}
+        wishlistCount={wishlistCount}
+        languageEnabled={Boolean(displayConfig.translateWidgetEnabled)}
+        languageOptions={languageOptions}
+        activeLanguage={pageLanguageChoice ?? pageLanguage}
+        changePageLanguage={changePageLanguage}
+        toggleTheme={toggleTheme}
+      />
+
       <Suspense fallback={null}>
         {productGalleryView.open && productGalleryView.items.length ? (
           <ImageGalleryLightbox

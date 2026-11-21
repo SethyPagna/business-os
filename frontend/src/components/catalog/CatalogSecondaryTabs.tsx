@@ -22,7 +22,7 @@ import { SectionShell, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
 import { PORTAL_CONTACT_ROW_INLINE, PortalContactRows } from './PortalSocialRow.tsx'
 import { PRODUCT_INSET_CLASS } from './portalProductSurfaces.ts'
-import { portalAccountsNotShown, portalMapOpenHref } from './portalSocialLinks.ts'
+import { portalAccountsNotShown } from './portalSocialLinks.ts'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
@@ -291,6 +291,17 @@ function AboutCover({ src, imageFetchPriority, onFailed, onShape }: { src: strin
 
 // A long story reads better in two columns on a wide screen; a short one stays one block.
 const ABOUT_STORY_TWO_COLUMN_FROM = 700
+
+/**
+ * Where "Open in Maps" goes: the shop's own Google Maps link when the owner set one, else a plain Maps search for the address, else nothing.
+ * Both are https links the visitor opens themselves.
+ */
+export function portalMapOpenHref(addressLink: unknown, address: unknown): string {
+  const link = String(addressLink ?? '').trim()
+  if (link) return link
+  const text = String(address ?? '').trim()
+  return text ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(text)}` : ''
+}
 
 // The address row of the details card: the brass pin, the real address, the whole row a link to the map. It wears the same recipe as a contact row.
 function AboutAddressRow({ item, copy }: { item: BusinessFact; copy: CopyFn }) {

@@ -12,8 +12,17 @@
 //
 // Run: node tests/portalContactEntries.test.ts
 import assert from 'node:assert/strict'
-import { PORTAL_CONTACT_TRIGGER_SELECTOR, buildPortalContactEntries, buildPortalSocialFromConfig, buildPortalSocialLinks, portalAccountsNotShown, portalContactFooterLinks, portalFooterAccounts, resolveContactFocusTarget } from '../src/components/catalog/portalSocialLinks.ts'
+import { createRequire } from 'node:module'
+import path from 'node:path'
+import { buildSync } from 'esbuild'
+import { buildPortalContactEntries, buildPortalSocialFromConfig, buildPortalSocialLinks, portalAccountsNotShown, portalContactFooterLinks, portalFooterAccounts } from '../src/components/catalog/portalSocialLinks.ts'
 import { deriveSocialHandle, resolveSocialDisplay } from '../src/utils/socialHandles.ts'
+
+// The focus helper lives with the one component that uses it (PortalContactMenu.tsx), so it is bundled here.
+const focusBundle = buildSync({ entryPoints: [path.join(import.meta.dirname, '..', 'src', 'components', 'catalog', 'PortalContactMenu.tsx')], bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react-dom'], loader: { '.css': 'empty' }, write: false, logLevel: 'silent' })
+const focusModule = { exports: {} as Record<string, unknown> }
+new Function('require', 'module', 'exports', focusBundle.outputFiles[0].text)(createRequire(import.meta.url), focusModule, focusModule.exports)
+const { PORTAL_CONTACT_TRIGGER_SELECTOR, resolveContactFocusTarget } = focusModule.exports as { PORTAL_CONTACT_TRIGGER_SELECTOR: string; resolveContactFocusTarget: <T extends { isConnected: boolean; focus: () => void }>(opener: T | null, host: { querySelector: (selector: string) => unknown } | null, active: unknown, body: unknown) => T | null }
 
 let failed = 0
 function runCase(name: string, fn: () => void): void {

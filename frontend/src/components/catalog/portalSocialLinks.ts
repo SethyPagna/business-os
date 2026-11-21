@@ -250,9 +250,8 @@ export function buildPortalContactEntries(input: {
       found.push(entry)
     }
     return found
-      .map((entry, index) => ({ entry, index }))
-      .sort((a, b) => order.indexOf(a.entry.platform) - order.indexOf(b.entry.platform) || a.index - b.index)
-      .map(({ entry }, position) => ({ ...entry, key: `${entry.platform}-${position}` }))
+      .sort((a, b) => order.indexOf(a.platform) - order.indexOf(b.platform))
+      .map((entry, position) => ({ ...entry, key: `${entry.platform}-${position}` }))
   }
 
   const messengerName = (input.contact ?? [])
@@ -283,17 +282,6 @@ export function buildPortalContactEntries(input: {
   return { chat, accounts }
 }
 
-/**
- * Where "Open in Maps" goes: the shop's own Google Maps link when the owner set one, else a plain Maps search for the address, else nothing.
- * Both are https links the visitor opens themselves.
- */
-export function portalMapOpenHref(addressLink: unknown, address: unknown): string {
-  const link = String(addressLink ?? '').trim()
-  if (link) return link
-  const text = String(address ?? '').trim()
-  return text ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(text)}` : ''
-}
-
 /** The accounts a screen has not already shown as chat rows: the same account never appears twice on one screen. */
 export function portalAccountsNotShown(accounts: readonly PortalContactEntry[], shown: readonly PortalContactEntry[]): PortalContactEntry[] {
   const taken = new Set(shown.map(entryIdentity))
@@ -309,39 +297,17 @@ export function portalAccountsNotShown(accounts: readonly PortalContactEntry[], 
  * no link. The entry comes from the accounts, else from the chat rows.
  */
 export function portalFooterAccounts(accounts: readonly PortalContactEntry[], chat: readonly PortalContactEntry[], screen: { tab: string; listOpen: boolean }): PortalContactEntry[] {
-  const aboutCovers = screen.tab === 'about' && !screen.listOpen
-  const shown = aboutCovers ? [] : screen.listOpen || screen.tab === 'faq' ? portalAccountsNotShown(accounts, chat) : [...accounts]
+  const covered = screen.tab === 'about' && !screen.listOpen ? [...accounts] : screen.listOpen || screen.tab === 'faq' ? accounts.filter((entry) => !portalAccountsNotShown([entry], chat).length) : []
   const telegram = accounts.find((entry) => entry.platform === 'telegram') ?? chat.find((entry) => entry.platform === 'telegram')
-  if (telegram && !shown.some((entry) => entry.platform === 'telegram')) shown.push(telegram)
-  return shown
-    .map((entry, index) => ({ entry, index }))
-    .sort((a, b) => PORTAL_ACCOUNT_ORDER.indexOf(a.entry.platform as PortalAccountPlatform) - PORTAL_ACCOUNT_ORDER.indexOf(b.entry.platform as PortalAccountPlatform) || a.index - b.index)
-    .map(({ entry }) => entry)
+  const shown = accounts.filter((entry) => entry === telegram || !covered.includes(entry))
+  return telegram && !shown.includes(telegram) ? [...shown, telegram] : shown
 }
 
 /** The footer's column lists the account entries. */
 export function portalContactFooterLinks(accounts: readonly PortalContactEntry[]): PortalFlatSocialLink[] {
-  return accounts
-    .filter((entry): entry is PortalContactEntry & { platform: SocialPlatform } => entry.platform !== 'phone')
-    .map((entry) => ({ key: entry.key, platform: entry.platform, value: entry.href, label: entry.label, accessibleName: entry.accessibleName, latin: entry.latin }))
+  return accounts.map((entry) => ({ key: entry.key, platform: entry.platform as SocialPlatform, value: entry.href, label: entry.label, accessibleName: entry.accessibleName, latin: entry.latin }))
 }
 
-
-type ContactFocusNode = { isConnected: boolean; focus: () => void }
-type ContactFocusHost = { querySelector: (selector: string) => unknown }
-
-export const PORTAL_CONTACT_TRIGGER_SELECTOR = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
-
-/**
- * Where focus goes when the Contact menu closes: nowhere if the visitor already put focus on something else, else the element that
- * opened the menu if it is still on the page, else the trigger now inside the menu's host.
- */
-export function resolveContactFocusTarget<T extends ContactFocusNode>(opener: T | null, host: ContactFocusHost | null, active: unknown, body: unknown): T | null {
-  const focusIsFree = !active || active === body || (active as ContactFocusNode).isConnected === false
-  if (!focusIsFree) return null
-  if (opener?.isConnected) return opener
-  return (host?.querySelector(PORTAL_CONTACT_TRIGGER_SELECTOR) as T | null | undefined) ?? null
-}
 
 type PortalSocialConfig = {
   links?: PortalAccountMap

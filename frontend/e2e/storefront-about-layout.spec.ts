@@ -8,9 +8,9 @@ import { framedPicture, stubStorefrontConfig } from './support/storefrontStub'
  *  - The cover is laid out by its own shape and never letterboxes: a wide picture is a full-width banner
  *    (object-cover, height from the ratio, capped at 520 px); a square or tall one keeps its own ratio
  *    (max 460 px wide, max 60vh tall) with the text beside it from md up.
- *  - The story takes the full width; under it phone and address sit BESIDE the map on a large
- *    screen and stack on a small one; nothing leaves a hole.
- *  - The map keeps its consent gate. No horizontal scroll at any width.
+ *  - The story takes the full width; right under it one details card (address, chat rows, account rows) sits BESIDE the live map on a large
+ *    screen and stacks on a small one; nothing leaves a hole.
+ *  - The map is live: the iframe is there when the tab is shown, with no consent click (owner A63, 21 Nov 2026). No horizontal scroll at any width.
  *
  * RUN ONLY THIS FILE:  cd frontend && npx playwright test storefront-about-layout
  *
@@ -31,6 +31,9 @@ const PATCH = {
   showCover: true,
   aboutContent: 'An independent beauty retailer. Genuine products from official brand stores.',
   links: { website: 'https://shop.example.test', facebook: 'https://facebook.com/sample.shop', instagram: 'https://instagram.com/sample_shop', telegram: 'https://t.me/sample_shop' },
+  showWebsite: true, showFacebook: true, showInstagram: true, showTelegram: true,
+  businessAddress: '12 Street 271, Phnom Penh',
+  showAddress: true,
   googleMapsEmbed: MAP_EMBED,
   showGoogleMap: true,
 }
@@ -150,7 +153,7 @@ test.describe('About page layout', () => {
       }
       if (width >= LARGE) {
         expect(Math.abs(tray.top - map.top), 'one row').toBeLessThanOrEqual(1)
-        expect(Math.abs(tray.height - map.height), 'equal heights: no hole beside the shorter card').toBeLessThanOrEqual(1)
+        // The two cards keep their own heights (the map keeps its 16:9); nothing is stretched into a hole.
         expect(tray.right, 'contacts left of the map').toBeLessThanOrEqual(map.left)
         expect(map.width, 'the map gets the larger share').toBeGreaterThan(tray.width)
       } else {
@@ -175,13 +178,20 @@ test.describe('About page layout', () => {
     expect(Math.abs(tray.left - details.left)).toBeLessThanOrEqual(1)
   })
 
-  test('the map keeps its consent gate', async ({ page }) => {
-    // CATCHES: a layout change that mounts the Google iframe on render (a third party contacted before a click).
+  test('the map is live: the iframe is there when About is shown, with no click and no consent gate', async ({ page }) => {
+    // CATCHES: the old click-to-load gate coming back (a Load map button, no iframe until a click), and a map card with no Open in Maps link.
     await openAbout(page, 1280)
+    await expect(page.locator('[data-portal-map-card] iframe[src*="google.com/maps"]')).toHaveCount(1)
+    await expect(page.locator('[data-portal-map-card] iframe')).toHaveAttribute('loading', 'lazy')
+    await expect(page.getByRole('button', { name: 'Load map' })).toHaveCount(0)
+    await expect(page.locator('[data-portal-map-card]').getByRole('link', { name: 'Open in Maps' })).toBeVisible()
+  })
+
+  test('no embed configured: no map card and no iframe', async ({ page }) => {
+    // CATCHES: an empty map frame or a dead Open in Maps button when the shop has not set a map.
+    await openAbout(page, 1280, { ...PATCH, googleMapsEmbed: '', showGoogleMap: false })
+    await expect(page.locator('[data-portal-map-card]')).toHaveCount(0)
     await expect(page.locator('iframe[src*="google.com/maps"]')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Load map' }).click()
-    await expect(page.locator('iframe[src*="google.com/maps"]')).toHaveCount(1)
-    await expect(page.locator('[data-portal-map-card] iframe')).toBeVisible()
   })
 
   test('without a cover the brand banner stays, and the name keeps its overlap', async ({ page }) => {
