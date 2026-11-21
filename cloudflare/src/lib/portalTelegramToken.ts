@@ -1,6 +1,6 @@
 import type { Env } from '../index'
 import { canonicalizePhone } from './phone'
-import { getPlanLimits } from './planTier'
+import { getPlanLimits, type PlanLimits } from './planTier'
 
 // Pure helpers for the shopper Telegram sign-in: the start token, its keys, the ticket value, update and
 // contact rules, the webhook gate decision and the time helpers. No D1, no network, no settings.
@@ -447,6 +447,11 @@ export async function isAuthenticWebhookRequest(env: PortalTelegramEnv, method: 
 }
 
 // ---- Time (section 1.3) ---------------------------------------------------------------------
+
+// The five poll gaps in order; the poll repeats the last one (section 3.6).
+export function pollScheduleMs(limits: PlanLimits): readonly number[] {
+  return [limits.portalTelegramPollDelay1Ms, limits.portalTelegramPollDelay2Ms, limits.portalTelegramPollDelay3Ms, limits.portalTelegramPollDelay4Ms, limits.portalTelegramPollDelay5Ms]
+}
 
 export function portalNowIso(ms: number = Date.now()): string {
   return new Date(ms).toISOString()

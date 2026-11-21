@@ -527,8 +527,13 @@ export type PlanLimits = {
 
   // Lifetime of the start token and of the pending join row.
   portalTelegramTokenTtlSeconds: number
-  // The waiting page's poll gaps (the last one repeats) and how long it polls.
-  portalTelegramPollScheduleMs: readonly number[]
+  // The waiting page's poll gaps in order (the fifth repeats; read them with pollScheduleMs) and how long it polls.
+  // Five scalar fields, not an array: the kernel fingerprint accepts constants only (house convention, like a min and a max).
+  portalTelegramPollDelay1Ms: number
+  portalTelegramPollDelay2Ms: number
+  portalTelegramPollDelay3Ms: number
+  portalTelegramPollDelay4Ms: number
+  portalTelegramPollDelay5Ms: number
   portalTelegramPollWindowMs: number
   // Per Telegram user: starts allowed in one window.
   portalTelegramPendingAttemptsMax: number
@@ -545,8 +550,6 @@ export type PlanLimits = {
   portalMemberSeenIntervalSeconds: number
   portalSessionTouchIntervalSeconds: number
 }
-
-const PORTAL_TELEGRAM_POLL_SCHEDULE_MS: readonly number[] = [2000, 3000, 5000, 8000, 10000]
 
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -636,7 +639,11 @@ const PAID_LIMITS: PlanLimits = deepFreeze({
   portalAiDailyMax: 300,
   portalAiVisitorDailyMax: 30,
   portalTelegramTokenTtlSeconds: 600,
-  portalTelegramPollScheduleMs: PORTAL_TELEGRAM_POLL_SCHEDULE_MS,
+  portalTelegramPollDelay1Ms: 2_000,
+  portalTelegramPollDelay2Ms: 3_000,
+  portalTelegramPollDelay3Ms: 5_000,
+  portalTelegramPollDelay4Ms: 8_000,
+  portalTelegramPollDelay5Ms: 10_000,
   portalTelegramPollWindowMs: 180_000,
   portalTelegramPendingAttemptsMax: 5,
   portalTelegramPendingWindowSeconds: 900,
@@ -729,7 +736,11 @@ const FREE_LIMITS: PlanLimits = deepFreeze({
   portalAiDailyMax: 100,
   portalAiVisitorDailyMax: 10,
   portalTelegramTokenTtlSeconds: 600,
-  portalTelegramPollScheduleMs: PORTAL_TELEGRAM_POLL_SCHEDULE_MS,
+  portalTelegramPollDelay1Ms: 2_000,
+  portalTelegramPollDelay2Ms: 3_000,
+  portalTelegramPollDelay3Ms: 5_000,
+  portalTelegramPollDelay4Ms: 8_000,
+  portalTelegramPollDelay5Ms: 10_000,
   portalTelegramPollWindowMs: 180_000,
   portalTelegramPendingAttemptsMax: 5,
   portalTelegramPendingWindowSeconds: 900,

@@ -202,7 +202,11 @@ const PAID = {
   portalAiDailyMax: 300,
   portalAiVisitorDailyMax: 30,
   portalTelegramTokenTtlSeconds: 600,
-  portalTelegramPollScheduleMs: [2000, 3000, 5000, 8000, 10000],
+  portalTelegramPollDelay1Ms: 2000,
+  portalTelegramPollDelay2Ms: 3000,
+  portalTelegramPollDelay3Ms: 5000,
+  portalTelegramPollDelay4Ms: 8000,
+  portalTelegramPollDelay5Ms: 10000,
   portalTelegramPollWindowMs: 180000,
   portalTelegramPendingAttemptsMax: 5,
   portalTelegramPendingWindowSeconds: 900,
@@ -294,7 +298,11 @@ const FREE = {
   portalAiDailyMax: 100,
   portalAiVisitorDailyMax: 10,
   portalTelegramTokenTtlSeconds: 600,
-  portalTelegramPollScheduleMs: [2000, 3000, 5000, 8000, 10000],
+  portalTelegramPollDelay1Ms: 2000,
+  portalTelegramPollDelay2Ms: 3000,
+  portalTelegramPollDelay3Ms: 5000,
+  portalTelegramPollDelay4Ms: 8000,
+  portalTelegramPollDelay5Ms: 10000,
   portalTelegramPollWindowMs: 180000,
   portalTelegramPendingAttemptsMax: 5,
   portalTelegramPendingWindowSeconds: 900,
@@ -323,9 +331,9 @@ check('both tables carry exactly the same field set, with no extras', async () =
 })
 
 // T-A14 (G38 S3a): the twelve shopper Telegram sign-in fields exist on both profiles with the design's values.
-const TELEGRAM_FIELDS = {"portalTelegramTokenTtlSeconds":0,"portalTelegramPollScheduleMs":0,"portalTelegramPollWindowMs":0,"portalTelegramPendingAttemptsMax":0,"portalTelegramPendingWindowSeconds":0,"portalTelegramSessionsPerMemberMax":0,"portalTelegramSessionsPerMemberWindowSeconds":0,"portalTelegramJoinsPerWindowMax":0,"portalTelegramJoinsWindowSeconds":0,"portalTelegramGateMemoSeconds":0,"portalMemberSeenIntervalSeconds":0,"portalSessionTouchIntervalSeconds":0}
-check('T-A14: both profiles define all 12 portal Telegram fields with the design values', async () => {
-  const expected = { portalTelegramTokenTtlSeconds: 600, portalTelegramPollScheduleMs: [2000, 3000, 5000, 8000, 10000], portalTelegramPollWindowMs: 180000, portalTelegramPendingAttemptsMax: 5, portalTelegramPendingWindowSeconds: 900, portalTelegramSessionsPerMemberMax: 10, portalTelegramSessionsPerMemberWindowSeconds: 86400, portalTelegramJoinsPerWindowMax: 30, portalTelegramJoinsWindowSeconds: 3600, portalTelegramGateMemoSeconds: 30, portalMemberSeenIntervalSeconds: 86400, portalSessionTouchIntervalSeconds: 3600 }
+const TELEGRAM_FIELDS = {"portalTelegramTokenTtlSeconds":0,"portalTelegramPollDelay1Ms":0,"portalTelegramPollDelay2Ms":0,"portalTelegramPollDelay3Ms":0,"portalTelegramPollDelay4Ms":0,"portalTelegramPollDelay5Ms":0,"portalTelegramPollWindowMs":0,"portalTelegramPendingAttemptsMax":0,"portalTelegramPendingWindowSeconds":0,"portalTelegramSessionsPerMemberMax":0,"portalTelegramSessionsPerMemberWindowSeconds":0,"portalTelegramJoinsPerWindowMax":0,"portalTelegramJoinsWindowSeconds":0,"portalTelegramGateMemoSeconds":0,"portalMemberSeenIntervalSeconds":0,"portalSessionTouchIntervalSeconds":0}
+check('T-A14: both profiles define all 16 portal Telegram fields with the design values', async () => {
+  const expected = { portalTelegramTokenTtlSeconds: 600, portalTelegramPollDelay1Ms: 2000, portalTelegramPollDelay2Ms: 3000, portalTelegramPollDelay3Ms: 5000, portalTelegramPollDelay4Ms: 8000, portalTelegramPollDelay5Ms: 10000, portalTelegramPollWindowMs: 180000, portalTelegramPendingAttemptsMax: 5, portalTelegramPendingWindowSeconds: 900, portalTelegramSessionsPerMemberMax: 10, portalTelegramSessionsPerMemberWindowSeconds: 86400, portalTelegramJoinsPerWindowMax: 30, portalTelegramJoinsWindowSeconds: 3600, portalTelegramGateMemoSeconds: 30, portalMemberSeenIntervalSeconds: 86400, portalSessionTouchIntervalSeconds: 3600 }
   assert.deepEqual(Object.keys(expected).sort(), Object.keys(TELEGRAM_FIELDS).sort())
   for (const tier of ['paid', 'free']) {
     for (const [key, value] of Object.entries(expected)) assert.deepEqual(PLAN_LIMITS_BY_TIER[tier][key], value, tier + '.' + key)
@@ -360,7 +368,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
 // the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
 // 20 Nov: the bell section lifetime is 245 s on both tiers (the follow-up read adds 25 s slack, up to 20 s jitter and an 8 s read) (owner 11 Nov: up to 5 minutes), and the three catalogue lifetimes that were literals keep today's single value on both.
-const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter', 'portalTelegramTokenTtlSeconds', 'portalTelegramPollScheduleMs', 'portalTelegramPollWindowMs', 'portalTelegramPendingAttemptsMax', 'portalTelegramPendingWindowSeconds', 'portalTelegramSessionsPerMemberMax', 'portalTelegramSessionsPerMemberWindowSeconds', 'portalTelegramJoinsPerWindowMax', 'portalTelegramJoinsWindowSeconds', 'portalTelegramGateMemoSeconds', 'portalMemberSeenIntervalSeconds', 'portalSessionTouchIntervalSeconds']
+const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter', 'portalTelegramTokenTtlSeconds', 'portalTelegramPollDelay1Ms', 'portalTelegramPollDelay2Ms', 'portalTelegramPollDelay3Ms', 'portalTelegramPollDelay4Ms', 'portalTelegramPollDelay5Ms', 'portalTelegramPollWindowMs', 'portalTelegramPendingAttemptsMax', 'portalTelegramPendingWindowSeconds', 'portalTelegramSessionsPerMemberMax', 'portalTelegramSessionsPerMemberWindowSeconds', 'portalTelegramJoinsPerWindowMax', 'portalTelegramJoinsWindowSeconds', 'portalTelegramGateMemoSeconds', 'portalMemberSeenIntervalSeconds', 'portalSessionTouchIntervalSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

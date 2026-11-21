@@ -369,6 +369,17 @@ check('T-A13 matchOptions: three distinct labels in 10 to 99, the code once, onl
 })
 
 // ---------------------------------------------------------------- helpers (section 1.3, 2.4, 2.6)
+check('pollScheduleMs: the five delays are positive, strictly increasing and end inside the poll window', async () => {
+  for (const tier of ['paid', 'free']) {
+    const limits = PLAN_LIMITS_BY_TIER[tier]
+    const delays = lib.pollScheduleMs(limits)
+    assert.deepEqual([...delays], [2000, 3000, 5000, 8000, 10000])
+    assert.ok(delays.every((d) => d > 0))
+    for (let i = 1; i < delays.length; i++) assert.ok(delays[i] > delays[i - 1], 'strictly increasing')
+    assert.ok(delays[delays.length - 1] <= limits.portalTelegramPollWindowMs)
+  }
+})
+
 check('portalNowIso and secondsAgoModifier follow section 1.3', async () => {
   const iso = lib.portalNowIso(T0)
   assert.equal(iso, '2026-11-21T08:00:00.000Z')
