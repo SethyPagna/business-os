@@ -327,4 +327,58 @@ check('the typed search term and FAQ query sit in their own notranslate span', (
   assert.equal(renderToStaticMarkup(React.createElement('p', null, withTypedTerm('{q} and "{q}"', '{q}', 'x'))).split('notranslate').length - 1, 2, 'every placeholder')
 })
 
+// ---- 7. The assistant: AI-written text is never translated, and a label that toggles is remounted ---------------------
+
+// Google rewrites text nodes it translates; React's later in-place update of that node then shows nothing. So the AI's
+// own words carry no-translate, and the two labels that toggle sit in a span keyed by their state (a new key mounts a
+// new node, which Google translates afresh).
+function assistantViolations(source: ts.SourceFile): string[] {
+  const problems: string[] = []
+  const withChild = (test: (child: ts.JsxExpression) => boolean) =>
+    elements(source, (node) => ts.isJsxElement(node) && node.children.some((child) => ts.isJsxExpression(child) && !!child.expression && test(child)))
+  const text = (child: ts.JsxExpression) => (child.expression as ts.Expression).getText(source)
+  const sites: [string, (child: ts.JsxExpression) => boolean][] = [
+    ['the answer summary', (child) => text(child) === 'assistantResponse.summary'],
+    ['a follow-up question chip', (child) => text(child) === 'question'],
+    ['a recommendation reason', (child) => text(child) === 'item.reason'],
+    ['a fit summary', (child) => text(child) === 'item.fit_summary'],
+  ]
+  for (const [name, test] of sites) {
+    const found = withChild(test)
+    if (found.length !== 1) problems.push(`${name}: expected one element, found ${found.length}`)
+    for (const node of found) if (!markedNoTranslate(node, source)) problems.push(`${name} is not translate="no" with notranslate`)
+  }
+  const keyed = (state: string, label: string) => {
+    const found = elements(source, (node) => {
+      const key = attributeOf(openOf(node) as JsxOpen, 'key')
+      return ts.isJsxElement(node) && !!key?.initializer?.getText(source).includes(state)
+    })
+    const ok = found.length === 1 && (found[0] as ts.JsxElement).children.some((child) => ts.isJsxExpression(child) && !!child.expression && text(child).includes(label))
+    if (!ok) problems.push(`the ${label} label is not in a span keyed by ${state}`)
+  }
+  keyed('assistantLoading', 'assistantSend')
+  keyed('added.has(addKey)', 'addToList')
+  return problems
+}
+check('CatalogAiSection: AI text is notranslate and the toggling Send and Add labels are keyed spans', () => {
+  assert.deepEqual(assistantViolations(parseSource(path.join(SRC, 'components/catalog/CatalogSecondaryTabs.tsx'))), [])
+})
+check('control: removing any one of the four marks or either key turns the assistant check red', () => {
+  const original = read('components/catalog/CatalogSecondaryTabs.tsx')
+  const mutants: [string, string, string][] = [
+    ['summary mark', 'translate="no" className="notranslate mt-1 text-sm', 'className="mt-1 text-sm'],
+    ['follow-up chip mark', 'translate="no" className={`notranslate ${CHIP} ${CHIP_IDLE}`}', 'className={`${CHIP} ${CHIP_IDLE}`}'],
+    ['reason mark', 'translate="no" className="notranslate mt-2 text-sm', 'className="mt-2 text-sm'],
+    ['fit summary mark', '<span translate="no" className="notranslate">{item.fit_summary}', '<span>{item.fit_summary}'],
+    ['Send label key', " key={assistantLoading ? 'wait' : 'send'}", ''],
+    ['Add label key', " key={added.has(addKey) ? 'in' : 'add'}", ''],
+  ]
+  for (const [name, from, to] of mutants) {
+    assert.equal(original.split(from).length, 2, `${name}: the mutant site exists once`)
+    const problems = assistantViolations(sourceOf(original.replace(from, () => to)))
+    assert.ok(problems.length >= 1, `${name}: removing it must turn the check red`)
+  }
+  assert.deepEqual(assistantViolations(sourceOf(original)), [], 'the unmutated source is clean')
+})
+
 console.log(`portalGoogleWording: ${passed} checks passed`)
