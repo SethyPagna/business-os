@@ -25,6 +25,8 @@ const SKIP_DIR = new Set(['node_modules', '.wrangler', 'dist', '.git'])
 
 const TABLE = String.raw`(?:["'\`\[]?\w+["'\`\]]?\s*\.\s*)?["'\`\[]?product_batches\b`
 const LITERAL = new RegExp(String.raw`\b(?:INSERT\s+OR\s+REPLACE|REPLACE)\s+INTO\s+` + TABLE + String.raw`|\bUPDATE\s+OR\s+REPLACE\s+` + TABLE, 'i')
+const COMMENTS = /--[^\r\n]*|\/\*[\s\S]*?\*\//g
+const bare = (text) => text.replace(COMMENTS, ' ')
 const BUILDERS = [
   ['REPLACE INTO <variable>', new RegExp(String.raw`\bREPLACE\s+INTO\s+["'\`]?\$\{`, 'i')],
   ['UPDATE OR REPLACE <variable>', new RegExp(String.raw`\bUPDATE\s+OR\s+REPLACE\s+["'\`]?\$\{`, 'i')],
@@ -64,9 +66,15 @@ function scannedFiles() {
   return files
 }
 const rel = (file) => path.relative(ROOT, file).split(path.sep).join('/')
+function scanText(text) {
+  const stripped = bare(text)
+  return {
+    literal: LITERAL.test(text) || LITERAL.test(stripped),
+    builder: BUILDERS.filter(([, re]) => re.test(text) || re.test(stripped)).map(([name]) => name),
+  }
+}
 function hits(file) {
-  const text = fs.readFileSync(file, 'utf8')
-  return { literal: LITERAL.test(text), builder: BUILDERS.filter(([, re]) => re.test(text)).map(([name]) => name) }
+  return scanText(fs.readFileSync(file, 'utf8'))
 }
 
 let passed = 0
@@ -141,5 +149,12 @@ check('the matchers see every spelling, and ignore the neighbours', () => {
     assert(BUILDERS.some(([, re]) => re.test(text)), text)
   }
   for (const text of ['`INSERT INTO ${t}(a)`', '`INSERT OR IGNORE INTO ${t}(a)`', '`SELECT replace(${x}, 1, 2)`']) assert(!BUILDERS.some(([, re]) => re.test(text)), text)
+})
+check('a replace hidden by comments is still seen, and the comment pattern is the guard own', () => {
+  for (const sql of ['INSERT/**/OR/**/REPLACE/**/INTO/**/product_batches(id) VALUES(1)', 'REPLACE /* x */ INTO product_batches(id)', 'UPDATE OR\nREPLACE --x\n product_batches SET a=1']) assert(scanText(sql).literal, sql)
+  assert(scanText('INSERT/**/OR REPLACE INTO ${t}(a)').builder.length > 0, 'builder behind a comment')
+  assert(!scanText('INSERT/**/INTO product_batches(id)').literal, 'a plain insert behind a comment')
+  const guardSource = fs.readFileSync(path.join(ROOT, 'cloudflare/src/lib/db.ts'), 'utf8')
+  assert(guardSource.includes(String.raw`--[^\r\n]*|\/\*[\s\S]*?\*\/`), 'lib/db.ts SQL_NOISE no longer has the comment alternatives this sweep strips')
 })
 console.log(`${passed} lot replace sweep checks passed`)
