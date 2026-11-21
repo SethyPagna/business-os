@@ -61,12 +61,12 @@ async function oracle(world, branch) {
 }
 
 // Mutants of the device model (mw3, mw12): set by run() for the devices of one run.
-const MODEL = { union: false, publishEach: false }
+const MODEL = { union: false, publishEach: false, dropHeld: false }
 // The device model of A.4. `marks` and `waitingBySession` are what the view reads (PUBLISHED); every chain of answers is applied to `staged` and published only when it ends with more = false.
 class Device {
-  constructor(world, branch, opts = {}) { Object.assign(this, { world, branch, marks: new Map(), waitingBySession: new Map(), staged: null, cursor: 0, tag: '', top: 0, answers: 0, rebuilds: 0, pagesFetched: 0, log: [], miss: opts.miss !== false, caps: null, maxMarks: 0, trace: !!opts.trace, union: opts.union ?? MODEL.union, publishEach: opts.publishEach ?? MODEL.publishEach }) }
+  constructor(world, branch, opts = {}) { Object.assign(this, { world, branch, marks: new Map(), waitingBySession: new Map(), staged: null, cursor: 0, tag: '', top: 0, answers: 0, rebuilds: 0, pagesFetched: 0, log: [], miss: opts.miss !== false, caps: null, maxMarks: 0, trace: !!opts.trace, union: opts.union ?? MODEL.union, publishEach: opts.publishEach ?? MODEL.publishEach, dropHeld: opts.dropHeld ?? MODEL.dropHeld }) }
   get pending() { return new Set([...this.waitingBySession.values()].flat()) }
-  begin() { this.staged = { marks: new Map(this.marks), waiting: new Map([...this.waitingBySession].map(([k, v]) => [k, [...v]])) } }
+  begin() { this.staged = { marks: new Map(this.marks), waiting: this.dropHeld ? new Map() : new Map([...this.waitingBySession].map(([k, v]) => [k, [...v]])) } }
   putWaiting(entries) {
     for (const [sid, ids] of entries) {
       const old = this.staged.waiting.get(sid)
@@ -222,7 +222,7 @@ async function scenario(world, report, patches) {
     await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,NULL,1,NULL,'create',?,'h','{}',?,'{}',?)").bind(lid, rid('lc'), JSON.stringify({ status: 'closed', revision: 0, members: products.length }), when).run()
     await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) SELECT ?, value, 1, NULL, 'observe', ?||'-'||value, 'h','{}','{}','{}', ? FROM json_each(?)").bind(lid, rid('lo'), when, mine).run()
   }
-  const nullEvent = (sid, when) => world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,NULL,1,NULL,'observe',?,'h','{}','{}','{}',?)").bind(sid, rid('ne'), when).run()
+  const nullEvent = (sid, when) => world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES(?,NULL,1,NULL,'observe',?,'h','{}',json_object('approval','rejected'),'{}',?)").bind(sid, rid('ne'), when).run()
   await snap()
   at('empty world')
   const empty = await same(world, device, 'empty world'); report.steps.push('empty world (' + empty.marks.size + ' marks)')
@@ -294,7 +294,7 @@ async function scenario(world, report, patches) {
   await device.sync()
   await step('L1 legacy NULL line set', async () => {
     await world.db.prepare("UPDATE inventory_check_approvals SET line_decisions_json=json_object(?,json_object('decision','reject')) WHERE session_id='l1-0'").bind(String(pool1[0].id)).run()
-    await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES('l1-0',?,1,NULL,'observe',?,'h','{}','{}','{}',?)").bind(pool1[0].id, rid('l1d'), when1).run()
+    await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,actor_name,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES('l1-0',?,1,NULL,'observe',?,'h','{}',json_object('approval','rejected'),'{}',?)").bind(pool1[0].id, rid('l1d'), when1).run()
     await world.db.prepare("UPDATE inventory_check_approvals SET status='rejected',decided_by=1,decided_at=?,decision_request_id=?,decision_note='closed' WHERE session_id='l1-1'").bind(when1, rid('l1c')).run()
     await nullEvent('l1-1', when1)
   })
@@ -418,20 +418,60 @@ async function throughput(world, report, label, tier) {
   const device = new Device(world, 1)
   await device.build()
   const rows = await world.all('SELECT p.id AS id, bs.quantity AS q FROM products p JOIN branch_stock bs ON bs.product_id=p.id AND bs.branch_id=1 WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0 ORDER BY p.id LIMIT 500')
+  let big = null
   try {
     assert.equal(rows.length, 500, 'products for the 500-line submission')
     const send = async (ps) => { const r = await world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: ps.map((p) => ({ productId: p.id, countedQuantity: p.q + 1, seenQuantity: p.q })) }, { cookie: counterCookie }); if (r.status >= 300) throw new Error('submit ' + ps.length + ': ' + r.status + ' ' + r.text.slice(0, 200)); return r }
     await send(rows.slice(0, 10)); await device.sync()
-    await send(rows)
+    big = await send(rows)
   } catch (e) { report.skipped.push(`${label}: ${String(e.message).slice(0, 120)}`); return }
   const reads0 = device.log.length
   await device.sync(3)
   const reads = device.log.slice(reads0).filter((x) => x.chg).length
   assert.ok(reads <= 3, `${label}: the device reached more = false in ${reads} reads (at most 3)`)
   assert.ok(device.maxMarks <= limits.inventoryMarksTouchedMax, `${label}: an answer touched ${device.maxMarks} products (limit ${limits.inventoryMarksTouchedMax})`)
+  if (tier === 'free') {
+    at0(report, 'A1d 500-line chain: read 2 carries no list')
+    const sid = big.json.item.id
+    const chain = device.log.slice(reads0).filter((x) => x.chg)
+    assert.ok(chain.length >= 2, 'the 500-line submission is answered in a chain of at least two reads (' + chain.length + ')')
+    assert.deepEqual(chain[0].chg.waiting.filter((w) => w[0] === sid), [[sid, 500]], 'read 1 carries the 500 waiting lines of the new session')
+    for (const read of chain.slice(1)) assert.deepEqual(read.chg.waiting.filter((w) => w[0] === sid), [], 'a later read of the chain carries no list for the session')
+    at0(report, label)
+  }
   await same(world, device, label)
   const built = new Device(world, 1); await built.build(); await same(world, built, label + ' (fresh build)')
   report.steps.push(label + ' (' + reads + ' reads)')
+  if (tier === 'free') { report.steps.push('A1d 500-line chain: read 2 carries no list'); await afterChain(world, report, device, rows, big.json.item.id, counterCookie) }
+}
+// A1d: what follows the 500-line chain, on the same Free plain-writer world. The device already holds the new session's 500 waiting ids; each step shows what an answer carries (entries are [session, count]) and that the device equals the oracle.
+//   an answer for another session must leave the held list alone (the device-drops-a-held-list mutant turns red here); a supersede and a line decision bring the new list; an approval leaving pending drops it.
+async function afterChain(world, report, device, rows, sid, cookie) {
+  const post = async (url, body, as) => { const r = await world.send('POST', IC + url, body, as ? { cookie: as } : undefined); if (r.status >= 300) throw new Error(url + ': ' + r.status + ' ' + r.text.slice(0, 160)); return r }
+  const stepA = async (label, writer, expect) => {
+    at0(report, label)
+    const from = device.log.length
+    try { await writer() } catch (e) { report.skipped.push(label + ': ' + String(e.message).slice(0, 120)); return }
+    await device.sync()
+    const entries = device.log.slice(from).filter((x) => x.chg).flatMap((x) => x.chg.waiting)
+    at0(report, label)
+    expect(entries)
+    await same(world, device, label)
+    const built = new Device(world, 1); await built.build(); await same(world, built, label + ' (fresh build)'); report.steps.push(label)
+  }
+  const lines = (ps, differ) => ps.map((p) => ({ productId: p.id, countedQuantity: differ ? p.q + 1 : p.q, seenQuantity: p.q }))
+  const other = await world.all('SELECT p.id AS id, bs.quantity AS q FROM products p JOIN branch_stock bs ON bs.product_id=p.id AND bs.branch_id=1 WHERE p.is_active=1 AND COALESCE(p.is_group,0)=0 ORDER BY p.id DESC LIMIT 3')
+  await stepA('A1d unrelated answer keeps the held list', () => post('/submissions', { branchId: 1, requestId: rid('sb'), lines: lines(other, false) }, cookie),
+    (entries) => assert.deepEqual(entries, [], 'a submission with no differing line names no list'))
+  await stepA('A1d supersede after the chain', () => post('/submissions', { branchId: 1, requestId: rid('sb'), lines: lines(rows.slice(200, 205), true) }, cookie),
+    (entries) => { assert.ok(entries.some((e) => e[0] === sid && e[1] === 495), 'the old session answers its new list (495)'); assert.ok(entries.some((e) => e[0] !== sid && e[1] === 5), 'the new session answers its 5 lines') })
+  await stepA('A1d line decision after the chain', () => post('/sessions/' + sid + '/approval/lines', { requestId: rid('ln'), productId: rows[300].id, action: 'reject' }),
+    (entries) => assert.ok(entries.some((e) => e[0] === sid && e[1] === 494), 'the decided session answers its new list (494)'))
+  let small = null
+  await stepA('A1d approval leaving pending', async () => {
+    small = (await world.all("SELECT session_id AS s FROM inventory_check_approvals WHERE status='pending' AND lines=5 ORDER BY submitted_at DESC LIMIT 1"))[0].s
+    for (let n = 0; n < 60; n++) { const r = await post('/sessions/' + small + '/approval', { decision: 'reject', requestId: rid('ap'), note: 'no' }); if (r.json.done !== false) break }
+  }, (entries) => assert.ok(entries.some((e) => e[0] === small && e[1] === 0), 'the decided session answers an empty list'))
 }
 const at0 = (report, label) => { report.at = label }
 
@@ -451,6 +491,10 @@ const MUTANTS = [
   { name: 'mw10 the walk counts waiting ids against the limit', worlds: ['r4b'], file: LIB, from: 'if (touched.size + legacyCost + freshProduct + items > limits.touchedMax && last !== null)', to: 'if (touched.size + legacyCost + freshProduct + items + (known !== undefined ? JSON.parse(String(known.waiting)).length : 0) > limits.touchedMax && last !== null)', red: 'R4b' },
   { name: 'mw11 no exactness re-read (exact always true)', file: LIB, from: 'const exact = lastTop === topId', to: 'const exact = true', red: 'R1' },
   { name: 'mw12 the device publishes each answer as it arrives', model: { publishEach: true }, red: 'W3c' },
+  { name: 'mA1 an observe walks too (every event is set-changing)', worlds: ['r4b'], file: LIB, from: "row.action === 'create' || Number(row.decides) === 1", to: "row.action !== 'close'", red: 'A1d 500-line chain' },
+  { name: 'mA2 no walk on create', file: LIB, from: "row.action === 'create' || Number(row.decides) === 1", to: 'Number(row.decides) === 1', red: 'W1 plain submission' },
+  { name: 'mA3 no walk on a line decision', file: LIB, from: "json_extract(after_json,'$.approval') IS NOT NULL ELSE 1 END AS decides", to: "json_extract(after_json,'$.approval') IS NOT NULL AND json_extract(after_json,'$.counted_quantity') IS NULL ELSE 1 END AS decides", red: 'W7 line reject' },
+  { name: 'mA4 the device drops a held list between answers', model: { dropHeld: true }, worlds: ['r4b'], red: 'A1d unrelated answer keeps the held list' },
   { name: 'mw14 legacy without a.status = pending', file: LIB, from: "a.line_set_json IS NULL AND a.session_id IS NOT NULL AND a.status = 'pending' AS legacy", to: 'a.line_set_json IS NULL AND a.session_id IS NOT NULL AS legacy', red: 'L2' },
 ]
 const SWITCHES = { ic_simple: 'on', ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' }
@@ -476,7 +520,7 @@ function runnerSelfCheck(v = verdict) {
 }
 
 async function run(patches, model = {}, worlds = ['main', 'r4a', 'r4b']) {
-  Object.assign(MODEL, { union: false, publishEach: false }, model)
+  Object.assign(MODEL, { union: false, publishEach: false, dropHeld: false }, model)
   const report = { steps: [], skipped: [], red: null, at: 'boot' }
   const inWorld = async (opts, fn) => { const world = await bootWorld({ seedVariant: 'base', patches, ...opts }); try { await fn(world) } finally { await world.dispose() } }
   try {
