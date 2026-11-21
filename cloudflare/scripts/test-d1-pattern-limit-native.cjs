@@ -217,7 +217,28 @@ async function verifyPortalMembersMigrationOnWorkerd() {
     }
     assert.equal(signatures.ONE_BATCH, signatures.EACH_STATEMENT, 'one batch and one statement at a time end identical')
   } finally { await mf.dispose() }
-  console.log('PASS 0321 and the pre-migration ops query run on workerd D1 (whole chain through the binding): sqlite_sequence is accepted, one batch and statement-by-statement end identical')
+  const empty = new Miniflare({ modules: true, script: '', d1Databases: ['EMPTY_ONE_BATCH', 'EMPTY_EACH_STATEMENT'] })
+  try {
+    const emptySignatures = {}
+    for (const binding of ['EMPTY_ONE_BATCH', 'EMPTY_EACH_STATEMENT']) {
+      const db = await empty.getD1Database(binding)
+      await applyInChunks(db, names.filter(f => f < target))
+      const pre = await db.prepare(opsSql).first()
+      assert.deepEqual({ ...pre }, { age_column_missing: 0, duplicate_contact_links: 0, g38_columns_present: 0, account_rows: 0, max_id: 0, sequence_above_max_id: 0, age_confirmed_rows: 0 }, `${binding}: pre-migration query on an empty table`)
+      const statements = statementsOf(target)
+      if (binding === 'EMPTY_ONE_BATCH') await db.batch(statements.map(s => db.prepare(s)))
+      else for (const statement of statements) await db.prepare(statement).run()
+      await applyInChunks(db, names.filter(f => f > target))
+      const post = await db.prepare(opsSql).first()
+      assert.deepEqual({ ...post }, { age_column_missing: 0, duplicate_contact_links: 0, g38_columns_present: 3, account_rows: 0, max_id: 0, sequence_above_max_id: 0, age_confirmed_rows: 0 }, `${binding}: the ops query is accepted after the migration on an empty table`)
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_sequence WHERE name LIKE 'portal_accounts%' AND seq > 0").first()).n, 0, `${binding}: an empty table leaves no used sequence`)
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('portal_accounts_0321_new','portal_members_guard_0321')").first()).n, 0)
+      assert.equal((await db.prepare("INSERT INTO portal_accounts (name) VALUES ('First')").run()).meta.last_row_id, 1, `${binding}: the first account is id 1`)
+      emptySignatures[binding] = JSON.stringify((await db.prepare("SELECT name, sql FROM sqlite_master WHERE tbl_name = 'portal_accounts' ORDER BY name").all()).results)
+    }
+    assert.equal(emptySignatures.EMPTY_ONE_BATCH, emptySignatures.EMPTY_EACH_STATEMENT, 'empty table: one batch and one statement at a time end identical')
+  } finally { await empty.dispose() }
+  console.log('PASS 0321 and the pre-migration ops query run on workerd D1 (whole chain through the binding): sqlite_sequence is accepted, on a table with rows and on an empty table one batch and statement-by-statement end identical')
 }
 
 async function verifyWranglerMigration(migration) {
