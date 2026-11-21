@@ -1,8 +1,8 @@
 // Storefront wording for shoppers on Google-translated pages (21 Nov 2026). Measured with Google Translate's real
 // script: the old no-payment line came out as "online payment only" in French; one-word labels were translated
 // without context (Back as the body part, Clear as the adjective, A-Z as Arizona); a number React rewrote after Google
-// translated its neighbourhood stayed stale. The wording table is the result of real-script runs kept under
-// Records/Design/2026-11-21/real-google/wording/. This test keeps the measured-bad strings out and pins the markup.
+// translated its neighbourhood stayed stale. The wording table is the result of those real-script runs. This test keeps
+// the measured-bad strings out and pins the markup.
 //
 // Run: node tests/portalGoogleWording.test.ts
 import assert from 'node:assert/strict'
