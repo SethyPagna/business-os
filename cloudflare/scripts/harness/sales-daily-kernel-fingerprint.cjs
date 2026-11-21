@@ -11,8 +11,8 @@
 // can change without a version bump. The keys are DERIVED by a scan of every closure file, which refuses (red, and never pinnable) every use of a limit table other than that one read form.
 //
 // The switch list of src/lib/readSwitches.ts (KNOWN_READ_SWITCHES) is hashed the same way: its shape (the array's string elements left out) plus one entry per switch name the kernel reads, derived by a scan of every other closure file that refuses every other way of naming a switch.
-// A switch name must be a string literal or a same-file top-level const bound to one; a parameter, a local, a property, a template or any other expression is refused, so a type (or a type assertion) never decides what the kernel reads:
-// reportAtomicMode itself clamps whatever value arrives to report_atomic or report_atomic_long.
+// A switch name must be a string literal or a same-file top-level const bound to one; a parameter, a local (destructured ones included), a property, a template or any other expression is refused, and a closure file may import from readSwitches.ts only the switch readers the scan checks (type-only imports aside).
+// The harness does not read types or type assertions (as any and as never pass through it): reportAtomicMode clamps whatever value arrives to report_atomic or report_atomic_long, so the derived names are all the kernel can read.
 // A pin file (scripts/sales-daily-kernel-pin.json) holds the per-statement hashes for the kernel version in force and an append-only history of
 // { version, aggregate }. node scripts/harness/sales-daily-kernel-fingerprint.cjs --write-pin refuses to write a changed aggregate under a version that
 // already has one, so a kernel change cannot be re-pinned without bumping SALES_DAILY_KERNEL_VERSION (which re-covers and re-computes every stored day).
