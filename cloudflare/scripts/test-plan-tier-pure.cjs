@@ -188,6 +188,13 @@ const PAID = {
   inventoryCheckLotLinesPerProduct: 100,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10000,
+  inventoryMarksPageIds: 2000,
+  inventoryMarksSnapshotCacheSeconds: 3600,
+  inventoryMarksChangesPageEvents: 1000,
+  inventoryMarksTouchedMax: 1000,
+  inventoryMarksCatchUpMaxEvents: 4000,
+  inventoryMarksPendingPageApprovals: 100,
+  inventoryMarksPollSeconds: 120,
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogVocabularyCacheSeconds: 300,
@@ -268,6 +275,13 @@ const FREE = {
   inventoryCheckLotLinesPerProduct: 50,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2000,
+  inventoryMarksPageIds: 2000,
+  inventoryMarksSnapshotCacheSeconds: 86400,
+  inventoryMarksChangesPageEvents: 500,
+  inventoryMarksTouchedMax: 500,
+  inventoryMarksCatchUpMaxEvents: 2000,
+  inventoryMarksPendingPageApprovals: 50,
+  inventoryMarksPollSeconds: 300,
   productListCacheSeconds: 3600,
   possibleDuplicatesCacheSeconds: 3600,
   catalogVocabularyCacheSeconds: 300,
@@ -313,7 +327,9 @@ const FREE_IS_LONGER = ['productListCacheSeconds', 'possibleDuplicatesCacheSecon
 // lifetimes above, so a lane that names a new lifetime and a lane that names a new page size never edit the same line.
 const FREE_IS_LONGER_PAGE_SIZES = ['paymentMethodScanPageSize']
 // The bell's section lifetime (routes/notifications.ts): owner 11 Nov, up to 5 minutes. A device re-reads L + 25 s + up to 20 s after an event, so L is 245 on both tiers and the worst case, with the 8 s read limit, stays under 5 minutes (deploy 11, bell catch-up).
-const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
+// The count marks (lib/inventoryCheckMarks.ts, read switch ic_marks): a cached snapshot page lives longer and a watching device polls less often on Free, because both cost reads; inventoryMarksPageIds is the same on both tiers (the page's id range is part of the stored page, not a cost).
+const FREE_IS_LONGER_MARKS = ['inventoryMarksSnapshotCacheSeconds', 'inventoryMarksPollSeconds']
+const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...FREE_IS_LONGER_MARKS]
 
 // Fields that are deliberately the SAME number on both tiers, named so the exemption cannot grow unnoticed. The Expenses export asks for 500 rows a page and the
 // offset path caps at 500, so a smaller Free page only turned an export of up to 500 rows (a month's: one request today) into two pages that each pay the cursor's
@@ -326,7 +342,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
 // the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
 // 20 Nov: the bell section lifetime is 245 s on both tiers (the follow-up read adds 25 s slack, up to 20 s jitter and an 8 s read) (owner 11 Nov: up to 5 minutes), and the three catalogue lifetimes that were literals keep today's single value on both.
-const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter']
+const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter', 'inventoryMarksPageIds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //

@@ -22,6 +22,9 @@ import { availableGroupings, buildGroupingBlock, type GroupingBlock } from '../l
 import type { FamilyGroupTotals } from '../lib/familyPagination'
 import { readInventoryCheckLots } from '../lib/inventoryCheckLots'
 import { getActionTier } from '../lib/permissions'
+import { broadcast } from '../durable-objects/broadcastHub'
+import { cacheKeyRequest } from '../lib/cacheKey'
+import { MARKS_FORMAT, fnv1a32, readChanges, readPendingPage, readSnapshotPage, readTopAndAt, type Mark } from '../lib/inventoryCheckMarks'
 import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
   canSeeStaffIdentity, InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, pickupInventoryCheckTask, releaseInventoryCheckTask, REPLACED_NOTE,
@@ -96,6 +99,8 @@ app.use('*', async (c, next) => {
   if (c.req.method === 'GET' || c.req.method === 'HEAD') return
   const status = c.res.status
   if (status >= 400 && status < 500) return
+  // Best effort and whatever the switch says (a broadcast is not a read): the devices that watch the count marks ask for their changes.
+  try { c.executionCtx.waitUntil(broadcast(c.env, 'inventory_checks', { branchId: c.get('icBranch') ?? null })) } catch { /* no execution context */ }
   // ON, a bump that did not land fails the write's answer (its outcome is unknown to the caller, and a stale set must never be served as fresh). OFF, nothing is being served from these
   // versions right now, so an unreachable cache store must not turn a committed Inventory Check write into an error: the failure is logged and the next flip ON starts from a bumped version
   // anyway (the version is also moved by every later writer).
@@ -202,7 +207,7 @@ async function readListPage(c: IcContext, rawQuery: Record<string, string>, extr
   // projection, the grouping block or the summary a screen needs. Each is JavaScript and calls an issue by filter cannot afford on Free (10 ms, 50 calls).
   if (extra.idsOnly) return { items: ((payload as { items?: unknown }).items ?? []) as ListPageAnswer['items'], total: Number((payload as { total?: unknown }).total ?? 0) }
   const lotCounts = await lotCountsOn(c)
-  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
+  const capabilities = { ...capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields)), ...await marksCapability(c) }
   const productsPage = getActionTier(user, 'products', 'view') !== 'none'
   const projection = projectInventoryList(payload as Record<string, unknown>, user, access, productsPage)
   const { body } = projection
@@ -255,7 +260,7 @@ app.get('/overlay', async c => {
     lots: (row.lots ?? []).map((lot) => access.fields.stock ? lot : { ...lot, branches: (lot.branches as Array<Record<string, unknown>>).map(({ quantity: _quantity, ...entry }) => entry) }),
     ...(row.lots_more ? { lots_more: true } : {}) })) : undefined
   const summary = wantSummary ? await readCheckSummary(c, branchId, fixStock, undefined, populationToken.token) : null
-  const capabilities = capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields))
+  const capabilities = { ...capabilitiesOf(user, fixStock, lotCounts, access.fields.stock, await submissionCaps(c, lotCounts), availableGroupings(access.fields)), ...await marksCapability(c) }
   return c.json({ wired: true, branchId, version: await inventoryChecksVersion(c.env), items, ...(lots ? { lots } : {}),
     ...(summary ? { summary } : {}), capabilities })
 })
@@ -272,6 +277,66 @@ app.get('/lots', async c => {
   if (!getInventoryCheckAccess(user).canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
   const productId = positiveWord(c.req.query('productId'), 'productId'), branchId = positiveWord(c.req.query('branchId'), 'branchId')
   return c.json(await readInventoryCheckLots(getDb(c.env), user, { productId, branchId, limit: getPlanLimits(c.env).inventoryCheckLotLinesPerProduct }))
+})
+// ---- ic_marks: the count marks a device holds (lib/inventoryCheckMarks.ts, contract docs/contracts/inventory-check-marks-20261121.md) ----------------------------------------------------
+// Three GET routes; all answer 404 while ic_marks is OFF. The marks are the LATEST count of each product at the branch (state, time); no quantity, stock or person is in them.
+const marksCapability = async (c: IcContext): Promise<{ marks?: { pollSeconds: number; catchUpMaxEvents: number; pageIds: number } }> => {
+  if (!await readSwitch(c.env, 'ic_marks')) return {}
+  const limits = getPlanLimits(c.env)
+  return { marks: { pollSeconds: limits.inventoryMarksPollSeconds, catchUpMaxEvents: limits.inventoryMarksCatchUpMaxEvents, pageIds: limits.inventoryMarksPageIds } }
+}
+const nonNegative = (word: string | undefined, parameter: string): number => {
+  if (word === undefined || !/^[0-9]{1,15}$/.test(word) || !Number.isSafeInteger(Number(word))) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter)
+  return Number(word)
+}
+// The shared start of the three routes. A viewer may see Waiting only with the stock field and Fix stock (the /overlay rule).
+async function marksStart(c: IcContext): Promise<{ scope: { organization: number | null; branchId: number }; permitted: boolean; limits: ReturnType<typeof getPlanLimits> } | null> {
+  if (!await readSwitch(c.env, 'ic_marks')) return null
+  singleValued(c)
+  const user = c.get('user'), access = getInventoryCheckAccess(user)
+  if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')
+  const branchId = positiveWord(c.req.query('branchId'), 'branchId')
+  return { scope: { organization: user.organization_id ?? null, branchId }, permitted: access.fields.stock && await fixStockOn(c), limits: getPlanLimits(c.env) }
+}
+type MarksPage = { page: number; buckets: number[]; cursor: number; tag: string; hash: string; rows: Mark[] }
+app.get('/marks', async c => {
+  const start = await marksStart(c)
+  if (!start) return notWired(c)
+  const { scope, limits } = start
+  const page = nonNegative(c.req.query('page'), 'page'), have = c.req.query('have') ?? ''
+  const db = getDb(c.env)
+  const key = await cacheKeyRequest(`https://ic.invalid/__bos/ic-marks?org=${scope.organization ?? ''}&branch=${scope.branchId}&page=${page}&f=${MARKS_FORMAT}`, 'marks', cacheIdentity(c))
+  let served: MarksPage | null = null, top = 0
+  // Every request validates the cached page against the log (one call): it is served only while its cursor is not past the newest event, its cursor event still has its tag and it is not further behind than half the catch-up threshold.
+  const cached = key ? await caches.default.match(key).then((hit) => hit ? hit.json<MarksPage>() : null).catch(() => null) : null
+  if (cached) {
+    const check = await readTopAndAt(db, cached.cursor)
+    top = check.top
+    if (cached.cursor <= check.top && (cached.cursor === 0 || check.atTag === cached.tag) && check.top - cached.cursor <= limits.inventoryMarksCatchUpMaxEvents / 2) served = cached
+  }
+  if (!served) {
+    const built = await readSnapshotPage(db, scope, page, limits.inventoryMarksPageIds)
+    top = built.cursor
+    served = { page, buckets: built.buckets, cursor: built.cursor, tag: built.tag, hash: fnv1a32(`${MARKS_FORMAT}:${page}:${built.cursor}:${built.tag}:${JSON.stringify(built.rows)}`), rows: built.rows }
+    if (key) c.executionCtx.waitUntil(caches.default.put(key, new Response(JSON.stringify(served), { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${limits.inventoryMarksSnapshotCacheSeconds}` } })))
+  }
+  const head = { format: MARKS_FORMAT, page: served.page, buckets: served.buckets, cursor: served.cursor, tag: served.tag, top, hash: served.hash }
+  return c.json(have !== '' && have === served.hash ? { ...head, unchanged: true } : { ...head, rows: served.rows })
+})
+app.get('/marks/changes', async c => {
+  const start = await marksStart(c)
+  if (!start) return notWired(c)
+  const since = nonNegative(c.req.query('since'), 'since'), tag = c.req.query('tag') ?? ''
+  if (!/^([0-9a-f]{8})?$/.test(tag) || (since > 0 && tag === '')) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'tag')
+  return c.json(await readChanges(getDb(c.env), start.scope, since, tag, { pageEvents: start.limits.inventoryMarksChangesPageEvents, touchedMax: start.limits.inventoryMarksTouchedMax }, start.permitted))
+})
+app.get('/marks/pending', async c => {
+  const start = await marksStart(c)
+  if (!start) return notWired(c)
+  if (!start.permitted) throw new InventoryCheckQueryError(403, 'inventory_check_fix_stock_required', '')
+  const afterAt = c.req.query('afterAt'), afterId = c.req.query('afterId')
+  if ((afterAt === undefined) !== (afterId === undefined) || (afterAt !== undefined && (afterAt.length > 40 || afterId!.length > 128))) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'afterAt')
+  return c.json(await readPendingPage(getDb(c.env), start.scope, afterAt === undefined ? null : { afterAt, afterId: afterId! }, start.limits.inventoryMarksPendingPageApprovals))
 })
 app.get('/sessions', async c => c.json(await listInventoryCheckSessions(getDb(c.env), await principal(c), c.req.query(), { approvals: await fixStockOn(c),
   tasks: async (branchId) => new Map((await readTaskBoard(c, branchId)).rows.map((row): [string, InventoryCheckPickupTask] => [row.id, { id: row.id, title: row.title, status: row.status, total: row.total, done: row.done, ...(row.atClose ? { at_close: true as const } : {}) }])) })))

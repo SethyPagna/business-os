@@ -436,6 +436,17 @@ export type PlanLimits = {
   // parameter. A branch whose checked set is larger is refused 503 inventory_check_filter_too_large rather than read in part.
   inventoryCheckFilterMaxIds: number
 
+  // lib/inventoryCheckMarks.ts (read switch `ic_marks`): the count marks the device holds. Page = product ids of one snapshot page; the snapshot page is cached this long (every cached page is validated by its cursor tag and the lag rule,
+  // so the TTL is not a correctness bound); a changes answer reads at most ChangesPageEvents events and names at most TouchedMax products; a device further behind than CatchUpMaxEvents rebuilds instead of paging; PendingPageApprovals
+  // approvals a page of the waiting set; PollSeconds the interval of a watching device.
+  inventoryMarksPageIds: number
+  inventoryMarksSnapshotCacheSeconds: number
+  inventoryMarksChangesPageEvents: number
+  inventoryMarksTouchedMax: number
+  inventoryMarksCatchUpMaxEvents: number
+  inventoryMarksPendingPageApprovals: number
+  inventoryMarksPollSeconds: number
+
   // ---- The shared ranked scope of the Products list (INV-A S7; behind the read switch `catalog_ranked_scope`) ----
   //
   // lib/rankedScope.ts: how long a cached ranking (the ordered family keys of a window of pages, and the family total) may be served. The entry is also keyed on the products,
@@ -597,6 +608,13 @@ const PAID_LIMITS: PlanLimits = deepFreeze({
   inventoryCheckLotLinesPerProduct: 100,
   inventoryLastChangeMaxRows: 8,
   inventoryCheckFilterMaxIds: 10_000,
+  inventoryMarksPageIds: 2_000,
+  inventoryMarksSnapshotCacheSeconds: 3_600,
+  inventoryMarksChangesPageEvents: 1_000,
+  inventoryMarksTouchedMax: 1_000,
+  inventoryMarksCatchUpMaxEvents: 4_000,
+  inventoryMarksPendingPageApprovals: 100,
+  inventoryMarksPollSeconds: 120,
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogVocabularyCacheSeconds: 300,
@@ -678,6 +696,13 @@ const FREE_LIMITS: PlanLimits = deepFreeze({
   inventoryCheckLotLinesPerProduct: 50,
   inventoryLastChangeMaxRows: 4,
   inventoryCheckFilterMaxIds: 2_000,
+  inventoryMarksPageIds: 2_000,
+  inventoryMarksSnapshotCacheSeconds: 86_400,
+  inventoryMarksChangesPageEvents: 500,
+  inventoryMarksTouchedMax: 500,
+  inventoryMarksCatchUpMaxEvents: 2_000,
+  inventoryMarksPendingPageApprovals: 50,
+  inventoryMarksPollSeconds: 300,
   productListCacheSeconds: 3_600,
   possibleDuplicatesCacheSeconds: 3_600,
   catalogVocabularyCacheSeconds: 300,
