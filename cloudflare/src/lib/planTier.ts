@@ -521,7 +521,32 @@ export type PlanLimits = {
   // both tiers (routes/portal.ts portalAiDailyBudget).
   portalAiDailyMax: number
   portalAiVisitorDailyMax: number
+
+  // ---- Shopper Telegram sign-in (G38 S3) ---------------------------------
+  // The owner's Free rule holds on both tiers: every value below is the same on Paid and Free.
+
+  // Lifetime of the start token and of the pending join row.
+  portalTelegramTokenTtlSeconds: number
+  // The waiting page's poll gaps (the last one repeats) and how long it polls.
+  portalTelegramPollScheduleMs: readonly number[]
+  portalTelegramPollWindowMs: number
+  // Per Telegram user: starts allowed in one window.
+  portalTelegramPendingAttemptsMax: number
+  portalTelegramPendingWindowSeconds: number
+  // Per member: sign-ins allowed in one window.
+  portalTelegramSessionsPerMemberMax: number
+  portalTelegramSessionsPerMemberWindowSeconds: number
+  // Join circuit breaker: new Telegram members allowed in one window.
+  portalTelegramJoinsPerWindowMax: number
+  portalTelegramJoinsWindowSeconds: number
+  // How long one isolate remembers the sign-in switch.
+  portalTelegramGateMemoSeconds: number
+  // Minimum gap between two writes of a member's last_seen_at, and of a session's last_seen_at.
+  portalMemberSeenIntervalSeconds: number
+  portalSessionTouchIntervalSeconds: number
 }
+
+const PORTAL_TELEGRAM_POLL_SCHEDULE_MS: readonly number[] = [2000, 3000, 5000, 8000, 10000]
 
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -610,6 +635,18 @@ const PAID_LIMITS: PlanLimits = deepFreeze({
   d1QueriesPerInvocation: 1000,
   portalAiDailyMax: 300,
   portalAiVisitorDailyMax: 30,
+  portalTelegramTokenTtlSeconds: 600,
+  portalTelegramPollScheduleMs: PORTAL_TELEGRAM_POLL_SCHEDULE_MS,
+  portalTelegramPollWindowMs: 180_000,
+  portalTelegramPendingAttemptsMax: 5,
+  portalTelegramPendingWindowSeconds: 900,
+  portalTelegramSessionsPerMemberMax: 10,
+  portalTelegramSessionsPerMemberWindowSeconds: 86_400,
+  portalTelegramJoinsPerWindowMax: 30,
+  portalTelegramJoinsWindowSeconds: 3_600,
+  portalTelegramGateMemoSeconds: 30,
+  portalMemberSeenIntervalSeconds: 86_400,
+  portalSessionTouchIntervalSeconds: 3_600,
 })
 
 const FREE_LIMITS: PlanLimits = deepFreeze({
@@ -691,6 +728,18 @@ const FREE_LIMITS: PlanLimits = deepFreeze({
   d1QueriesPerInvocation: 50,
   portalAiDailyMax: 100,
   portalAiVisitorDailyMax: 10,
+  portalTelegramTokenTtlSeconds: 600,
+  portalTelegramPollScheduleMs: PORTAL_TELEGRAM_POLL_SCHEDULE_MS,
+  portalTelegramPollWindowMs: 180_000,
+  portalTelegramPendingAttemptsMax: 5,
+  portalTelegramPendingWindowSeconds: 900,
+  portalTelegramSessionsPerMemberMax: 10,
+  portalTelegramSessionsPerMemberWindowSeconds: 86_400,
+  portalTelegramJoinsPerWindowMax: 30,
+  portalTelegramJoinsWindowSeconds: 3_600,
+  portalTelegramGateMemoSeconds: 30,
+  portalMemberSeenIntervalSeconds: 86_400,
+  portalSessionTouchIntervalSeconds: 3_600,
 })
 
 /**

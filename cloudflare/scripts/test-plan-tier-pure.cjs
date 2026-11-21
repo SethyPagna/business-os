@@ -201,6 +201,18 @@ const PAID = {
   d1QueriesPerInvocation: 1000,
   portalAiDailyMax: 300,
   portalAiVisitorDailyMax: 30,
+  portalTelegramTokenTtlSeconds: 600,
+  portalTelegramPollScheduleMs: [2000, 3000, 5000, 8000, 10000],
+  portalTelegramPollWindowMs: 180000,
+  portalTelegramPendingAttemptsMax: 5,
+  portalTelegramPendingWindowSeconds: 900,
+  portalTelegramSessionsPerMemberMax: 10,
+  portalTelegramSessionsPerMemberWindowSeconds: 86400,
+  portalTelegramJoinsPerWindowMax: 30,
+  portalTelegramJoinsWindowSeconds: 3600,
+  portalTelegramGateMemoSeconds: 30,
+  portalMemberSeenIntervalSeconds: 86400,
+  portalSessionTouchIntervalSeconds: 3600,
 }
 const FREE = {
   tier: 'free',
@@ -281,6 +293,18 @@ const FREE = {
   d1QueriesPerInvocation: 50,
   portalAiDailyMax: 100,
   portalAiVisitorDailyMax: 10,
+  portalTelegramTokenTtlSeconds: 600,
+  portalTelegramPollScheduleMs: [2000, 3000, 5000, 8000, 10000],
+  portalTelegramPollWindowMs: 180000,
+  portalTelegramPendingAttemptsMax: 5,
+  portalTelegramPendingWindowSeconds: 900,
+  portalTelegramSessionsPerMemberMax: 10,
+  portalTelegramSessionsPerMemberWindowSeconds: 86400,
+  portalTelegramJoinsPerWindowMax: 30,
+  portalTelegramJoinsWindowSeconds: 3600,
+  portalTelegramGateMemoSeconds: 30,
+  portalMemberSeenIntervalSeconds: 86400,
+  portalSessionTouchIntervalSeconds: 3600,
 }
 
 check('the paid table is exactly the numbers production runs today', async () => {
@@ -296,6 +320,16 @@ check('both tables carry exactly the same field set, with no extras', async () =
   const paid = Object.keys(PLAN_LIMITS_BY_TIER.paid).sort()
   assert.deepEqual(free, paid, 'a field on one tier only is a limit that reads undefined on the other')
   assert.deepEqual(free, Object.keys(FREE).sort(), 'a new field needs a reader and a pin here')
+})
+
+// T-A14 (G38 S3a): the twelve shopper Telegram sign-in fields exist on both profiles with the design's values.
+const TELEGRAM_FIELDS = {"portalTelegramTokenTtlSeconds":0,"portalTelegramPollScheduleMs":0,"portalTelegramPollWindowMs":0,"portalTelegramPendingAttemptsMax":0,"portalTelegramPendingWindowSeconds":0,"portalTelegramSessionsPerMemberMax":0,"portalTelegramSessionsPerMemberWindowSeconds":0,"portalTelegramJoinsPerWindowMax":0,"portalTelegramJoinsWindowSeconds":0,"portalTelegramGateMemoSeconds":0,"portalMemberSeenIntervalSeconds":0,"portalSessionTouchIntervalSeconds":0}
+check('T-A14: both profiles define all 12 portal Telegram fields with the design values', async () => {
+  const expected = { portalTelegramTokenTtlSeconds: 600, portalTelegramPollScheduleMs: [2000, 3000, 5000, 8000, 10000], portalTelegramPollWindowMs: 180000, portalTelegramPendingAttemptsMax: 5, portalTelegramPendingWindowSeconds: 900, portalTelegramSessionsPerMemberMax: 10, portalTelegramSessionsPerMemberWindowSeconds: 86400, portalTelegramJoinsPerWindowMax: 30, portalTelegramJoinsWindowSeconds: 3600, portalTelegramGateMemoSeconds: 30, portalMemberSeenIntervalSeconds: 86400, portalSessionTouchIntervalSeconds: 3600 }
+  assert.deepEqual(Object.keys(expected).sort(), Object.keys(TELEGRAM_FIELDS).sort())
+  for (const tier of ['paid', 'free']) {
+    for (const [key, value] of Object.entries(expected)) assert.deepEqual(PLAN_LIMITS_BY_TIER[tier][key], value, tier + '.' + key)
+  }
 })
 
 // Read-cost LIFETIMES (planTier.ts "Read-cost lifetimes"): a longer lifetime
@@ -326,7 +360,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES]
 // only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
 // the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
 // 20 Nov: the bell section lifetime is 245 s on both tiers (the follow-up read adds 25 s slack, up to 20 s jitter and an 8 s read) (owner 11 Nov: up to 5 minutes), and the three catalogue lifetimes that were literals keep today's single value on both.
-const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter']
+const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter', 'portalTelegramTokenTtlSeconds', 'portalTelegramPollScheduleMs', 'portalTelegramPollWindowMs', 'portalTelegramPendingAttemptsMax', 'portalTelegramPendingWindowSeconds', 'portalTelegramSessionsPerMemberMax', 'portalTelegramSessionsPerMemberWindowSeconds', 'portalTelegramJoinsPerWindowMax', 'portalTelegramJoinsWindowSeconds', 'portalTelegramGateMemoSeconds', 'portalMemberSeenIntervalSeconds', 'portalSessionTouchIntervalSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
@@ -339,7 +373,7 @@ check('POSITIVE CONTROL: free actually differs from paid; ceilings are smaller, 
   for (const key of Object.keys(paid)) {
     if (key === 'tier') continue
     if (SAME_ON_BOTH_TIERS.includes(key)) {
-      assert.equal(free[key], paid[key], `${key} is named as the same on both tiers, so it must be`)
+      assert.deepEqual(free[key], paid[key], `${key} is named as the same on both tiers, so it must be`)
       continue
     }
     if (free[key] === paid[key]) same.push(key)
