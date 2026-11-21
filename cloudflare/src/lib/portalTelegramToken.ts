@@ -131,8 +131,12 @@ export function deriveTelegramKeys(secret: string, botId: string): Promise<Teleg
 
 type KeySet = 'current' | 'previous'
 
+export function isUsableSecret(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 32
+}
+
 function usableSecret(value: unknown): string | null {
-  return typeof value === 'string' && value.length >= 32 ? value : null
+  return isUsableSecret(value) ? value : null
 }
 
 async function keysFor(env: PortalTelegramEnv, which: KeySet): Promise<TelegramKeys | null> {
@@ -174,6 +178,20 @@ const FLAG_TERMS = 1 << 3
 const FLAG_AGE = 1 << 4
 const FLAG_RESERVED = 0xf000
 
+export type DecodedStartFlags = { localeIndex: number; locale: string | null; termsAccepted: boolean; ageConfirmed: boolean; code: number }
+
+export function decodeStartFlags(flags: number): DecodedStartFlags | null {
+  if (!Number.isInteger(flags) || flags < 0 || flags > 0xffff || (flags & FLAG_RESERVED) !== 0) return null
+  const localeIndex = flags & 7
+  return {
+    localeIndex,
+    locale: PORTAL_TELEGRAM_LOCALES[localeIndex] ?? null,
+    termsAccepted: (flags & FLAG_TERMS) !== 0,
+    ageConfirmed: (flags & FLAG_AGE) !== 0,
+    code: (flags >> 5) & 0x7f,
+  }
+}
+
 export async function mintStartToken(env: PortalTelegramEnv, fields: StartTokenFields, nowMs: number = Date.now()): Promise<string | null> {
   const { locale, code } = fields
   if (!Number.isInteger(locale) || locale < 0 || locale >= PORTAL_TELEGRAM_LOCALES.length) return null
@@ -194,6 +212,7 @@ export async function mintStartToken(env: PortalTelegramEnv, fields: StartTokenF
 }
 
 export type VerifiedStartToken = {
+  flags: number
   locale: string
   termsAccepted: boolean
   ageConfirmed: boolean
@@ -223,10 +242,9 @@ export async function verifyStartToken(env: PortalTelegramEnv, token: unknown, n
   if (!bytes || bytes.length !== TOKEN_BYTES) return null
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const flags = view.getUint16(0)
-  if ((flags & FLAG_RESERVED) !== 0) return null
-  const localeIndex = flags & 7
-  if (localeIndex >= PORTAL_TELEGRAM_LOCALES.length) return null
-  const code = (flags >> 5) & 0x7f
+  const decoded = decodeStartFlags(flags)
+  if (!decoded || decoded.locale === null) return null
+  const code = decoded.code
   if (code < 10 || code > 99) return null
   const expiry = view.getUint32(2)
   const ttl = getPlanLimits(env).portalTelegramTokenTtlSeconds
@@ -248,9 +266,10 @@ export async function verifyStartToken(env: PortalTelegramEnv, token: unknown, n
   }
   if (!keySet) return null
   return {
-    locale: PORTAL_TELEGRAM_LOCALES[localeIndex],
-    termsAccepted: (flags & FLAG_TERMS) !== 0,
-    ageConfirmed: (flags & FLAG_AGE) !== 0,
+    flags,
+    locale: decoded.locale,
+    termsAccepted: decoded.termsAccepted,
+    ageConfirmed: decoded.ageConfirmed,
     code,
     expiry,
     startedAtSeconds: expiry - ttl,
@@ -304,7 +323,7 @@ export function parseCallbackData(data: unknown): { token: string; choice: 0 | 1
 export type ClassifiedUpdate =
   | { kind: 'ignore' }
   | { kind: 'start'; fromId: number; token: string; languageCode: string | null }
-  | { kind: 'contact'; fromId: number; languageCode: string | null; contact: { userId: unknown; phoneNumber: unknown } }
+  | { kind: 'contact'; fromId: number; languageCode: string | null; contact: { userId: unknown; phoneNumber: unknown; firstName: string | null; lastName: string | null } }
   | { kind: 'help'; fromId: number; languageCode: string | null }
   | { kind: 'callback'; callbackId: string; fromId: number; token: string; choice: 0 | 1 | 2; languageCode: string | null }
   | { kind: 'stale'; callbackId: string }
@@ -317,6 +336,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function validSender(from: unknown): from is Record<string, unknown> & { id: number } {
   return isRecord(from) && typeof from.id === 'number' && Number.isSafeInteger(from.id) && from.id >= 1 && from.id <= MAX_TELEGRAM_ID && from.is_bot !== true
+}
+
+function rawName(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
 }
 
 function languageOf(from: Record<string, unknown>): string | null {
@@ -337,7 +360,7 @@ function classifyMessage(message: unknown): ClassifiedUpdate {
   if (!validSender(from) || message.chat.id !== from.id) return IGNORE
   const languageCode = languageOf(from)
   if (isRecord(message.contact)) {
-    return { kind: 'contact', fromId: from.id, languageCode, contact: { userId: message.contact.user_id, phoneNumber: message.contact.phone_number } }
+    return { kind: 'contact', fromId: from.id, languageCode, contact: { userId: message.contact.user_id, phoneNumber: message.contact.phone_number, firstName: rawName(from.first_name), lastName: rawName(from.last_name) } }
   }
   const start = typeof message.text === 'string' ? /^\/start ([A-Za-z0-9_-]{51})$/.exec(message.text) : null
   if (start) return { kind: 'start', fromId: from.id, token: start[1], languageCode }
@@ -359,17 +382,26 @@ function classifyCallback(query: unknown): ClassifiedUpdate {
 
 // ---- Contacts (section 5.6) -----------------------------------------------------------------
 
-export type ContactVerdict = { ok: true; phone: string } | { ok: false; reply: 'R-OWN-NUMBER' | 'R-PHONE-BAD' | 'R-ANON' }
+const MAX_NAME_LENGTH = 64
 
-export function contactVerdict(fromId: number, contact: { userId: unknown; phoneNumber: unknown }): ContactVerdict {
+function cleanName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const name = value.trim().slice(0, MAX_NAME_LENGTH).trim()
+  return name === '' ? null : name
+}
+
+export type ContactVerdict = { ok: true; phone: string; firstName: string | null; lastName: string | null } | { ok: false; reply: 'R-OWN-NUMBER' | 'R-PHONE-BAD' | 'R-ANON' }
+
+export function contactVerdict(fromId: number, contact: { userId: unknown; phoneNumber: unknown; firstName?: unknown; lastName?: unknown }): ContactVerdict {
   const userId = contact.userId
   if (typeof userId !== 'number' || !Number.isSafeInteger(userId) || userId !== fromId) return { ok: false, reply: 'R-OWN-NUMBER' }
   const phoneNumber = contact.phoneNumber
   if (typeof phoneNumber !== 'string' || phoneNumber.length > 32 || !/^[0-9+ ()-]+$/.test(phoneNumber)) return { ok: false, reply: 'R-PHONE-BAD' }
-  const digits = phoneNumber.replace(/\D/g, '')
+  const allDigits = phoneNumber.replace(/\D/g, '')
+  const digits = allDigits.startsWith('00') ? allDigits.slice(2) : allDigits
   if (digits.startsWith('888')) return { ok: false, reply: 'R-ANON' }
   const phone = canonicalizePhone(digits)
-  return phone ? { ok: true, phone } : { ok: false, reply: 'R-PHONE-BAD' }
+  return phone ? { ok: true, phone, firstName: cleanName(contact.firstName), lastName: cleanName(contact.lastName) } : { ok: false, reply: 'R-PHONE-BAD' }
 }
 
 // ---- The webhook gate (sections 5.1 to 5.3) -------------------------------------------------

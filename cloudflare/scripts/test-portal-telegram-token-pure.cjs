@@ -212,11 +212,20 @@ check('T-A8 the ticket is 68 characters and can never equal hashToken of anythin
 // ---------------------------------------------------------------- T-A9
 check('T-A9 contacts: only a Telegram-verified own number with a real phone is accepted', async () => {
   const ok = (phone, fromId = 5000, userId = 5000) => lib.contactVerdict(fromId, { userId, phoneNumber: phone })
-  assert.deepEqual(ok('85588123456'), { ok: true, phone: '088123456' }, 'a Cambodian 088 number is not anonymous')
-  assert.deepEqual(ok('+855 12 345 678'), { ok: true, phone: '012345678' })
-  assert.deepEqual(ok('+855 88 812 3456'), { ok: true, phone: '0888123456' }, 'a Cambodian 088 8xx number contains 888 and is accepted')
+  assert.deepEqual(ok('85588123456'), { ok: true, phone: '088123456', firstName: null, lastName: null }, 'a Cambodian 088 number is not anonymous')
+  assert.deepEqual(ok('+855 12 345 678'), { ok: true, phone: '012345678', firstName: null, lastName: null })
+  assert.deepEqual(ok('+855 88 812 3456'), { ok: true, phone: '0888123456', firstName: null, lastName: null }, 'a Cambodian 088 8xx number contains 888 and is accepted')
   assert.deepEqual(ok('+888 0123 4567'), { ok: false, reply: 'R-ANON' })
   assert.deepEqual(ok('88812345678'), { ok: false, reply: 'R-ANON' })
+  assert.deepEqual(ok('00888 1234 5678'), { ok: false, reply: 'R-ANON' }, 'the 00 international prefix of +888')
+  assert.deepEqual(ok('0085512345678'), { ok: true, phone: '012345678', firstName: null, lastName: null }, 'the 00 prefix of a Cambodian number')
+  const named = (first, last) => lib.contactVerdict(5000, { userId: 5000, phoneNumber: '012345678', firstName: first, lastName: last })
+  assert.deepEqual(named('  Sok ', 'Dara'), { ok: true, phone: '012345678', firstName: 'Sok', lastName: 'Dara' }, 'names carried and trimmed')
+  assert.deepEqual(named(undefined, '   '), { ok: true, phone: '012345678', firstName: null, lastName: null }, 'missing or blank names are null')
+  assert.deepEqual(named(7, null), { ok: true, phone: '012345678', firstName: null, lastName: null }, 'non-strings are null')
+  assert.equal(named('a'.repeat(100), 'b'.repeat(64)).firstName, 'a'.repeat(64), 'an over-long name is cut to 64')
+  assert.equal(named('a'.repeat(100), 'b'.repeat(64)).lastName, 'b'.repeat(64))
+  assert.equal(named('a'.repeat(63) + ' z', 'x').firstName, 'a'.repeat(63), 'a cut never leaves a trailing space')
   assert.deepEqual(ok('+855 12 345 678', 5000, 5001), { ok: false, reply: 'R-OWN-NUMBER' }, 'forwarded contact')
   assert.deepEqual(lib.contactVerdict(5000, { userId: undefined, phoneNumber: '012345678' }), { ok: false, reply: 'R-OWN-NUMBER' }, 'missing user_id')
   assert.deepEqual(ok('012345678', 2 ** 53, 2 ** 53), { ok: false, reply: 'R-OWN-NUMBER' }, 'unsafe id')
@@ -227,8 +236,94 @@ check('T-A9 contacts: only a Telegram-verified own number with a real phone is a
   const update = (message) => lib.classifyUpdate({ update_id: 1, message })
   const base = { chat: { id: 5000, type: 'private' }, from: { id: 5000, is_bot: false } }
   assert.equal(update({ ...base, contact: { user_id: 5000, phone_number: '012345678' } }).kind, 'contact')
+  const withNames = update({ ...base, from: { id: 5000, is_bot: false, first_name: 'Sok', last_name: 7 }, contact: { user_id: 5000, phone_number: '012345678' } })
+  assert.equal(withNames.contact.firstName, 'Sok', 'the sender first name rides on the contact variant')
+  assert.equal(withNames.contact.lastName, null, 'a non-string last name is null')
+  assert.deepEqual(lib.contactVerdict(withNames.fromId, withNames.contact), { ok: true, phone: '012345678', firstName: 'Sok', lastName: null })
   assert.equal(update({ ...base, from: { id: 5000, is_bot: true }, contact: { user_id: 5000, phone_number: '012345678' } }).kind, 'ignore', 'bot')
   assert.equal(update({ ...base, chat: { id: 5000, type: 'group' }, contact: { user_id: 5000, phone_number: '012345678' } }).kind, 'ignore', 'group')
+})
+
+// ---------------------------------------------------------------- T-A2b decodeStartFlags
+check('T-A2b decodeStartFlags round-trips every flag and refuses reserved bits', async () => {
+  const env = baseEnv()
+  for (const locale of [0, 1]) for (const terms of [false, true]) for (const age of [false, true]) for (const code of [10, 37, 99]) {
+    const verified = await lib.verifyStartToken(env, await mint(env, { locale, termsAccepted: terms, ageConfirmed: age, code }), T0)
+    const decoded = lib.decodeStartFlags(verified.flags)
+    assert.deepEqual(decoded, { localeIndex: locale, locale: ['en', 'km'][locale], termsAccepted: terms, ageConfirmed: age, code })
+  }
+  const base = 1 | (1 << 3) | (50 << 5)
+  assert.deepEqual(lib.decodeStartFlags(base), { localeIndex: 1, locale: 'km', termsAccepted: true, ageConfirmed: false, code: 50 })
+  assert.equal(lib.decodeStartFlags(base | (1 << 4)).ageConfirmed, true)
+  assert.equal(lib.decodeStartFlags(base & ~(1 << 3)).termsAccepted, false)
+  assert.equal(lib.decodeStartFlags(2).locale, null, 'a locale index with no language is null, not a crash')
+  for (const bit of [12, 13, 14, 15]) assert.equal(lib.decodeStartFlags(base | (1 << bit)), null, 'reserved bit ' + bit)
+  for (const bad of [-1, 65536, 1.5, NaN, '1']) assert.equal(lib.decodeStartFlags(bad), null, String(bad))
+})
+
+// ---------------------------------------------------------------- T-A2c isUsableSecret
+check('T-A2c isUsableSecret: 31 characters refused, 32 accepted', async () => {
+  assert.equal(lib.isUsableSecret('x'.repeat(31)), false)
+  assert.equal(lib.isUsableSecret('x'.repeat(32)), true)
+  assert.equal(lib.isUsableSecret('x'.repeat(200)), true)
+  for (const bad of [undefined, null, 5, '', {}]) assert.equal(lib.isUsableSecret(bad), false)
+  assert.equal(await mint({ ...baseEnv(), PORTAL_ABUSE_HMAC_SECRET: 'x'.repeat(31) }), null, 'the mint uses the same rule')
+  assert.ok(await mint({ ...baseEnv(), PORTAL_ABUSE_HMAC_SECRET: 'x'.repeat(32) }), 'the mint accepts 32')
+})
+
+// ---------------------------------------------------------------- T-A3b exact limits
+check('T-A3b the 5 s clock lead and the 60 s ROTATED_AT lead are exact', async () => {
+  const env = baseEnv()
+  assert.ok(await lib.verifyStartToken(env, await mint(env, {}, T0 + 5000), T0), 'expiry = now + TTL + 5 is accepted')
+  assert.equal(await lib.verifyStartToken(env, await mint(env, {}, T0 + 6000), T0), null, 'expiry = now + TTL + 6 is refused')
+  const oldEnv = { ...baseEnv(), PORTAL_ABUSE_HMAC_SECRET: OLD_SECRET }
+  const token = await mint(oldEnv)
+  const now = T0 + 20_000
+  const rotatedAt = (ms) => ({ ...baseEnv(), PORTAL_ABUSE_HMAC_SECRET_PREVIOUS: OLD_SECRET, PORTAL_ABUSE_HMAC_SECRET_ROTATED_AT: new Date(ms).toISOString() })
+  assert.ok(await lib.verifyStartToken(rotatedAt(now + 60_000), token, now), 'ROTATED_AT exactly 60 s ahead is accepted')
+  assert.equal(await lib.verifyStartToken(rotatedAt(now + 60_001), token, now), null, 'ROTATED_AT 60.001 s ahead is refused')
+  assert.equal(await lib.verifyStartToken(rotatedAt(now + 61_000), token, now), null, 'ROTATED_AT 61 s ahead is refused')
+})
+
+// ---------------------------------------------------------------- T-A12b constant time, behaviourally
+check('T-A12b sameBytes reads every byte whatever differs; secretsEqual hashes both sides on every path', async () => {
+  const counted = (bytes) => {
+    const box = { reads: 0 }
+    const proxy = new Proxy(bytes, { get(target, prop) { if (typeof prop === 'string' && /^[0-9]+$/.test(prop)) box.reads++; return Reflect.get(target, prop) } })
+    return { proxy, box }
+  }
+  const make = (n, fill) => new Uint8Array(n).fill(fill)
+  const cases = []
+  for (const n of [0, 1, 16, 1000]) {
+    const base = make(n, 7)
+    cases.push([base, make(n, 7), true, 'equal'])
+    if (n > 0) {
+      const first = make(n, 7); first[0] = 8
+      const last = make(n, 7); last[n - 1] = 8
+      cases.push([base, first, false, 'first byte'], [base, last, false, 'last byte'])
+    }
+    cases.push([base, make(n + 1, 7), false, 'right longer'], [make(n + 1, 7), base, false, 'left longer'], [base, make(n + 5, 0), false, 'longer zeros'])
+  }
+  for (const [a, b, expected, label] of cases) {
+    const left = counted(a)
+    const right = counted(b)
+    assert.equal(lib.sameBytes(left.proxy, right.proxy), expected, label + ' result')
+    assert.equal(left.box.reads + right.box.reads, 2 * Math.max(a.length, b.length), label + ' reads every position of the longer input on both sides')
+  }
+  const subtle = globalThis.crypto.subtle
+  const original = subtle.digest
+  let digests = 0
+  subtle.digest = function (...args) { digests++; return original.apply(this, args) }
+  try {
+    const pairs = [['abc', 'abc', true], ['abc', 'xbc', false], ['abc', 'abx', false], ['abc', 'abcd', false], ['abc', '', false], ['', 'abc', false], ['', '', true], ['a'.repeat(5000), 'a', false]]
+    for (const [expected, supplied, want] of pairs) {
+      digests = 0
+      assert.equal(await lib.secretsEqual(expected, supplied), want, expected.slice(0, 5) + ' vs ' + supplied.slice(0, 5))
+      assert.equal(digests, 2, 'both inputs are hashed before any answer: ' + expected.slice(0, 5) + ' vs ' + supplied.slice(0, 5))
+    }
+  } finally {
+    subtle.digest = original
+  }
 })
 
 // ---------------------------------------------------------------- T-A10
