@@ -192,7 +192,7 @@ async function loadPreferences(env: Env) {
 // the catalog. The actor's own write must never show stale, so the bell asks for `?fresh=1` after its
 // own bell-relevant write (frontend/src/api/bellFreshness.ts: `fresh=1`, or `fresh=a,b` naming only the sections the write resolves) or on the refresh button: that request recomputes and overwrites the
 // entry for everyone, but only when a data version moved since the entry was computed (the entry stores them), so a button
-// pressed with no write in between is answered from the entry. This holds only while every writer bumps its version before it responds. Every cached entry carries the time its data was computed and /summary reports the
+// pressed with no write in between is answered from the entry. This holds only while every writer bumps its version before it responds. Every cached entry carries the time its computation started and /summary reports the
 // oldest of them as generatedAt, which is the "as of" the panel shows. The data epoch is part of the key
 // (lib/cacheKey.ts), so nothing from before a restore is served.
 //
@@ -282,16 +282,27 @@ function sectionCacheFor(c: NotificationContext, user: PhoneActor): SectionCache
           }
         }
       }
+      // The entry's time is when its producer STARTED, read right after the cache match (Date.now() in a Worker only advances on I/O): every
+      // write committed before the start is in the data, so a plain read can trust an entry for the plan lifetime counted from its start.
+      const startedAt = Date.now()
       // Versions are read BEFORE the producer: a write that lands while it runs leaves the stored versions older than the data
       // version, so the next fresh read recomputes instead of trusting a half-old entry.
       const v = store && key ? await versionsNow(namespaces) : null
       const value = await producer()
-      const at = Date.now()
+      const at = startedAt
       computedAt.push(at)
       if (store && key) {
-        c.executionCtx.waitUntil(store.put(key, new Response(JSON.stringify({ at, v, value }), {
-          headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
-        })))
+        // A computation that started later has already stored: this older one must not overwrite it (it could bring back a resolved alert).
+        c.executionCtx.waitUntil((async () => {
+          const held = await store.match(key)
+          if (held) {
+            const stored = await held.json<{ at?: number }>().catch(() => null)
+            if (Number(stored?.at) > startedAt) return
+          }
+          await store.put(key, new Response(JSON.stringify({ at, v, value }), {
+            headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
+          }))
+        })().catch(() => {}))
       }
       return value
     }
