@@ -373,33 +373,36 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
     assert.equal(c.pin.version, version + 1)
   })
 
-  // The aggregate of every EARLIER kernel version, held here as literals: the pin file alone could be edited and re-pinned in one go. A new version appends one line here when the version after it is bumped.
-  const EARLIER = { 1: 'e0fc6748b9692bad96e1', 2: '79ef55bb36a7d1f69a8a', 3: 'cca31e5c5ff7babd1346', 4: '2399ccc3a193ea8cf9c9', 5: '8624d772d0f89952f034' }
-  /** Everything wrong with a pin history: a gap or no history, a missing entry for a version below the one in force, an entry that differs from the literal list. */
-  const historyProblems = (pin, version, earlier) => {
+  // The aggregate of every kernel version, the one in force included, held here as literals: the pin file alone could be edited and re-pinned in one go. Each version bump appends one line here.
+  const PINNED = { 1: 'e0fc6748b9692bad96e1', 2: '79ef55bb36a7d1f69a8a', 3: 'cca31e5c5ff7babd1346', 4: '2399ccc3a193ea8cf9c9', 5: '8624d772d0f89952f034', 6: 'cda86a72797044a9dd46' }
+  /** Everything wrong with a pin: a gap or no history, a history that does not end at the version in force, an entry or the pinned aggregate that differs from the literal map. */
+  const historyProblems = (pin, version, pinned) => {
     const gap = F.historyGap(pin.history)
     if (gap) return [gap]
     const problems = []
     if (pin.history.length !== version) problems.push(`the history ends at ${pin.history.length}, the version in force is ${version}`)
-    for (const h of pin.history) if (h.version in earlier && h.aggregate !== earlier[h.version]) problems.push(`history version ${h.version} aggregate ${h.aggregate} is not the recorded ${earlier[h.version]}`)
+    for (const h of pin.history) if (h.aggregate !== pinned[h.version]) problems.push(`history version ${h.version} aggregate ${h.aggregate} is not the recorded ${pinned[h.version]}`)
+    if (pin.aggregate !== pinned[version]) problems.push(`pin aggregate ${pin.aggregate} for version ${version} is not the recorded ${pinned[version]}`)
     return problems
   }
 
-  await check('K12 the pin history cannot be rewritten quietly: versions are exactly 1..current, every earlier aggregate equals the literal list held here, and the writer refuses a gap or a missing history', () => {
+  await check('K12 the pin history cannot be rewritten quietly: versions are exactly 1..current, every aggregate, the version in force included, equals the literal map held here, and the writer refuses a gap or a missing history', () => {
     const pin = F.readPin()
     const version = F.currentVersion(new Map())
     assert.deepEqual(pin.history.map((h) => h.version), Array.from({ length: version }, (_, i) => i + 1))
-    assert.deepEqual(Object.keys(EARLIER).map(Number), Array.from({ length: version - 1 }, (_, i) => i + 1), 'the literal list covers every version below the one in force')
-    assert.deepEqual(historyProblems(pin, version, EARLIER), [], 'the real pin')
+    assert.deepEqual(Object.keys(PINNED).map(Number), Array.from({ length: version }, (_, i) => i + 1), 'the literal map covers 1..the version in force, no gap')
+    for (const h of pin.history) assert.equal(h.aggregate, PINNED[h.version], `history version ${h.version} equals the literal map`)
+    assert.equal(pin.aggregate, PINNED[version], 'the pinned aggregate equals the literal of the version in force')
+    assert.deepEqual(historyProblems(pin, version, PINNED), [], 'the real pin')
     const clone = (p) => JSON.parse(JSON.stringify(p))
     const lastGone = clone(pin); lastGone.history.pop()
-    assert.ok(historyProblems(lastGone, version, EARLIER).length >= 1, 'MUTANT: the last history entry deleted by hand')
+    assert.ok(historyProblems(lastGone, version, PINNED).length >= 1, 'MUTANT: the last history entry deleted by hand')
     const middleGone = clone(pin); middleGone.history.splice(2, 1)
-    assert.ok(historyProblems(middleGone, version, EARLIER).some((p) => /without a gap/.test(p)), 'MUTANT: an entry in the middle deleted')
+    assert.ok(historyProblems(middleGone, version, PINNED).some((p) => /without a gap/.test(p)), 'MUTANT: an entry in the middle deleted')
     const none = clone(pin); delete none.history
-    assert.ok(historyProblems(none, version, EARLIER).some((p) => /no history/.test(p)), 'MUTANT: no history')
+    assert.ok(historyProblems(none, version, PINNED).some((p) => /no history/.test(p)), 'MUTANT: no history')
     const edited = clone(pin); edited.history[3].aggregate = '0'.repeat(20)
-    assert.ok(historyProblems(edited, version, EARLIER).some((p) => /version 4 aggregate/.test(p)), 'MUTANT: an earlier aggregate edited')
+    assert.ok(historyProblems(edited, version, PINNED).some((p) => /version 4 aggregate/.test(p)), 'MUTANT: an earlier aggregate edited')
     const mutated = F.fingerprint(sourceWith(F.ENTRY, (t) => `${t}\nexport const __kffixMutant = 1\n`))
     const cli = F.pinWrite({ history: [] }, mutated, version)
     assert.ok(cli.refused && /no history/.test(cli.refused), 'MUTANT: the pin file deleted, then --write-pin (the CLI passes { history: [] }) is refused')
@@ -411,8 +414,12 @@ export async function f(n: string) { const m = await import('./fxDynamic'); retu
     const before = clone(pin); before.history = before.history.slice(0, 4)
     const rewritten = F.pinWrite(before, mutated, 5)
     assert.equal(rewritten.refused, null, 'the writer alone cannot tell (it is the same shape as a first pin of version 5)')
-    assert.ok(historyProblems(rewritten.pin, 5, EARLIER).some((p) => /version 5 aggregate/.test(p)), 'MUTANT: the rewrite of version 5 is red in the test, by the literal')
-    console.log('  K12 red: last entry deleted, middle entry deleted, no history, edited aggregate, deleted pin file, version 5 rewritten')
+    assert.ok(historyProblems(rewritten.pin, 5, PINNED).some((p) => /version 5 aggregate/.test(p)), 'MUTANT: the rewrite of version 5 is red in the test, by the literal')
+    const sameVersionRewrite = clone(pin); sameVersionRewrite.history.pop()
+    const reRead = F.pinWrite(sameVersionRewrite, mutated, version)
+    assert.equal(reRead.refused, null, 'the writer alone cannot tell a deleted last entry from a first pin of that version')
+    assert.ok(historyProblems(reRead.pin, version, PINNED).some((p) => new RegExp(`version ${version} aggregate`).test(p)), `MUTANT: the entry of the version in force (${version}) deleted, a changed kernel re-pinned under it, is red by the literal`)
+    console.log('  K12 red: last entry deleted, middle entry deleted, no history, edited aggregate, deleted pin file, version 5 rewritten, version in force rewritten')
   })
 
   await check('K11 MUTANT (planTier own structure): a new reader of a table, a spread, a computed or duplicate key, a non-constant unread value, let, and an as-wrapper are refused; a getPlanLimits read there is counted; export changes the shape entry', () => {
