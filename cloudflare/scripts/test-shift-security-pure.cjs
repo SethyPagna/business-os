@@ -115,7 +115,7 @@ async function main() {
 
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('S-FOREIGN','per_account',8,'Other cashier',1,'Canonical Shop',date(datetime('now','-1 hour'),'+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
+    VALUES ('S-FOREIGN','per_account',8,'Other cashier',1,'Canonical Shop',date(max(datetime('now','-1 hour'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')),'+7 hours'),max(datetime('now','-1 hour'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')),5,1000)`).run()
   const foreignId = sqlite.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-FOREIGN'").get().id
   // O8 -- under the default per_account policy a cashier sees ONLY their own
   // shifts. Each row carries the opening float and the counted drawer, so
@@ -155,7 +155,7 @@ async function main() {
   // test-shift-inactive-branch-pure.cjs covers the reads, close and cancel.
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('S-OFFBRANCH','per_account',7,'Cashier',2,'Inactive',date(datetime('now','-1 hour'),'+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
+    VALUES ('S-OFFBRANCH','per_account',7,'Cashier',2,'Inactive',date(max(datetime('now','-1 hour'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')),'+7 hours'),max(datetime('now','-1 hour'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')),5,1000)`).run()
   const offBranchId = sqlite.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-OFFBRANCH'").get().id
   const offBranchAmend = await call('PATCH', `/${offBranchId}`, { expected_revision: 0, reason: 'out of scope', opening_float_usd: 6 })
   assert.equal(offBranchAmend.status, 409, 'a shift on an inactive branch cannot be amended')

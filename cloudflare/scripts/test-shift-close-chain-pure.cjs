@@ -171,7 +171,7 @@ const round2 = (n) => Math.round(n * 100) / 100
   // Backdate the opening by an hour so the money below can sit INSIDE the
   // half-open window: this test opens and closes within the same second, and
   // a row stamped after closed_at is correctly excluded by the kernel.
-  sqlite.prepare("UPDATE shift_sessions SET opened_at = datetime('now','-60 minutes') WHERE id=?").run(openedShift.id)
+  sqlite.prepare("UPDATE shift_sessions SET opened_at = max(datetime('now','-60 minutes'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')) WHERE id=?").run(openedShift.id)
   const openedAt = sqlite.prepare('SELECT opened_at FROM shift_sessions WHERE id=?').get(openedShift.id).opened_at
   // Offsets computed BY SQLITE from the stored opened_at. Doing the arithmetic
   // in JS would reinterpret SQLite's space-separated stamp as local time and

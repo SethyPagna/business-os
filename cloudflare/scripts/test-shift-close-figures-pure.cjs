@@ -232,7 +232,7 @@ async function routeChecks() {
   const shiftId = opened.body.shift.id
   // Backdated with its business date, so the amendment below stays inside it
   // whatever the hour this runs at.
-  f.sql.prepare("UPDATE shift_sessions SET opened_at = datetime('now','-60 minutes'), business_date = date(datetime('now','-60 minutes'), '+7 hours') WHERE id=?").run(shiftId)
+  f.sql.prepare("UPDATE shift_sessions SET opened_at = max(datetime('now','-60 minutes'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')), business_date = date(max(datetime('now','-60 minutes'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')), '+7 hours') WHERE id=?").run(shiftId)
   const openedAt = f.sql.prepare('SELECT opened_at FROM shift_sessions WHERE id=?').get(shiftId).opened_at
   const at = (minutes) => f.sql.prepare("SELECT datetime(?, '+' || ? || ' minutes') v").get(openedAt, minutes).v
   const sale = f.sql.prepare(`INSERT INTO sales(id,receipt_number,sale_status,branch_id,branch_name,cashier_id,cashier_name,payment_method,payment_details,
@@ -379,7 +379,7 @@ async function dayWithSales(shifts, sales, opening = { usd: 10, khr: 0 }) {
   const opened = await f.call(shifts, '/open', { branch_id: 1, opening_float_usd: opening.usd, opening_float_khr: opening.khr })
   assert.equal(opened.status, 201, JSON.stringify(opened.body))
   const id = opened.body.shift.id
-  f.sql.prepare("UPDATE shift_sessions SET opened_at = datetime('now','-60 minutes'), business_date = date(datetime('now','-60 minutes'), '+7 hours') WHERE id=?").run(id)
+  f.sql.prepare("UPDATE shift_sessions SET opened_at = max(datetime('now','-60 minutes'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')), business_date = date(max(datetime('now','-60 minutes'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')), '+7 hours') WHERE id=?").run(id)
   const openedAt = f.sql.prepare('SELECT opened_at FROM shift_sessions WHERE id=?').get(id).opened_at
   const at = (minutes) => f.sql.prepare("SELECT datetime(?, '+' || ? || ' minutes') v").get(openedAt, minutes).v
   const insert = f.sql.prepare(`INSERT INTO sales(id,receipt_number,sale_status,branch_id,branch_name,cashier_id,cashier_name,payment_method,payment_details,
