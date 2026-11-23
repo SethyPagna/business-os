@@ -6847,6 +6847,7 @@
   "shift_history_all": "Authorized shop history",
   "shift_history_own": "Your recorded shifts",
   "shift_history_empty": "No shifts recorded.",
+  "shift_left_open_title": "Left open from earlier days",
   "shift_search_placeholder": "Search cashier or ID",
   "shift_search_no_match": "No shifts match the search.",
   "shift_no_amendments": "No amendments recorded.",

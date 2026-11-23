@@ -696,6 +696,18 @@ export async function fetchShiftHistory(id: number): Promise<ShiftHistoryResult>
   return result
 }
 
+/** Open shifts left on an earlier day: the Worker answers it only to an administrator or a holder of the late-close grant. */
+export type ForgottenShiftsResult = { shifts: Shift[]; scope: 'forgotten' }
+
+export async function listForgottenShifts(filters: { branchId?: number | null } = {}, options: { fresh?: boolean } = {}): Promise<ForgottenShiftsResult> {
+  const query = queryString({ forgotten: 1, branch_id: filters.branchId })
+  const channel = `shifts:forgotten:${query}`
+  if (options.fresh) cacheInvalidate(channel)
+  const result = await route<ForgottenShiftsResult>(channel, () => apiFetch('GET', `/api/shifts${query}`), null)
+  if (!result) throw new Error('Could not read shifts left open')
+  return result
+}
+
 export type AmendShiftInput = {
   actorId?: number | string
   expectedRevision: number

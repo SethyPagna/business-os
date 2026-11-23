@@ -14,6 +14,7 @@ import { LATE_CLOSE_DEFAULT_TIME, isLateClose, lateCloseDefaultTime, lateCloseIs
 import ShiftSummary from './ShiftSummary.tsx'
 import { shiftCloseTimeRefusalText } from './shiftCloseTimeError.ts'
 import { isAdminControlUser } from '../../utils/permissions.ts'
+import ShiftHeaderRow from './ShiftHeaderRow.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from './ShiftCountFields.tsx'
 import {
   amendShift,
@@ -21,6 +22,7 @@ import {
   carryOverCloseSeedMs,
   closeShiftById,
   fetchShiftHistory,
+  listForgottenShifts,
   listShifts,
   orderShiftRows,
   parseShiftCount,
@@ -45,6 +47,16 @@ type Props = {
   label?: ReactNode
   buttonClassName?: string
   notify?: (message: string, tone?: string) => void
+}
+
+/** "Close forgotten shifts" as the Worker reads it: the stored value exactly true (a user setting over the role's); an administrator always holds it. */
+function grantsForgottenClose(user: { role_code?: unknown; permissions?: unknown; role_permissions?: unknown } | null | undefined): boolean {
+  const asMap = (value: unknown): Record<string, unknown> => {
+    if (typeof value === 'string') { try { return asMap(JSON.parse(value)) } catch { return {} } }
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  }
+  const merged = { ...asMap(user?.role_permissions), ...asMap(user?.permissions) }
+  return !!user && (String(user.role_code || '').trim().toLowerCase() === 'admin' || merged.all === true || merged.shift_close_forgotten === true)
 }
 
 function closingCountInvalid(value: string): boolean {
@@ -234,6 +246,10 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const activeBranchId = branchId === undefined ? fallbackBranch : branchId
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<Shift[]>([])
+  // Open shifts left on an earlier day, read once per opening and only for who may close them (an administrator, or the grant).
+  const holdsForgottenGrant = grantsForgottenClose(app.user)
+  const [forgotten, setForgotten] = useState<Shift[]>([])
+  const [fromForgotten, setFromForgotten] = useState(false)
   const [scope, setScope] = useState<'all' | 'own'>('all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -353,6 +369,15 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     return () => { window.removeEventListener(SHIFT_STATE_CHANGED_EVENT, refresh); listRequest.current += 1; detailsRequest.current += 1 }
   }, [load, open])
 
+  useEffect(() => {
+    if (!open || !holdsForgottenGrant) { setForgotten([]); return }
+    let current = true
+    listForgottenShifts({ branchId: activeBranchId }, { fresh: true })
+      .then((result) => { if (current) setForgotten(result.shifts) })
+      .catch(() => { if (current) setForgotten([]) })
+    return () => { current = false }
+  }, [open, holdsForgottenGrant, activeBranchId])
+
   const resetAction = () => {
     setPending(false)
     setAction(null)
@@ -363,7 +388,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     setCancelReason('')
   }
 
-  const openDetails = async (shift: Shift) => {
+  const openDetails = async (shift: Shift, closeForm = false) => {
     if (scopeRef.current !== listScope) return
     const requestId = ++detailsRequest.current
     setSelected(shift)
@@ -390,7 +415,15 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
           if (saved.action === 'reopen') setReopen({ reason: value('reason'), openingNote: value('opening_note') })
           if (saved.action === 'cancel') setCancelReason(value('reason'))
           if (saved.action === 'edit') setEdit({ expectedRevision: Number(saved.body.expected_revision), reason: value('reason'), openedAt: 'opened_at' in saved.body ? dateTimeLocal(value('opened_at')) : dateTimeLocal(result.shift.opened_at), closedAt: 'closed_at' in saved.body ? dateTimeLocal(value('closed_at')) : dateTimeLocal(result.shift.closed_at), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), openingNote: value('opening_note'), closingNote: value('closing_note') })
-        } else setPending(false)
+        } else {
+          setPending(false)
+          if (closeForm && result.shift.capabilities.can_close && !result.shift.closed_at) {
+            const seed = blankClose(result.shift)
+            setCloseBase(seed)
+            setClose(seed)
+            setAction('close')
+          }
+        }
       }
     } catch (cause) {
       if (requestId === detailsRequest.current && scopeRef.current === listScope) setDetailsError(cause instanceof Error ? cause.message : t('shift_history_failed'))
@@ -502,6 +535,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
       })
       if (!isCurrent()) return
       if (result.shift) replaceRow(result.shift)
+      setForgotten((current) => current.filter((row) => row.id !== selected.id))
       resetAction()
       refreshMountedShiftState()
       sendNotice?.(t('shift_close_saved'), 'success')
@@ -578,6 +612,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         : editRielInvalid ? t(shiftCountBlockerKey('riel_cash'))
         : !edit.reason.trim() ? t('shift_reason_required')
           : null
+  // A shift reached only through "Left open from earlier days" and opened by someone else is closed here, never amended.
+  const othersForgottenRow = fromForgotten && !!selected && String(selected.user_id) !== String(app.user?.id)
   const closeIsLate = lateRow(selected)
   const closeReason = action !== 'close' ? null
     : closeIsLate && lateReason(close.reason) == null ? t('shift_late_reason_blank')
@@ -623,7 +659,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         >
           {selected ? (
             <div className="space-y-4">
-              <button type="button" className="btn-secondary min-h-11 px-3 text-xs" onClick={() => { detailsRequest.current += 1; setSelected(null); resetAction() }} disabled={saving || dirty}>
+              <button type="button" className="btn-secondary min-h-11 px-3 text-xs" onClick={() => { detailsRequest.current += 1; setSelected(null); setFromForgotten(false); resetAction() }} disabled={saving || dirty}>
                 <ArrowLeft className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />{t('back')}
               </button>
               <ShiftSummary shift={selected} detail closedLate={!!selected.closed_at && !detailsLoading && !detailsError && lateCloseReview(amendments.filter((row) => row.shift_session_id === selected.id)) != null} />
@@ -633,7 +669,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
               {!detailsLoading && !detailsError && (pending || selected.capabilities.can_edit || selected.capabilities.can_close || selected.capabilities.can_reopen || selected.capabilities.can_cancel) ? (
                 <section className="space-y-3" aria-label={t('shift_actions')}>
                   <div className="flex flex-wrap gap-2">
-                    {selected.capabilities.can_edit ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'edit'} onClick={() => { if (action === 'edit') resetAction(); else { setEdit(editDraft(selected)); setAction('edit') } }}><Pencil className="mr-1 inline h-3.5 w-3.5" />{t('shift_action_edit')}</button> : null}
+                    {selected.capabilities.can_edit ? (othersForgottenRow ? null : <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'edit'} onClick={() => { if (action === 'edit') resetAction(); else { setEdit(editDraft(selected)); setAction('edit') } }}><Pencil className="mr-1 inline h-3.5 w-3.5" />{t('shift_action_edit')}</button>) : null}
                     {selected.capabilities.can_close ? <button type="button" className="min-h-11 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50" disabled={saving || pending || dirty && action !== 'close'} onClick={() => { if (action === 'close') resetAction(); else { const seed = blankClose(selected); setCloseBase(seed); setClose(seed); setAction('close') } }}>{t('shift_action_close')}</button> : null}
                     {selected.capabilities.can_reopen ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'reopen'} onClick={() => { if (action === 'reopen') resetAction(); else { setReopen(blankReopen()); setAction('reopen') } }}>{t('shift_action_reopen')}</button> : null}
                     {selected.capabilities.can_cancel ? <button type="button" className="btn-danger min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'cancel'} onClick={() => { if (action === 'cancel') resetAction(); else { setCancelReason(''); setAction('cancel') } }}>{t('shift_action_cancel_shift')}</button> : null}
@@ -746,6 +782,16 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                 <SearchInput id="shift-history-search" value={search} onChange={setSearch} maxLength={SHIFT_SEARCH_MAX_LENGTH}
                   placeholder={t('shift_search_placeholder')} ariaLabel={t('shift_search_placeholder')} />
               </div>
+              {forgotten.length > 0 ? (
+                <section aria-label={t('shift_left_open_title')} className="space-y-1">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t('shift_left_open_title')}</h3>
+                  {forgotten.map((shift) => (
+                    <button key={shift.id} type="button" onClick={() => { setFromForgotten(true); void openDetails(shift, true) }} className="block w-full rounded-lg border border-amber-200 bg-amber-50/60 p-2 text-left outline-none ring-blue-500 focus-visible:ring-2 dark:border-amber-900 dark:bg-amber-950/20">
+                      <ShiftHeaderRow shift={shift} />
+                    </button>
+                  ))}
+                </section>
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{scope === 'all' ? t('shift_history_all') : t('shift_history_own')}</p>
                 <button type="button" onClick={() => void load(true)} className="btn-secondary min-h-11 shrink-0 px-3 text-xs" disabled={loading}><RotateCcw className="mr-1 inline h-3.5 w-3.5" />{t('refresh')}</button>
@@ -757,7 +803,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
               {loading || searchPending ? <p role="status" className="py-6 text-center text-sm text-gray-500">{search.trim() ? t('searching') : t('shift_current_loading')}</p>
                 : error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</p>
                 : rows.length === 0 ? <p className="rounded-lg border border-dashed p-5 text-center text-sm text-gray-500">{query ? t('shift_search_no_match') : t('shift_history_empty')}</p>
-                : <div className="max-h-[min(65vh,38rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]">{rows.map((shift) => <button key={shift.id} type="button" onClick={() => void openDetails(shift)} className="block w-full rounded-xl text-left outline-none ring-blue-500 transition hover:bg-blue-50 focus-visible:ring-2 dark:hover:bg-blue-950/20"><ShiftSummary shift={shift} /></button>)}</div>}
+                : <div className="max-h-[min(65vh,38rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]">{rows.map((shift) => <button key={shift.id} type="button" onClick={() => { setFromForgotten(false); void openDetails(shift) }} className="block w-full rounded-xl text-left outline-none ring-blue-500 transition hover:bg-blue-50 focus-visible:ring-2 dark:hover:bg-blue-950/20"><ShiftSummary shift={shift} /></button>)}</div>}
               <div className="min-h-11">
               {!loading && !searchPending && !error && pageInfo.total != null ? pager : null}
               </div>
