@@ -143,7 +143,7 @@ for (const [name, additional] of [
 ] as const) {
   const facts = await summaryFacts(closedRow(additional))
   assert.deepEqual(facts.map(([label]) => label), [
-    'shift_code', 'shift_opened_at', 'shift_closed_at', 'shift_duration',
+    'shift_opened_at', 'shift_closed_at', 'shift_duration',
     'shift_opened_with', 'shift_recon_additional_cash', 'shift_counted_close',
   ], `${name}: the summary reads Opened with -> Additional change used -> Counted at close\n${JSON.stringify(facts)}`)
   const value = Object.fromEntries(facts)

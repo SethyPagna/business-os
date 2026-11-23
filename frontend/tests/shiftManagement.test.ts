@@ -160,11 +160,12 @@ ok(/selected \? \(/.test(modal) && /setSelected\(null\)/.test(modal), 'row click
 ok(/max-h-\[min\(65vh,38rem\)\][^"\n]*overflow-y-auto/.test(modal), 'the history list is compact and independently scrollable')
 ok(/orderShiftRows\(result\.shifts\)/.test(modal), 'the popup keeps unresolved historical open shifts ahead of closed rows')
 
-const dateIndex = summary.indexOf('fmtDateOnly(shift.business_date)')
-const idIndex = summary.indexOf('{shift.shift_code}')
+const headerRow = read('src/components/shifts/ShiftHeaderRow.tsx')
+const dateIndex = headerRow.indexOf('fmtDateOnly(shift.business_date)')
+const idIndex = headerRow.indexOf('{shift.shift_code}')
 ok(dateIndex >= 0 && idIndex > dateIndex, 'every row leads with date and appends the compact shift id inline')
-for (const token of ['fmtClock24(shift.opened_at)', "fmtClock24(shift.closed_at)", 'shift.user_name', 'opening_float_usd', 'opening_float_khr', 'closing_counted_usd', 'closing_counted_khr']) {
-  ok(summary.includes(token), `default row renders ${token}`)
+for (const token of ['shiftCellTime(shift.opened_at', 'shiftCellTime(shift.closed_at', 'shift.user_name','opening_float_usd', 'opening_float_khr', 'closing_counted_usd', 'closing_counted_khr']) {
+  ok((summary + headerRow).includes(token), `default row renders ${token}`)
 }
 ok(/<ShiftCashBreakdown/.test(summary) && /shift\.reconciliation/.test(summary), 'detail renders the server reconciliation, never a locally recomputed difference')
 ok(!/shiftCashDifference/.test(summary), 'the summary no longer subtracts the opening float to invent a difference')
@@ -172,7 +173,7 @@ for (const key of ['shift_recon_opening', 'shift_recon_additional_cash', 'shift_
   ok((breakdown + comparisonModel).includes(`'${key}'`), `the breakdown carries the ${key} row`)
 }
 ok(/shift_difference_hint/.test(breakdown) && /shift_recon_review/.test(breakdown), 'the breakdown explains expected and surfaces the server review flag')
-ok(/detail \? \(/.test(summary) && /shift_duration/.test(summary) && /shift_cash_breakdown/.test(summary), 'duration and cash breakdown stay in detail rather than the default row')
+ok(/detail \? \(/.test(summary) && /duration\(shift, t\)/.test(summary) && /shift_cash_breakdown/.test(summary), 'duration and cash breakdown stay in detail rather than the default row')
 
 for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) {
   ok(modal.includes(`selected.capabilities.${capability}`), `detail action visibility comes from ${capability}`)

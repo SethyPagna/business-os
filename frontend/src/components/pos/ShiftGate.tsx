@@ -13,6 +13,7 @@ import { LATE_CLOSE_DEFAULT_TIME, LATE_REASON_MAX, lateCloseDefaultTime, lateClo
 import { shiftCountIssue, shiftRielCountInvalid } from '../shifts/shiftCountRules.ts'
 import { TimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
+import ShiftHeaderRow from '../shifts/ShiftHeaderRow.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional } from '../shifts/shiftReportModel.ts'
 import { retiredBranchNotice } from '../shifts/retiredBranchNotice.ts'
@@ -479,14 +480,9 @@ function CarryOverIntro({ shift, closeBefore }: { shift: Shift; closeBefore?: st
       <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
         {t('shift_previous_open_hint')}
       </p>
+      <ShiftHeaderRow shift={shift} />
       <ShiftFactStrip facts={[
-        !!shift.shift_code && { label: t('shift_code'), value: shift.shift_code },
-        // N7: a drawer left open on a branch that has since been retired is
-        // offered from whichever branch this till now runs, so name the
-        // branch it belongs to (the label stored at open).
-        shift.branch_active === false && { label: t('branch'), value: `${shift.branch_name || '—'} · ${t('shift_branch_inactive')}` },
         { label: t('shift_opened_at'), value: fmtDateTime24(shift.opened_at) },
-        !!shift.user_name && { label: t('shift_opened_by'), value: shift.user_name },
         { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },
         !!closeBefore && { label: t('shift_previous_open_close_before'), value: fmtDateTime24(closeBefore) },
       ]}
@@ -1006,8 +1002,9 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
               // under, after the close as the times it WAS. The operator is
               // reconciling against the opening float, and making them
               // remember it invites a wrong count.
+              <>
+              <ShiftHeaderRow shift={shift} />
               <ShiftFactStrip facts={[
-                !!shift.shift_code && { label: t('shift_code'), value: shift.shift_code },
                 { label: t('shift_opened_at'), value: fmtDateTime24(shift.opened_at) },
                 // Before the close this is the clock, labelled as the moment
                 // about to be stamped; after it, the moment that was.
@@ -1028,6 +1025,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
               />
+              </>
             )}
 
             {/* What the drawer SHOULD hold, from the server's one

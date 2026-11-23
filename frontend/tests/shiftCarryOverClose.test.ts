@@ -260,13 +260,13 @@ const pins: Pin[] = [
       "!!closeBefore && { label: t('shift_previous_open_close_before'), value: fmtDateTime24(closeBefore) },", ''),
   },
   {
-    label: 'and so is the account that opened the row -- the username, as every history surface prints it',
+    label: 'and so is the account that opened the row -- the username, in the one header row every shift header shares',
     holds: ({ gate: g }) => {
       const intro = between(g, 'function CarryOverIntro', 'function CarryOverCloseFields')
-      return /\{ label: t\('shift_opened_by'\), value: shift\.user_name \}/.test(intro)
+      return /<ShiftHeaderRow shift=\{shift\} \/>/.test(intro)
     },
     mutate: (source) => editGate(source,
-      "!!shift.user_name && { label: t('shift_opened_by'), value: shift.user_name },", ''),
+      '<ShiftHeaderRow shift={shift} />', ''),
   },
 
   // ---- 6. the retry-replay contract, on this form too --------------------
@@ -391,7 +391,7 @@ for (const key of ['shift_previous_open_title', 'shift_previous_open_hint', 'shi
   assert.ok(typeof km[key] === 'string' && km[key].trim().length > 0, `km.json is missing ${key}`)
   assert.notEqual(km[key], en[key], `km.json falls back to the English string for ${key}`)
   assert.match(km[key], /[ក-៿]/, `km.json carries no Khmer script for ${key}`)
-  assert.match(gate, new RegExp(`t\\('${key}'\\)`), `${key} is in the packs but nothing renders it`)
+  assert.match(gate + read('src/components/shifts/ShiftHeaderRow.tsx'), new RegExp(`t\\('${key}'\\)`), `${key} is in the packs but nothing renders it`)
   checks += 5
   console.log(`  ok - ${key} is written in both packs and rendered`)
 }
@@ -492,6 +492,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: (...args: any[]) => notices.push(args), user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
     if (name.includes('formatters')) return { fmtDate: String, fmtDateTime24: String, parseServerTimestampMs: Date.parse }
     if (name.includes('DateEntryInput')) return { TimeEntryInput: TimeMarker }
+    if (name.includes('ShiftHeaderRow')) return { default: function ShiftHeaderRow() { return null } }
     if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }
     if (name.includes('shiftReportModel')) return {
       shiftCountedPairText: (usd: unknown, khr: unknown) => `${usd}|${khr}`,
@@ -546,6 +547,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     pairs: found.filter((node) => node.type === PairMarker).map((node) => node.props),
     // The fact strip CarryOverIntro renders, flattened to label -> value. The
     // component filters nothing out itself; falsy entries are its own "omit".
+    header: found.find((node) => typeof node.type === 'function' && node.type.name === 'ShiftHeaderRow')?.props.shift as { user_name?: string } | undefined,
     facts: Object.fromEntries(found
       .filter((node) => typeof node.type === 'function' && node.type.name === 'ShiftFactStrip')
       .flatMap((node) => (node.props.facts as any[]) || [])
@@ -585,7 +587,7 @@ try {
   console.log('  ok - executed: the default never precedes the row\'s own opening')
 
   // The strip the cashier reads the picker against.
-  assert.equal(fresh.facts.shift_opened_by, 'sopheak', 'the strip names the account that opened the row')
+  assert.equal(fresh.header?.user_name, 'sopheak', 'the header row above the strip names the account that opened the row')
   assert.equal(fresh.facts.shift_previous_open_close_before, NEXT_STALE_OPENED_AT,
     'and the bound the close must precede, formatted by the shop\'s own date-time formatter')
   assert.equal(fresh.facts.shift_opened_at, EARLIER_OPENED_AT, 'beside the row\'s own opening, unchanged')

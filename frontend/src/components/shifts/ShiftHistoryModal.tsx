@@ -626,7 +626,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
               <button type="button" className="btn-secondary min-h-11 px-3 text-xs" onClick={() => { detailsRequest.current += 1; setSelected(null); resetAction() }} disabled={saving || dirty}>
                 <ArrowLeft className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />{t('back')}
               </button>
-              <ShiftSummary shift={selected} detail />
+              <ShiftSummary shift={selected} detail closedLate={!!selected.closed_at && !detailsLoading && !detailsError && lateCloseReview(amendments.filter((row) => row.shift_session_id === selected.id)) != null} />
               {detailsLoading ? <p role="status" className="text-sm text-gray-500">{t('shift_current_loading')}</p> : null}
               {detailsError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300"><span>{detailsError}</span><button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving} onClick={() => { if (selected) void openDetails(selected) }}>{t('refresh')}</button></div> : null}
 
