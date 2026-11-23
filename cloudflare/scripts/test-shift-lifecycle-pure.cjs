@@ -466,12 +466,13 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at)
     VALUES ('HIST-OPEN','per_account',30,'Historic',1,'Shop','2026-02-01','2026-02-01T01:00:00.000Z'),
-      ('HIST-NEXT','per_account',30,'Historic',1,'Shop','2026-02-02','2026-02-02T01:00:00.000Z')`).run()
+      ('HIST-NEXT','per_account',30,'Historic',1,'Shop','2026-02-02','2026-02-01T10:00:00.000Z')`).run()
   const historic = sqlite.prepare("SELECT id,revision FROM shift_sessions WHERE shift_code='HIST-OPEN'").get()
-  assert.equal((await call('POST', `/${historic.id}/close`, {
-    expected_revision: historic.revision, reason: 'Forgot to close', closed_at: '2026-02-02T02:00:00.000Z',
-    closing_counted_usd: 1, closing_counted_khr: 1,
-  })).status, 409, 'historic close cannot run into the next existing shift (it is outside the day of the shift it closes)')
+  const overlapping = await call('POST', `/${historic.id}/close`, {
+    expected_revision: historic.revision, reason: 'Forgot to close', closed_at: '2026-02-01T12:00:00.000Z',
+  })
+  assert.equal(overlapping.status, 409, 'historic close cannot run into the next existing shift')
+  assert.equal((await overlapping.json()).code, 'shift_overlaps_next_segment', 'the refusal is the overlap, not the day bound (the time is inside the shift day)')
 
   // Real route + transactional SQLite: a lost ack is simulated by ignoring
   // the first success, reopening elsewhere, then replaying the frozen body.

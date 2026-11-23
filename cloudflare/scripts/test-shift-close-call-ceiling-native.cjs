@@ -165,7 +165,7 @@ async function seededDay(shifts, { shopWide = false, hours = 8, telegramOn = tru
   await Promise.all(f.background); f.background.length = 0; openTelegram.restore()
   assert.equal(opened.status, 201, JSON.stringify(opened.body))
   const id = opened.body.shift.id
-  f.sql.prepare("UPDATE shift_sessions SET opened_at = ?, business_date = ? WHERE id=?").run(OPENED.toISOString(), new RealDate(FIXED_NOW + 7 * 3600e3).toISOString().slice(0, 10), id)
+  f.sql.prepare("UPDATE shift_sessions SET opened_at = ?, business_date = ? WHERE id=?").run(OPENED.toISOString(), new RealDate(OPENED.getTime() + 7 * 3600e3).toISOString().slice(0, 10), id)
   const sale = f.sql.prepare(`INSERT INTO sales(id,receipt_number,sale_status,branch_id,branch_name,cashier_id,cashier_name,payment_method,payment_details,
       payment_currency,exchange_rate,amount_paid_usd,amount_paid_khr,change_usd,change_khr,total_usd,total_khr,delivery_actual_cost_usd,created_at,updated_at,payments_version)
     VALUES (?,?,'completed',1,'Shop',?,?,?,?,?,4100,?,?,0,0,?,?,?,?,'v1',?)`)
@@ -199,7 +199,7 @@ async function runClose(load, { shopWide = false, requestId = 'req-close-0000000
   try {
     f.log.length = 0; f.calls = 0; f.refuseAfter = refuse
     close = await withFixedClock(async () => {
-      const response = await f.call(shifts, `/${id}/close`, { client_request_id: requestId, expected_revision: revision, closing_counted_usd: 100, closing_counted_khr: 41000 })
+      const response = await f.call(shifts, `/${id}/close`, { client_request_id: requestId, expected_revision: revision, closing_counted_usd: 100, closing_counted_khr: 41000, reason: 'Forgot to close' })
       await Promise.all(f.background)
       return response
     })
