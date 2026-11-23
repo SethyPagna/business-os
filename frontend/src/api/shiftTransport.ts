@@ -222,6 +222,8 @@ export type Shift = {
   closing_counted_usd: number | null
   closing_counted_khr: number | null
   closing_note: string | null
+  /** GET /current only: this open earlier-day shift can be closed late (a reason and a day-bounded time). */
+  late_close?: boolean
   closed_by_user_id: number | null
   closed_by_user_name: string | null
   revision: number
@@ -762,6 +764,8 @@ export type CloseShiftByIdInput = {
   additionalCashUsd?: number | null
   additionalCashKhr?: number | null
   closingNote?: string | null
+  /** The late-close reason. Left out for a same-day close, so that body is unchanged. */
+  reason?: string | null
 }
 
 export type CloseShiftByIdResult = {
@@ -784,6 +788,7 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
       additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)'),
       additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional change used (KHR)'),
       closing_note: input.closingNote ?? null,
+      ...(input.reason?.trim() ? { reason: input.reason.trim() } : {}),
     }, input.actorId),
     null,
     true,
