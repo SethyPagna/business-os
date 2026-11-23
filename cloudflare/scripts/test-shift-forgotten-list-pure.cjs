@@ -3,7 +3,8 @@
 //   - statements: ONE, whatever the number of rows: each row's next-segment opening is a correlated scalar subquery inside the list statement
 //     (NEXT_OPENING_SQL, the rule readAdjacentShift/intervalError use), so 1, 3 and the maximum number of rows cost the same; with a
 //     branch filter one more (branchExists). It reads no shift policy, no setting and no sale.
-//   - rows: the plan scans the PARTIAL index idx_shift_sessions_open (open rows only), so on 2,000 stored shifts it reads the open rows
+//   - rows: the plan scans the PARTIAL index idx_shift_sessions_open (WHERE closed_at IS NULL: the open rows AND the rows cancelled while open, because a cancel never sets
+//     closed_at; the index cannot tell them apart, so cancelled_at IS NULL is a row filter), so on 2,000 stored shifts it reads those rows
 //     and nothing else; a normal day is a handful (asserted at most 50).
 //   - the normal paged list statement keeps its registered fingerprint, and this statement's fingerprint is the one registered in
 //     scripts/read-budget/fingerprints/api_shifts.json under the shape shifts-forgotten.
@@ -196,13 +197,15 @@ async function sameDayAndRowCount() {
   const c1 = w.open(w.yesterday, { shift_code: 'S-C1', user_id: 9, user_name: 'boss', opened_at: w.yesterday + 'T12:00:00.000Z' })
   const s1 = w.open(w.yesterday, { shift_code: 'S-S1', scope_mode: 'shop_wide', user_id: 7, opened_at: w.yesterday + 'T11:00:00.000Z' })
   w.open(w.yesterday, { shift_code: 'S-S2', parent_shift_id: s1.id, scope_mode: 'shop_wide', user_id: 8, user_name: 'colleague', opened_at: w.yesterday + 'T11:00:00.000Z', closed_at: w.yesterday + 'T12:30:00.000Z', closed_by_user_id: 1, closed_by_user_name: 'x' })
+  const d1 = w.open(w.yesterday, { shift_code: 'S-D1', user_id: 40, user_name: 'onlyCancelledLater', opened_at: w.yesterday + 'T13:00:00.000Z' })
+  w.open(w.yesterday, { shift_code: 'S-D2', parent_shift_id: d1.id, user_id: 40, user_name: 'onlyCancelledLater', opened_at: w.yesterday + 'T16:00:00.000Z', cancelled_at: w.yesterday + 'T16:30:00.000Z', cancelled_by_user_id: 1, cancelled_by_user_name: 'x', cancel_reason: 'r' })
   const n1 = w.open(w.yesterday, { shift_code: 'S-N1', user_id: 30, user_name: 'noBranch', branch_id: null, branch_name: null, opened_at: w.yesterday + 'T13:00:00.000Z' })
   w.open(w.yesterday, { shift_code: 'S-N2', parent_shift_id: n1.id, user_id: 30, user_name: 'noBranch', branch_id: null, branch_name: null, opened_at: w.yesterday + 'T13:00:00.000Z', closed_at: w.yesterday + 'T13:20:00.000Z', closed_by_user_id: 1, closed_by_user_name: 'x' })
   w.h.as(HOLDER)
   const res = await w.h.json('GET', '/?forgotten=1')
   assert.equal(res.status, 200, JSON.stringify(res.body))
   const byCode = Object.fromEntries(res.body.shifts.map((shift) => [shift.shift_code, shift.close_before]))
-  const expected = [[a1, w.yesterday + 'T14:00:00.000Z'], [b1, null], [c1, null], [s1, w.yesterday + 'T11:00:00.000Z'], [n1, w.yesterday + 'T13:00:00.000Z']]
+  const expected = [[a1, w.yesterday + 'T14:00:00.000Z'], [b1, null], [c1, null], [s1, w.yesterday + 'T11:00:00.000Z'], [d1, null], [n1, w.yesterday + 'T13:00:00.000Z']]
   for (const [row, value] of expected) {
     assert.equal(separateSeek(w.sqlite, row), value, 'the separate seek for ' + row.shift_code)
     assert.equal(byCode[row.shift_code], value, 'the list value equals the separate seek for ' + row.shift_code)
@@ -243,9 +246,13 @@ async function main() {
   assert.ok(plan.some((detail) => /SEARCH nx USING INDEX idx_shift_sessions_scope_branch_opened .*scope_mode=/.test(detail)), 'a shop-wide next opening is a seek on the 0306 shop index:\n' + plan.join('\n'))
   assert.ok(plan.some((detail) => /SEARCH nx USING INDEX idx_shift_sessions_scope_user_branch_opened .*scope_mode=/.test(detail)), 'a per-account next opening is a seek on the 0306 user index:\n' + plan.join('\n'))
   assert.ok(!plan.some((detail) => /nx USING (COVERING )?INDEX idx_shift_sessions_open/.test(detail)) && !plan.some((detail) => /SCAN nx/.test(detail)), 'the subquery never scans')
+  w.open(w.yesterday, { user_id: 50, user_name: 'cancelledWhileOpen', shift_code: 'S-CANCELLED-OPEN', cancelled_at: w.yesterday + 'T15:00:00.000Z', cancelled_by_user_id: 1, cancelled_by_user_name: 'x', cancel_reason: 'r' })
   const openRows = w.sqlite.prepare('SELECT COUNT(*) AS n FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL').get().n
-  assert.equal(openRows, 4, 'the partial index holds only open rows: that is every row the list scans')
-  assert.ok(openRows <= 50, 'a normal day reads at most 50 rows')
+  const indexRows = w.sqlite.prepare('SELECT COUNT(*) AS n FROM shift_sessions WHERE closed_at IS NULL').get().n
+  assert.equal(openRows, 4)
+  assert.equal(indexRows, 5, 'the partial index holds the open rows AND the row cancelled while open (a cancel never sets closed_at): the list scans both and keeps only the open ones')
+  assert.equal((await w.h.json('GET', '/?forgotten=1')).body.shifts.length, 3, 'the row cancelled while open is scanned and not listed')
+  assert.ok(indexRows <= 50, 'a normal day reads at most 50 rows')
 
   assert.match(listSql, /closed_at IS NULL AND cancelled_at IS NULL AND business_date < @today/, 'only open rows of earlier days')
   const route = fs.readFileSync(path.join(root, 'src', 'routes', 'shifts.ts'), 'utf8')
