@@ -112,7 +112,7 @@ function harness(sqlite) {
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/shiftReconciliation': shiftReconciliation,
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000 }) },
+    '../lib/planTier': { getPlanLimits: () => ({ d1QueriesPerInvocation: 1000, forgottenShiftListMax: 50 }) },
     '../lib/acquisitionCostAccess': { holdsCostViewGrant: () => true },
     '../lib/telegram': { scheduleTelegramShiftOverview: async () => 'unavailable', scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async (_env, id) => { state.reports.push(id); return true }, sendTelegramStaleShiftAlert: async () => true },
   }, SHIFTS_SOURCE)
@@ -404,6 +404,119 @@ async function main() {
     assert.deepEqual(lateWithNext, same, 'a late close with today registered sends exactly the statements of a same-day close')
     assert.deepEqual(lateAlone, same, 'and so does a late close with nothing after it')
     assert.deepEqual(same, SAME_DAY_AT_27CCAC698, 'and a same-day close sends what it sent before this slice')
+  })
+
+  await check('15. a holder closes another cashier\'s open earlier-day row but cannot amend it: PATCH is 404 as at 27ccac698 and writes nothing', async () => {
+    const w = world(); const late = w.dayOne()
+    const amendBody = { expected_revision: late.revision, reason: 'fix float', opening_float_usd: 999 }
+    w.h.as(COLLEAGUE)
+    assert.equal((await w.h.json('PATCH', `/${late.id}`, amendBody)).status, 404, 'a colleague without the grant: hidden')
+    w.h.as(HOLDER)
+    const patch = await w.h.json('PATCH', `/${late.id}`, amendBody)
+    assert.equal(patch.status, 404, JSON.stringify(patch.body))
+    assert.equal(w.stored(late.id).opening_float_usd, 20, 'nothing was written')
+    assert.equal(w.stored(late.id).revision, late.revision)
+    assert.equal(w.sqlite.prepare('SELECT COUNT(*) AS n FROM shift_session_amendments').get().n, 0)
+    const keyed = await w.h.json('PATCH', `/${late.id}`, { ...amendBody, client_request_id: 'holder-amend-request-0001' })
+    assert.equal(keyed.status, 404, 'the same through a request identity (the replay middleware)')
+    assert.equal(w.stored(late.id).opening_float_usd, 20)
+    const history = await w.h.json('GET', `/${late.id}/history`)
+    assert.equal(history.status, 200, 'the close form still reads the row\'s history')
+    const closed = await close(w, late, { reason: REASON })
+    assert.equal(closed.status, 200, JSON.stringify(closed.body))
+    assert.equal(w.stored(late.id).closed_by_user_name, 'holder')
+  })
+
+  await check('16. a holder cannot see, read or close another cashier\'s closed or cancelled earlier-day row, or a same-day open row (404, nothing written)', async () => {
+    const attempt = async (w, row) => {
+      w.h.as(HOLDER)
+      const before = JSON.stringify(w.stored(row.id))
+      const outcomes = {
+        history: (await w.h.json('GET', `/${row.id}/history`)).status,
+        patch: (await w.h.json('PATCH', `/${row.id}`, { expected_revision: row.revision, reason: 'x', opening_float_usd: 5 })).status,
+        close: (await close(w, row, { reason: REASON })).status,
+        keyedClose: (await close(w, row, { reason: REASON, client_request_id: 'holder-hidden-close-0001' })).status,
+      }
+      for (const [name, status] of Object.entries(outcomes)) assert.equal(status, 404, `${name}: ${status}`)
+      assert.equal(JSON.stringify(w.stored(row.id)), before, 'nothing was written')
+    }
+    const closedRow = world(); await attempt(closedRow, closedRow.dayOne({ closed_at: `${closedRow.yesterday}T15:00:00.000Z`, closed_by_user_id: 7, closed_by_user_name: 'cashier' }))
+    const cancelledRow = world(); await attempt(cancelledRow, cancelledRow.dayOne({ cancelled_at: `${cancelledRow.yesterday}T15:00:00.000Z`, cancelled_by_user_id: 9, cancelled_by_user_name: 'boss', cancel_reason: 'mistake' }))
+    const sameDay = world(); await attempt(sameDay, sameDay.dayTwo())
+  })
+
+  await check('17. a holder\'s retry of its own committed late close returns the stored result; another account\'s retry of that request id is 404', async () => {
+    const id = 'holder-late-close-retry-0001'
+    const w = world(); const late = w.dayOne()
+    w.h.as(HOLDER)
+    const first = await close(w, late, { reason: REASON, client_request_id: id })
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    const retry = await close(w, late, { reason: REASON, client_request_id: id })
+    assert.equal(retry.status, 200, JSON.stringify(retry.body))
+    assert.equal(retry.body.mutation_committed, true)
+    assert.equal(retry.body.already_closed, true)
+    assert.equal(retry.body.shift.id, late.id)
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='shift.close'").get().n, 1, 'the retry wrote nothing')
+    const other = user(13, 'otherholder', { pos: true, shift_close_forgotten: true })
+    for (const who of [other, COLLEAGUE, STRING_HOLDER]) {
+      w.h.as(who)
+      const stranger = await close(w, late, { reason: REASON, client_request_id: id })
+      assert.equal(stranger.status, 404, `${who.name}: ${JSON.stringify(stranger.body)}`)
+      assert.equal(stranger.body.mutation_committed, undefined, 'the stored result is not handed to another account')
+    }
+    w.h.as(HOLDER)
+    const changed = await close(w, late, { reason: 'a different reason', client_request_id: id })
+    assert.equal(changed.status, 409, 'the same request id with different values is still refused')
+  })
+
+  await check('18. a late close skips no next-segment check: a segment that opened later the same day bounds it (409 shift_overlaps_next_segment)', async () => {
+    const w = world(); const late = w.dayOne()
+    w.open(w.today, { opened_at: `${w.yesterday}T15:00:00.000Z`, shift_code: 'S-LATE-NEXT' })
+    const refused = await close(w, late, { reason: REASON })
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'shift_overlaps_next_segment')
+    assert.equal(w.stored(late.id).closed_at, null)
+    const ok = await close(w, late, { reason: REASON, closed_at: `${w.yesterday}T14:30:00.000Z` })
+    assert.equal(ok.status, 200, JSON.stringify(ok.body))
+  })
+
+  await check('19. the refusal sentence names the opener, an administrator and the allowed, not a manager', async () => {
+    const w = world(); w.sqlite.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('shift_scope_mode','shop_wide')").run()
+    const late = w.dayOne({ scope_mode: 'shop_wide' })
+    w.h.as(COLLEAGUE)
+    for (const body of [{ reason: REASON }, { reason: REASON, client_request_id: 'wording-late-close-0001' }]) {
+      const res = await close(w, late, body)
+      assert.equal(res.status, 403)
+      assert.equal(res.body.error, 'Only the cashier who opened it, an administrator, or someone allowed can close it.')
+    }
+  })
+
+  await check('20. the forgotten list: a holder and an administrator get the open earlier-day rows; everyone else is refused; the normal list is unchanged', async () => {
+    const w = world(); const mine = w.dayOne(); const theirs = w.open(w.yesterday, { user_id: 8, user_name: 'colleague', shift_code: 'S-LATE-THEIRS' })
+    w.open(w.yesterday, { user_id: 20, user_name: 'done', shift_code: 'S-LATE-DONE', closed_at: `${w.yesterday}T15:00:00.000Z` })
+    w.open(w.yesterday, { user_id: 21, user_name: 'gone', shift_code: 'S-LATE-GONE', cancelled_at: `${w.yesterday}T15:00:00.000Z`, cancelled_by_user_id: 9, cancelled_by_user_name: 'boss', cancel_reason: 'mistake' })
+    w.dayTwo({ user_id: 22, user_name: 'today', shift_code: 'S-LATE-TODAY' })
+    for (const who of [HOLDER, ADMIN, ROLE_HOLDER]) {
+      w.h.as(who)
+      const res = await w.h.json('GET', '/?forgotten=1')
+      assert.equal(res.status, 200, `${who.name}: ${JSON.stringify(res.body)}`)
+      assert.deepEqual(res.body.shifts.map((shift) => shift.id).sort(), [mine.id, theirs.id].sort(), `${who.name}: only open rows of earlier days`)
+      assert.equal(res.body.shifts[0].capabilities.can_close, true)
+    }
+    for (const who of [COLLEAGUE, STRING_HOLDER, CASHIER]) {
+      w.h.as(who)
+      const res = await w.h.json('GET', '/?forgotten=1')
+      assert.equal(res.status, 403, who.name)
+      assert.equal(res.body.shifts, undefined)
+    }
+    w.h.as(HOLDER)
+    assert.equal((await w.h.json('GET', '/?forgotten=yes')).status, 400)
+    const normal = await w.h.json('GET', '/')
+    assert.deepEqual(normal.body.shifts.map((shift) => shift.id), [], 'a holder\'s normal list still carries only its own rows')
+    w.sqlite.prepare('INSERT INTO branches(id,name,is_active) VALUES (2,?,1)').run('Other')
+    assert.equal((await w.h.json('GET', '/?forgotten=1&branch_id=1')).body.shifts.length, 2)
+    const branch = await w.h.json('GET', '/?forgotten=1&branch_id=2')
+    assert.deepEqual(branch.body.shifts, [])
   })
 
   if (failed.length) { console.log(`\n${failed.length} FAILED, ${passed} passed`); process.exit(1) }

@@ -58,18 +58,6 @@ app.use('*', async (c, next) => {
   // Visibility comes before the replay lookup: a receipt this account earned while the shift was
   // visible (shop_wide, since switched back) must not hand the row back. Cancel is skipped: only
   // an administrator reaches it here, and an administrator sees every shift.
-  let policyRead: ShiftPolicy | undefined
-  if (action !== 'cancel') {
-    policyRead = await readShiftPolicy(db)
-    if (!canSeeShift(user, policyRead, target)) return c.json({ error: 'Shift not found.' }, 404)
-  }
-  c.set('shiftPre', { shift: target, policy: policyRead })
-  // The same split the handlers enforce, applied before the replay lookup so
-  // a caller who may not act cannot probe a receipt: amend follows
-  // canAmendShift (any shifts user), and close, reopen and cancel stay with
-  // the owner or an administrator.
-  const permitted = action === 'amend' ? canAmendShift(user, target) : action === 'close' ? canCloseShift(user, target, Date.now()) : canMutateShift(user, target)
-  if (!permitted) return c.json(action === 'close' && isOpenOnEarlierDay(target, Date.now()) ? SHIFT_LATE_NOT_PERMITTED : { error: 'Shift permission is required.' }, 403)
   // No branch-activity check here: a committed receipt replays even after its
   // branch was retired, and each handler decides what an inactive branch
   // allows (N7 -- close and cancel yes, amend and reopen no).
@@ -89,6 +77,24 @@ app.use('*', async (c, next) => {
       ...(action === 'reopen' ? { reopened_from_shift_id: target.id } : {}),
     }, 200)
   }
+  let policyRead: ShiftPolicy | undefined
+  if (action !== 'cancel') {
+    policyRead = await readShiftPolicy(db)
+    const visible = action === 'close' ? canSeeShiftToClose(user, policyRead, target) : canSeeShift(user, policyRead, target)
+    if (!visible) {
+      // A grant holder's retry of a late close it committed: the row is closed now and no longer theirs to see, but the receipt is
+      // theirs (looked up by this account and this request id), so the stored result comes back instead of a 404.
+      if (action === 'close' && holdsLateClose(user)) { const prior = await replay(); if (prior) return prior }
+      return c.json({ error: 'Shift not found.' }, 404)
+    }
+  }
+  c.set('shiftPre', { shift: target, policy: policyRead })
+  // The same split the handlers enforce, applied before the replay lookup so
+  // a caller who may not act cannot probe a receipt: amend follows
+  // canAmendShift (any shifts user), and close, reopen and cancel stay with
+  // the owner or an administrator.
+  const permitted = action === 'amend' ? canAmendShift(user, target) : action === 'close' ? canCloseShift(user, target, Date.now()) : canMutateShift(user, target)
+  if (!permitted) return c.json(action === 'close' && isOpenOnEarlierDay(target, Date.now()) ? SHIFT_LATE_NOT_PERMITTED : { error: 'Shift permission is required.' }, 403)
   const prior = await replay(); if (prior) return prior
   await next()
   // A concurrent exact retry may reach the revision guard before its peer's
@@ -593,7 +599,10 @@ function shiftVisibility(user: SessionUser, policy: ShiftPolicy) {
 function canSeeShift(user: SessionUser, policy: ShiftPolicy, shift: ShiftRow): boolean {
   return canManageShifts(user) || shift.user_id === user.id
     || (policy.scope_mode === 'shop_wide' && shift.scope_mode === 'shop_wide')
-    || (isOpenOnEarlierDay(shift, Date.now()) && holdsLateClose(user))
+}
+/** What the late close and the close form's reads may reach: every row canSeeShift allows, plus an OPEN earlier-day row for a grant holder. Never amend. */
+function canSeeShiftToClose(user: SessionUser, policy: ShiftPolicy, shift: ShiftRow): boolean {
+  return canSeeShift(user, policy, shift) || (isOpenOnEarlierDay(shift, Date.now()) && holdsLateClose(user))
 }
 /** An open shift whose Cambodia business day is before today: the one kind of row a late close may end. */
 function isOpenOnEarlierDay(shift: ShiftRow, nowMs: number): boolean {
@@ -603,7 +612,7 @@ function isOpenOnEarlierDay(shift: ShiftRow, nowMs: number): boolean {
 function holdsLateClose(user: SessionUser): boolean {
   return holdsLateClosePermission(getMergedPermissions(user), canManageShifts(user))
 }
-const SHIFT_LATE_NOT_PERMITTED = { code: 'shift_late_close_not_permitted', error: 'Only the cashier who opened this shift, a manager or an administrator can close it.' } as const
+const SHIFT_LATE_NOT_PERMITTED = { code: 'shift_late_close_not_permitted', error: 'Only the cashier who opened it, an administrator, or someone allowed can close it.' } as const
 const SHIFT_LATE_REASON_REQUIRED = { code: 'shift_late_reason_required', error: 'A late close needs a reason.' } as const
 const SHIFT_LATE_OUTSIDE_DAY = { code: 'shift_late_close_outside_day', error: "Pick a time on the shift's own day." } as const
 const SHIFT_LATE_NOT_COUNTED = { code: 'shift_late_close_not_counted', error: 'Today is already open, so this earlier shift is closed without a cash count.' } as const
@@ -1159,6 +1168,15 @@ app.get('/', async (c) => {
   if (rawBranchId != null && String(rawBranchId).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
   // A retired branch is still a valid HISTORY filter (N7, see BRANCH_ACTIVE_SQL).
   if (branchId != null && !(await branchExists(db, branchId))) return c.json({ error: 'Branch not found.' }, 400)
+  if (c.req.query('forgotten') != null) {
+    if (c.req.query('forgotten') !== '1') return c.json({ error: 'Invalid forgotten-shifts request.' }, 400)
+    if (!holdsLateClose(user)) return c.json(SHIFT_LATE_NOT_PERMITTED, 403)
+    const forgotten = await db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions INDEXED BY idx_shift_sessions_open
+      WHERE closed_at IS NULL AND cancelled_at IS NULL AND business_date < @today AND (@branchId IS NULL OR branch_id = @branchId)
+      ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT @limit`)
+      .all<ShiftDbRow>({ today: businessToday(Date.now()), branchId, limit: getPlanLimits(c.env).forgottenShiftListMax })
+    return c.json({ shifts: await Promise.all(forgotten.map((shift) => presentShift(db, user, shift))), scope: 'forgotten' })
+  }
   const rawUserId = c.req.query('user_id')
   const parsedUserId = rawUserId == null || rawUserId.trim() === '' ? null : Number(rawUserId)
   if (parsedUserId != null && (!Number.isInteger(parsedUserId) || parsedUserId <= 0)) return c.json({ error: 'Invalid user id.' }, 400)
@@ -1276,7 +1294,7 @@ app.get('/:id/history', async (c) => {
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   // 404, not 403: a caller who may not see this shift must not learn that it
   // exists, which id probing would otherwise reveal one status code at a time.
-  if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShiftToClose(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   // The whole RECORD, not the one segment. The list shows a reopened shift as
   // a single row, so its detail has to carry what that row stands for: every
   // segment oldest first, and every amendment of every segment on one
@@ -1560,7 +1578,7 @@ app.post('/close', async (c) => {
   const pre = c.get('shiftPre')
   const shift = pre?.shift ?? await readShiftById(db, Number(body.shift_id))
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
-  if (!canSeeShift(user, pre?.policy ?? await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShiftToClose(user, pre?.policy ?? await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   if (body.branch_id != null && shift.branch_id !== branchId) return c.json({ error: 'Shift branch does not match the requested branch.' }, 400)
   if (shift.cancelled_at) return c.json({ error: 'This shift was cancelled. Register a replacement opening first.' }, 409)
   if (!canCloseShift(user, shift, Date.now())) return c.json(isOpenOnEarlierDay(shift, Date.now()) ? SHIFT_LATE_NOT_PERMITTED : { error: 'Only the shift owner or an administrator can close this shift.' }, 403)
@@ -1623,7 +1641,7 @@ app.post('/:id/close', async (c) => {
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
   const db = getDb(c.env); const pre = c.get('shiftPre'); const shift = pre?.shift ?? await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
-  if (!canSeeShift(user, pre?.policy ?? await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
+  if (!canSeeShiftToClose(user, pre?.policy ?? await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   // No branch-activity check: closing is allowed on a retired branch (N7).
   if (!canCloseShift(user, shift, now)) return c.json(isOpenOnEarlierDay(shift, now) ? SHIFT_LATE_NOT_PERMITTED : { error: 'Only the shift owner or an administrator can close this shift.' }, 403)
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
