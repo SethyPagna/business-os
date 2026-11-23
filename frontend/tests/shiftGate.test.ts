@@ -111,7 +111,7 @@ const endBody = gate.slice(gate.indexOf('export function EndShiftButton'))
 // earlier DAY, and fmtDate is the app's existing day-first date-only
 // formatter. The rule is unchanged -- every date and time on this screen
 // still comes from utils/formatters, never from a second local format.
-ok(/import \{ fmtDate, fmtDateTime24, parseServerTimestampMs \} from '\.\.\/\.\.\/utils\/formatters\.ts'/.test(gate),
+ok(/import \{ fmtDate, fmtDateOnly, fmtDateTime24, parseServerTimestampMs \} from '\.\.\/\.\.\/utils\/formatters\.ts'/.test(gate),
   'times are formatted through the shared formatters, not a second local date format')
 ok(/fmtDateTime24\(shift\.opened_at\)/.test(endBody),
   'the close panel prints the OPENING moment as a formatted date and time')

@@ -152,14 +152,31 @@ test('the separators are drawn by the item, never a text node, so a dot cannot d
   const html = render(shiftRow({ branch_active: false } as Partial<Shift>))
   assert.ok(html.slice(0, html.indexOf(box)).match(/<div class="[^"]*\boverflow-hidden\b[^"]*"[^>]*>$/), 'inside a clipping box, so a dot at a line start is cut off')
   const css = read('../src/styles/main.css')
-  assert.match(css, /\.shift-hdr-item::before \{ content:"\\00b7"; position:absolute;/, 'the dot is generated content in the item\'s left gap')
+  assert.match(css, /\.shift-hdr-item::before \{ content:""; position:absolute; left:\.25rem; top:50%; width:\.25rem; height:\.25rem; [^}]*border-radius:9999px; background:#6b7280;/, 'the dot is a small round shape drawn in the item\'s left gap, dark enough to read as a middle dot')
   assert.match(css, /\.shift-hdr-item \{ position:relative; padding-left:\.75rem; \}/, 'and the gap equals the row\'s negative margin (-ml-3 = .75rem)')
 })
 
-test('the Shifts popup title wraps the full ID: no truncate, ellipsis, clipping or nowrap, and the ID is in it', () => {
+test('the Shifts popup title holds the full ID and wraps only after a hyphen: no break-all, truncate, clipping or nowrap', () => {
   const modal = read('../src/components/shifts/ShiftHistoryModal.tsx')
   const line = modal.split('\n').find((row) => row.includes('title={selected ?')) ?? ''
-  assert.ok(line.includes('selected.shift_code'), 'the title carries the whole shift code')
-  assert.match(line, /className="[^"]*\bwhitespace-normal\b[^"]*\bbreak-all\b/, 'it wraps')
-  assert.ok(!/truncate|ellipsis|overflow-hidden|whitespace-nowrap|line-clamp/.test(line), 'and never truncates')
+  assert.ok(line.includes('code={selected.shift_code}'), 'the title carries the whole shift code')
+  assert.match(line, /className="[^"]*\bwhitespace-normal\b/, 'it wraps')
+  assert.ok(!/break-all|truncate|ellipsis|overflow-hidden|whitespace-nowrap|line-clamp/.test(line), 'and never truncates or breaks mid-word')
+  const { ShiftCodeBreaks } = loadTsx(new URL('../src/components/shifts/ShiftHeaderRow.tsx', import.meta.url))
+  const html = renderToStaticMarkup(React.createElement(ShiftCodeBreaks, { code: CODE }))
+  assert.equal(html.replace(/<wbr\/?>/g, ''), CODE, 'the whole ID is rendered')
+  assert.equal((html.match(/-<wbr\/?>/g) ?? []).length, CODE.split('-').length - 1, 'a break point after every hyphen')
+  assert.equal((html.match(/<wbr\/?>/g) ?? []).length, CODE.split('-').length - 1, 'and nowhere else')
+})
+
+test('the retired-branch badge is its own separated item with no margin of its own, so a wrap never clips its left edge', () => {
+  const box = headerContainer(render(shiftRow({ branch_active: false } as Partial<Shift>)))
+  const badge = box.match(/<span class="([^"]*)"><span class="([^"]*)"[^>]*>Branch inactive<\/span><\/span>/)
+  assert.ok(badge, 'the tag sits inside one wrapper item')
+  assert.match(badge[1], /\bshift-hdr-item\b/, 'the wrapper carries the separator gap')
+  assert.ok(!/\bml-|\boverflow-hidden\b/.test(badge[2]), 'the pill has no margin to be cut and no clipping of its own')
+  const html = render(shiftRow({ branch_active: false } as Partial<Shift>))
+  const clip = html.slice(0, html.indexOf(box)).match(/<div class="([^"]*\boverflow-hidden\b[^"]*)"[^>]*>$/)
+  assert.ok(clip, 'the clipping box')
+  assert.ok(!/\bpy-px\b/.test(clip[1]) && /\bpy-1\b/.test(clip[1]), 'padded so tall Khmer subscripts are not sheared')
 })

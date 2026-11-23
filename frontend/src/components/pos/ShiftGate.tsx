@@ -7,9 +7,9 @@ import { useApp } from '../../AppContext'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { CheckConnectionButton } from '../shared/SavingBlockedNote.tsx'
-import { fmtDate, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
+import { fmtDate, fmtDateOnly, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import { closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftLocalDateTimeFromMs, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
-import { LATE_CLOSE_DEFAULT_TIME, LATE_REASON_MAX, lateCloseDayLabel, lateCloseDefaultTime, lateCloseIsoForTime, lateReason } from '../shifts/shiftLateClose.ts'
+import { LATE_CLOSE_DEFAULT_TIME, LATE_REASON_MAX, lateCloseDefaultTime, lateCloseIsoForTime, lateReason } from '../shifts/shiftLateClose.ts'
 import { shiftCountIssue, shiftRielCountInvalid } from '../shifts/shiftCountRules.ts'
 import { TimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
@@ -317,7 +317,7 @@ export function LateCloseFields({ reason, time, day, onReason, onTime, disabled 
   reason: string; time: string; day: string; onReason: (value: string) => void; onTime: (value: string) => void; disabled: boolean
 }) {
   const { t } = useApp() as ShiftGateContext
-  const timeLabel = t('shift_late_time').replace('{date}', lateCloseDayLabel(day))
+  const timeLabel = t('shift_late_time').replace('{date}', fmtDateOnly(day))
   return (
     <>
       <label className="block">
@@ -431,8 +431,10 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
       // The panel is gone on success, so the toast is the only confirmation
       // the cashier gets: it names the drawer that was written and the moment
       // it was FILED UNDER, not a bare "done".
-      notify(`${t('shift_close_saved')} ${shiftCountedPairText(result.shift.closing_counted_usd, result.shift.closing_counted_khr, fmtUSD, fmtKHR)}`
-        + (result.shift.closed_at ? ` · ${fmtDateTime24(result.shift.closed_at)}` : ''))
+      notify(result.shift
+        ? `${t('shift_close_saved')} ${shiftCountedPairText(result.shift.closing_counted_usd, result.shift.closing_counted_khr, fmtUSD, fmtKHR)}`
+          + (result.shift.closed_at ? ` · ${fmtDateTime24(result.shift.closed_at)}` : '')
+        : t('shift_close_saved'))
     } catch (e) {
       // An unacknowledged write is not an error the cashier can act on: the
       // shared unresolved banner owns it and this button becomes Retry, which

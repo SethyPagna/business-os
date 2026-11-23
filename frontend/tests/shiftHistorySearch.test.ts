@@ -90,6 +90,8 @@ function mount(source = MODAL, rows: Row[] = ROWS) {
       return debounce.settled
     } }
     if (id.includes('formatters')) return require('../src/utils/formatters.ts')
+    if (id.includes('utils/permissions')) return require('../src/utils/permissions.ts')
+    if (id.includes('shiftLateClose')) return require('../src/components/shifts/shiftLateClose.ts')
     if (id.includes('shared/Modal')) return { __esModule: true, default: 'Modal' }
     if (id.includes('PaginationControls')) return { __esModule: true, default: 'Pager', DEFAULT_PAGE_SIZE: PAGE_SIZE }
     if (id.includes('SearchInput')) return { __esModule: true, default: 'SearchInput' }

@@ -10,11 +10,11 @@ import PaginationControls, { DEFAULT_PAGE_SIZE, TopPager } from '../shared/Pagin
 import SearchInput from '../shared/SearchInput.tsx'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import { LateCloseFields, LateCountField, SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from '../pos/ShiftGate.tsx'
-import { LATE_CLOSE_DEFAULT_TIME, isLateClose, lateCloseDefaultTime, lateCloseIsoForTime, lateReason } from './shiftLateClose.ts'
+import { LATE_CLOSE_DEFAULT_TIME, holdsForgottenCloseGrant, isLateClose, lateCloseDefaultTime, lateCloseIsoForTime, lateReason } from './shiftLateClose.ts'
 import ShiftSummary from './ShiftSummary.tsx'
 import { shiftCloseTimeRefusalText } from './shiftCloseTimeError.ts'
 import { isAdminControlUser } from '../../utils/permissions.ts'
-import ShiftHeaderRow from './ShiftHeaderRow.tsx'
+import ShiftHeaderRow, { ShiftCodeBreaks } from './ShiftHeaderRow.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from './ShiftCountFields.tsx'
 import {
   amendShift,
@@ -47,16 +47,6 @@ type Props = {
   label?: ReactNode
   buttonClassName?: string
   notify?: (message: string, tone?: string) => void
-}
-
-/** "Close forgotten shifts" as the Worker reads it: the stored value exactly true (a user setting over the role's); an administrator always holds it. */
-function grantsForgottenClose(user: { role_code?: unknown; permissions?: unknown; role_permissions?: unknown } | null | undefined): boolean {
-  const asMap = (value: unknown): Record<string, unknown> => {
-    if (typeof value === 'string') { try { return asMap(JSON.parse(value)) } catch { return {} } }
-    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-  }
-  const merged = { ...asMap(user?.role_permissions), ...asMap(user?.permissions) }
-  return !!user && (String(user.role_code || '').trim().toLowerCase() === 'admin' || merged.all === true || merged.shift_close_forgotten === true)
 }
 
 function closingCountInvalid(value: string): boolean {
@@ -247,7 +237,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<Shift[]>([])
   // Open shifts left on an earlier day, read once per opening and only for who may close them (an administrator, or the grant).
-  const holdsForgottenGrant = grantsForgottenClose(app.user)
+  // An administrator already sees every shift in the list, so only a holder reads this list, and only for per-cashier rows of others.
+  const holdsForgottenGrant = holdsForgottenCloseGrant(app.user) && !isAdminControlUser(app.user)
   const [forgotten, setForgotten] = useState<Shift[]>([])
   const [fromForgotten, setFromForgotten] = useState(false)
   const [scope, setScope] = useState<'all' | 'own'>('all')
@@ -373,7 +364,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     if (!open || !holdsForgottenGrant) { setForgotten([]); return }
     let current = true
     listForgottenShifts({ branchId: activeBranchId }, { fresh: true })
-      .then((result) => { if (current) setForgotten(result.shifts) })
+      .then((result) => { if (current) setForgotten(result.shifts.filter((row) => row.scope_mode === 'per_account' && String(row.user_id) !== String(app.user?.id))) })
       .catch(() => { if (current) setForgotten([]) })
     return () => { current = false }
   }, [open, holdsForgottenGrant, activeBranchId])
@@ -534,11 +525,20 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         closingNote: close.closingNote.trim() || null,
       })
       if (!isCurrent()) return
+      const reachedOnlyThroughSection = fromForgotten && String(selected.user_id) !== String(app.user?.id)
       if (result.shift) replaceRow(result.shift)
       setForgotten((current) => current.filter((row) => row.id !== selected.id))
       resetAction()
       refreshMountedShiftState()
       sendNotice?.(t('shift_close_saved'), 'success')
+      if (reachedOnlyThroughSection || !result.shift) {
+        detailsRequest.current += 1
+        setDetailsLoading(false)
+        setDetailsError('')
+        setSelected(null)
+        setFromForgotten(false)
+        return
+      }
       await refreshDetails(result.shift, isCurrent)
     } catch (cause) {
       if (isCurrent()) reportSaveError(cause, 'shift_end_failed')
@@ -612,8 +612,6 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         : editRielInvalid ? t(shiftCountBlockerKey('riel_cash'))
         : !edit.reason.trim() ? t('shift_reason_required')
           : null
-  // A shift reached only through "Left open from earlier days" and opened by someone else is closed here, never amended.
-  const othersForgottenRow = fromForgotten && !!selected && String(selected.user_id) !== String(app.user?.id)
   const closeIsLate = lateRow(selected)
   const closeReason = action !== 'close' ? null
     : closeIsLate && lateReason(close.reason) == null ? t('shift_late_reason_blank')
@@ -650,7 +648,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
       </button>
       {open ? (
         <Modal
-          title={selected ? <span className="whitespace-normal break-all">{`${fmtDateOnly(selected.business_date)} · ${selected.shift_code}`}</span> : t('shift_history')}
+          title={selected ? <span className="whitespace-normal">{`${fmtDateOnly(selected.business_date)} · `}<ShiftCodeBreaks code={selected.shift_code} /></span> : t('shift_history')}
           onClose={dismiss}
           closeDisabled={saving}
           size="xl"
@@ -669,7 +667,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
               {!detailsLoading && !detailsError && (pending || selected.capabilities.can_edit || selected.capabilities.can_close || selected.capabilities.can_reopen || selected.capabilities.can_cancel) ? (
                 <section className="space-y-3" aria-label={t('shift_actions')}>
                   <div className="flex flex-wrap gap-2">
-                    {selected.capabilities.can_edit ? (othersForgottenRow ? null : <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'edit'} onClick={() => { if (action === 'edit') resetAction(); else { setEdit(editDraft(selected)); setAction('edit') } }}><Pencil className="mr-1 inline h-3.5 w-3.5" />{t('shift_action_edit')}</button>) : null}
+                    {selected.capabilities.can_edit ? (<button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'edit'} onClick={() => { if (action === 'edit') resetAction(); else { setEdit(editDraft(selected)); setAction('edit') } }}><Pencil className="mr-1 inline h-3.5 w-3.5" />{t('shift_action_edit')}</button>) : null}
                     {selected.capabilities.can_close ? <button type="button" className="min-h-11 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50" disabled={saving || pending || dirty && action !== 'close'} onClick={() => { if (action === 'close') resetAction(); else { const seed = blankClose(selected); setCloseBase(seed); setClose(seed); setAction('close') } }}>{t('shift_action_close')}</button> : null}
                     {selected.capabilities.can_reopen ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'reopen'} onClick={() => { if (action === 'reopen') resetAction(); else { setReopen(blankReopen()); setAction('reopen') } }}>{t('shift_action_reopen')}</button> : null}
                     {selected.capabilities.can_cancel ? <button type="button" className="btn-danger min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'cancel'} onClick={() => { if (action === 'cancel') resetAction(); else { setCancelReason(''); setAction('cancel') } }}>{t('shift_action_cancel_shift')}</button> : null}

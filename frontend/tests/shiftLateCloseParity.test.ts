@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  LATE_CLOSE_PERMISSION, LATE_REASON_MAX, holdsLateClosePermission, isLateClose, lateCloseBounds, lateCloseIsoForTime, lateCloseTimeOnDay,
+  LATE_CLOSE_PERMISSION, LATE_REASON_MAX, holdsForgottenCloseGrant, holdsLateClosePermission, isLateClose, lateCloseBounds, lateCloseIsoForTime, lateCloseTimeOnDay,
   lateReason, offersLateClose,
 } from '../src/components/shifts/shiftLateClose.ts'
 import { PERMISSION_DEFS } from '../src/components/users/permissionDefinitions.ts'
@@ -30,6 +30,21 @@ for (const row of cases.reason) {
 }
 
 for (const row of cases.permission) assert.equal(holdsLateClosePermission(row.merged, row.admin), row.allowed, JSON.stringify(row))
+
+// The user shapes the Worker reads (strings as stored, a role's grant under a user's own setting), through the one screen function.
+assert.ok(cases.grantUsers.length >= 9)
+for (const row of cases.grantUsers) {
+  assert.equal(holdsForgottenCloseGrant({ role_code: row.role_code, permissions: row.permissions, role_permissions: row.role_permissions }), row.allowed, row.name)
+}
+assert.equal(holdsForgottenCloseGrant(null), false)
+assert.equal(holdsForgottenCloseGrant({ role_code: 'cashier', permissions: { shift_close_forgotten: true } }), true, 'an object as the app holds it')
+
+// No screen file decides the grant on its own: the key is read only in the mirror.
+const srcRoot = path.join(import.meta.dirname, '..', 'src')
+const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)])
+const allowed = new Set(['shiftLateClose.ts', 'permissionDefinitions.ts', 'rolePresetDefaults.ts'])
+const strays = walk(srcRoot).filter((file) => /\.(ts|tsx)$/.test(file) && !allowed.has(path.basename(file)) && fs.readFileSync(file, 'utf8').includes('shift_close_forgotten')).map((file) => path.relative(srcRoot, file))
+assert.deepEqual(strays, [], 'the grant is read in shiftLateClose.ts alone')
 
 // The day-bounded picker: the shift's own Cambodia day, 23:59:59 at the latest, the same edge the Worker refuses past.
 const day = lateCloseBounds('2026-11-22', cases.offsetMinutes)!

@@ -371,7 +371,7 @@ try {
   }) as typeof fetch
   const lostInput = { actorId: 4, expectedRevision: 0, closedAt, closingCountedUsd: null, closingCountedKhr: 0 }
   const reconciledClose = await closeShiftById(18, lostInput)
-  assert.equal(reconciledClose.shift.id, 18)
+  assert.equal(reconciledClose.shift?.id, 18)
   assert.equal(effects, 1)
   assert.deepEqual(lostBodies[0], lostBodies[1], 'automatic reconciliation replays the exact identity and body')
   assert.equal(pendingShiftMutation(4, 18), null, 'proven commit clears the durable retry')

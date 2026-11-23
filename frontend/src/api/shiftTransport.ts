@@ -112,6 +112,7 @@ async function shiftMutationFetch(method: string, path: string, body: ShiftMutat
       const exactTarget = path.endsWith('/reopen')
         ? result?.reopened_from_shift_id === targetId && result?.shift?.parent_shift_id === targetId
         : result?.shift?.id === targetId
+          || (path.endsWith('/close') && result?.replayed === true && result?.status === 'closed' && Number(result?.id) === targetId)
       if (!exactTarget) throw Object.assign(new Error('Could not verify the committed shift'), { outcome: 'unknown' })
       clearExactPending()
       return result
@@ -780,17 +781,21 @@ export type CloseShiftByIdInput = {
   reason?: string | null
 }
 
+/** `shift` is null on a replayed close the caller may no longer read: the Worker then answers only { id, status, closed_at, replayed }. */
 export type CloseShiftByIdResult = {
-  shift: Shift
+  shift: Shift | null
   already_closed: boolean
   is_open: false
+  replayed?: true
 }
+
+type ReplayedCloseBody = { id?: unknown; status?: unknown; replayed?: unknown }
 
 export async function closeShiftById(id: number, input: CloseShiftByIdInput): Promise<CloseShiftByIdResult> {
   if (input.closedAt && shiftTimestampIsFuture(input.closedAt)) throw new Error('Closing time cannot be in the future.')
   const closingCountedUsd = optionalShiftCount(input.closingCountedUsd, 'Closing USD count')
   const closingCountedKhr = optionalShiftCount(input.closingCountedKhr, 'Closing KHR count')
-  const result = await shiftWrite<CloseShiftByIdResult>(
+  const result = await shiftWrite<CloseShiftByIdResult & ReplayedCloseBody>(
     `shifts:close:${id}`,
     () => shiftMutationFetch('POST', `/api/shifts/${id}/close`, {
       expected_revision: input.expectedRevision,
@@ -806,6 +811,7 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
     true,
     input.actorId,
   )
+  if (result && !result.shift && result.replayed === true && result.status === 'closed') return { shift: null, already_closed: true, is_open: false, replayed: true }
   if (!result?.shift) throw new Error('Could not close shift')
   return result
 }

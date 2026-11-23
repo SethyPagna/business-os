@@ -33,11 +33,6 @@ export function holdsLateClosePermission(merged: Record<string, unknown>, isAdmi
 }
 
 /** Whether a chosen close instant lies on the shift's own day, no later than 23:59:59. */
-/** The shift's day as the app writes dates (dd/mm/yyyy), for the closing-time label. Empty when the date is not a business date. */
-export function lateCloseDayLabel(businessDate: string): string {
-  return DATE_PATTERN.test(businessDate) ? businessDate.slice(8, 10) + '/' + businessDate.slice(5, 7) + '/' + businessDate.slice(0, 4) : ''
-}
-
 export function lateCloseTimeOnDay(businessDate: string, closeMs: number): boolean {
   const bounds = lateCloseBounds(businessDate)
   return !!bounds && Number.isFinite(closeMs) && closeMs >= bounds.startMs && closeMs <= bounds.lastSecondMs
@@ -53,6 +48,22 @@ export function lateCloseIsoForTime(businessDate: string, time: string): string 
   if (!bounds) return null
   const ms = bounds.startMs + (Number(time.slice(0, 2)) * 60 + Number(time.slice(3))) * 60 * 1000
   return lateCloseTimeOnDay(businessDate, ms) ? new Date(ms).toISOString() : null
+}
+
+type GrantUser = { role_code?: unknown; permissions?: unknown; role_permissions?: unknown } | null | undefined
+
+/** One level of stored JSON, as the Worker reads it: a string is parsed once and must hold an object. */
+function permissionMap(value: unknown): Record<string, unknown> {
+  let parsed = value
+  if (typeof parsed === 'string') { try { parsed = JSON.parse(parsed) } catch { return {} } }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+}
+
+/** Whether this user may close a shift left open on an earlier day: the Worker's grant check (a user setting wins over the role's). */
+export function holdsForgottenCloseGrant(user: GrantUser): boolean {
+  if (!user) return false
+  const merged = { ...permissionMap(user.role_permissions), ...permissionMap(user.permissions) }
+  return holdsLateClosePermission(merged, String(user.role_code || '').trim().toLowerCase() === 'admin' || merged.all === true)
 }
 
 /** Whether the screen offers the late-close form to this person for this row. */

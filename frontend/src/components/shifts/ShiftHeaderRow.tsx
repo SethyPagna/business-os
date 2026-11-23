@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import { useApp } from '../../AppContext.tsx'
 import { fmtClock24, fmtDate, fmtDateOnly } from '../../utils/formatters.ts'
 import type { Shift } from '../../api/shiftTransport.ts'
@@ -9,6 +9,12 @@ export function shiftCellTime(raw: string | null | undefined, businessDate: stri
   const clock = fmtClock24(raw)
   const date = fmtDate(raw)
   return date !== '—' && date !== fmtDateOnly(businessDate) ? `${date} ${clock}` : clock
+}
+
+/** A shift ID that may wrap only after a hyphen, never inside a segment, and is never cut short. */
+export function ShiftCodeBreaks({ code }: { code: string }) {
+  const parts = code.split('-')
+  return <>{parts.map((part, index) => <Fragment key={index}>{part}{index < parts.length - 1 ? <>-<wbr /></> : null}</Fragment>)}</>
 }
 
 type Props = {
@@ -26,18 +32,20 @@ export default function ShiftHeaderRow({ shift, children }: Props) {
   }
   return (
     <div className="flex min-w-0 items-start justify-between gap-3">
-      <div className="min-w-0 flex-1 overflow-hidden py-px">
+      <div className="-my-1 min-w-0 flex-1 overflow-hidden py-1">
       <div className="-ml-3 flex min-w-0 flex-wrap items-baseline gap-y-0.5">
         <span className="shift-hdr-item text-sm font-semibold text-gray-900 dark:text-white">{fmtDateOnly(shift.business_date)}</span>
         {shift.shift_code ? <span className="shift-hdr-item dense-id break-all text-[10px] text-gray-400 dark:text-gray-500">{shift.shift_code}</span> : null}
         <span title={t('shift_opened_by')} className="shift-hdr-item break-words text-xs text-gray-500 dark:text-gray-400">{shift.user_name || tr('shift_staff', 'Staff')}</span>
         <span className="shift-hdr-item break-words text-xs text-gray-500 dark:text-gray-400">{shift.branch_name || tr('all_branches', 'All branches')}</span>
         {shift.branch_active === false ? (
-          <span
-            className="ml-1.5 inline-flex rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 dark:bg-zinc-800 dark:text-gray-300"
-            title={tr('shift_branch_inactive_hint', 'This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.')}
-          >
-            {tr('shift_branch_inactive', 'Branch inactive')}
+          <span className="shift-hdr-item inline-flex">
+            <span
+              className="inline-flex rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 dark:bg-zinc-800 dark:text-gray-300"
+              title={tr('shift_branch_inactive_hint', 'This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.')}
+            >
+              {tr('shift_branch_inactive', 'Branch inactive')}
+            </span>
           </span>
         ) : null}
       </div>

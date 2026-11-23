@@ -1338,7 +1338,7 @@ body.lang-km .price-strip { line-height: var(--km-line-height, 1.6); }
 /* The shift header row's separators are drawn, not typed: each item after the first carries a dot in its own left gap, and the row sits in an overflow-hidden box
    shifted left by that gap, so a dot that lands at a line start is clipped away and none can end or start a wrapped line. */
 .shift-hdr-item { position:relative; padding-left:.75rem; }
-.shift-hdr-item::before { content:"\00b7"; position:absolute; left:.28rem; color:#9ca3af; font-size:.75rem; line-height:inherit; }
+.shift-hdr-item::before { content:""; position:absolute; left:.25rem; top:50%; width:.25rem; height:.25rem; margin-top:-.125rem; border-radius:9999px; background:#6b7280; }
 .dense-id { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:.68rem; letter-spacing:-.025em; }
 
 /* Text affordances -- the ONE float shared by the copy gesture and the

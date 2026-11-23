@@ -408,8 +408,8 @@ console.log('  ok - the hint states the late-close rule, in both packs')
 const dayLabels = await import('../src/components/shifts/shiftLateClose.ts')
 assert.equal(en.shift_late_time, 'Closing time on {date}')
 assert.ok(km.shift_late_time.includes('{date}'), 'the Khmer label carries the day too')
-assert.equal(dayLabels.lateCloseDayLabel('2026-11-22'), '22/11/2026')
-assert.equal(dayLabels.lateCloseDayLabel('not a date'), '')
+assert.equal(typeof (dayLabels as Record<string, unknown>).lateCloseDayLabel, 'undefined', 'the day label is fmtDateOnly, not a second formatter')
+assert.ok(gate.includes('fmtDateOnly(day)'), 'the POS time label names the day through fmtDateOnly')
 assert.ok(gate.includes('time={form.draft.time} day={form.day}'), "the POS form passes the shift's day to the time label")
 assert.ok(read('src/components/shifts/ShiftHistoryModal.tsx').includes("day={selected?.business_date ?? ''}"), "the Shifts popup late form passes the shift's day too")
 assert.equal(en.shift_previous_open_locked, 'Only the cashier who opened it, an administrator, or someone allowed can close it.')
@@ -501,7 +501,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     if (name.includes('useSavingGate')) return { useSavingGate: () => ({ blocked: false, reason: '' }) }
     if (name.includes('shared/Modal')) return { default: () => null }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: (...args: any[]) => notices.push(args), user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
-    if (name.includes('formatters')) return { fmtDate: String, fmtDateTime24: String, parseServerTimestampMs: Date.parse }
+    if (name.includes('formatters')) return { fmtDate: String, fmtDateOnly: String, fmtDateTime24: String, parseServerTimestampMs: Date.parse }
     if (name.includes('DateEntryInput')) return { TimeEntryInput: TimeMarker }
     if (name.includes('ShiftHeaderRow')) return { default: function ShiftHeaderRow() { return null } }
     if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }

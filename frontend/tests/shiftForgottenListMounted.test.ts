@@ -19,6 +19,7 @@ async function runTest(name: string, fn: () => Promise<void> | void): Promise<vo
 
 const EMPLOYEE = { id: 7, username: 'sokha', name: 'Sokha', role_code: 'cashier', permissions: { pos: true, sales: true } }
 const HOLDER = { id: 8, username: 'manager', name: 'Manager', role_code: 'cashier', permissions: { pos: true, sales: true, shift_close_forgotten: true } }
+const ADMIN = { id: 1, username: 'owner', name: 'Owner', role_code: 'admin', permissions: { all: true } }
 const capabilities = { can_edit: true, can_close: true, can_reopen: false, can_cancel: false }
 
 const forgottenRow = (id: number, code: string, userId: number, userName: string, closeBefore: string | null = null) => ({
@@ -34,13 +35,16 @@ const own = forgottenRow(62, 'S-20261010-0900-manager', 8, 'manager')
 
 const harness = await createHarness({ localStorage: { businessos_user: JSON.stringify(HOLDER), businessos_read_session: 'read-session-of-manager' } })
 
-async function mountPopup(user: typeof EMPLOYEE | typeof HOLDER, options: { forgotten?: unknown[]; list?: unknown[]; history?: unknown } = {}) {
+async function mountPopup(user: typeof EMPLOYEE | typeof HOLDER | typeof ADMIN, options: { forgotten?: unknown[]; list?: unknown[]; history?: unknown; history404AfterClose?: boolean; closeResult?: (row: unknown) => unknown } = {}) {
+  const notices: Array<[string, string | undefined]> = []
+  const historyReads: number[] = []
+  let closedOnce = false
   const forgottenCalls: Array<Record<string, unknown>> = []
   const closes: Array<Record<string, unknown>> = []
   const forgotten = options.forgotten ?? []
   const page = await harness.mount({
     component: 'components/shifts/ShiftHistoryModal.tsx',
-    props: { branchId: 1, notify: () => {} },
+    props: { branchId: 1, notify: (message: string, tone?: string) => { notices.push([message, tone]) } },
     app: {
       page: 'reports', language: 'en', t: (key: string) => en[key] ?? key, user, settings: {}, notify: () => {},
       fmtUSD: (value: unknown) => `${Number(value || 0).toFixed(2)}`, fmtKHR: (value: unknown) => `${Number(value || 0)}៛`,
@@ -51,19 +55,23 @@ async function mountPopup(user: typeof EMPLOYEE | typeof HOLDER, options: { forg
         listShifts: async () => ({ shifts: options.list ?? [], scope: 'all', page: 1, total: (options.list ?? []).length }),
         listForgottenShifts: async (filters: Record<string, unknown>) => { forgottenCalls.push(filters); return { shifts: forgotten, scope: 'forgotten' } },
         fetchShiftHistory: async (id: number) => {
+          historyReads.push(id)
+          if (options.history404AfterClose && closedOnce) throw new Error('Shift not found.')
           const row = ([...forgotten, ...(options.list ?? [])] as Array<{ id: number }>).find((item) => item.id === id) ?? options.history
           return { shift: row, amendments: [], segments: [row] }
         },
         closeShiftById: async (id: number, body: Record<string, unknown>) => {
           closes.push(body)
           const row = ([...forgotten, ...(options.list ?? [])] as Array<{ id: number }>).find((item) => item.id === id)
-          return { shift: { ...row, closed_at: '2026-10-10T16:59:00.000Z' } }
+          closedOnce = true
+          const closed = { ...row, closed_at: '2026-10-10T16:59:00.000Z' }
+          return options.closeResult ? options.closeResult(closed) : { shift: closed }
         },
       },
     },
   })
   await page.click(page.button(en.shift_history))
-  return { page, forgottenCalls, closes }
+  return { page, forgottenCalls, closes, notices, historyReads }
 }
 
 const buttonsLabelled = (page: Awaited<ReturnType<typeof mountPopup>>['page'], label: string): MemoryNode[] =>
@@ -109,18 +117,47 @@ await runTest('tapping a forgotten row opens the late-close form', async () => {
   } finally { await popup.page.unmount() }
 })
 
-await runTest('another cashier\'s forgotten row offers no Edit; the holder\'s own row keeps it', async () => {
-  const popup = await mountPopup(HOLDER, { forgotten: [others, own] })
+await runTest('Edit follows the Worker\'s can_edit: an administrator keeps it, a holder gets none on a row the Worker refuses, and the opener keeps it on their own row', async () => {
+  const adminRow = forgottenRow(65, 'S-20261010-1200-dara', 9, 'dara')
+  const adminPopup = await mountPopup(ADMIN, { list: [adminRow] })
   try {
-    await popup.page.click(buttonsLabelled(popup.page, others.shift_code)[0])
-    assert.ok(popup.page.text().includes(en.shift_late_reason), 'the form did open')
-    assert.equal(buttonsLabelled(popup.page, en.shift_action_edit).length, 0, 'no Edit on another cashier\'s shift')
-  } finally { await popup.page.unmount() }
-  const ownPopup = await mountPopup(HOLDER, { forgotten: [own] })
+    await adminPopup.page.click(buttonsLabelled(adminPopup.page, adminRow.shift_code)[0])
+    assert.equal(buttonsLabelled(adminPopup.page, en.shift_action_edit).length, 1, 'administrator: Edit shown')
+  } finally { await adminPopup.page.unmount() }
+  const refused = { ...others, capabilities: { ...capabilities, can_edit: false } }
+  const holderPopup = await mountPopup(HOLDER, { forgotten: [refused] })
+  try {
+    await holderPopup.page.click(buttonsLabelled(holderPopup.page, refused.shift_code)[0])
+    assert.ok(holderPopup.page.text().includes(en.shift_late_reason), 'the form did open')
+    assert.equal(buttonsLabelled(holderPopup.page, en.shift_action_edit).length, 0, 'holder, can_edit false: no Edit')
+  } finally { await holderPopup.page.unmount() }
+  const allowed = await mountPopup(HOLDER, { forgotten: [others] })
+  try {
+    await allowed.page.click(buttonsLabelled(allowed.page, others.shift_code)[0])
+    assert.equal(buttonsLabelled(allowed.page, en.shift_action_edit).length, 1, 'holder, can_edit true: Edit shown, the screen adds no rule of its own')
+  } finally { await allowed.page.unmount() }
+  const ownPopup = await mountPopup(HOLDER, { list: [own] })
   try {
     await ownPopup.page.click(buttonsLabelled(ownPopup.page, own.shift_code)[0])
-    assert.equal(buttonsLabelled(ownPopup.page, en.shift_action_edit).length, 1, 'Edit stays on their own row')
+    assert.equal(buttonsLabelled(ownPopup.page, en.shift_action_edit).length, 1, 'own row: Edit')
   } finally { await ownPopup.page.unmount() }
+})
+
+await runTest('the section lists only rows the caller cannot already reach: no administrator call, no own row, no shop-wide row', async () => {
+  const shopWide = { ...forgottenRow(66, 'S-20261010-1300-shop', 9, 'dara'), scope_mode: 'shop_wide' }
+  const admin = await mountPopup(ADMIN, { forgotten: [others] })
+  try {
+    assert.equal(admin.forgottenCalls.length, 0, 'an administrator never asks')
+    assert.equal(sectionBoxes(admin.page).length, 0, 'and sees no section')
+  } finally { await admin.page.unmount() }
+  const holder = await mountPopup(HOLDER, { forgotten: [others, own, shopWide] })
+  try {
+    assert.equal(holder.forgottenCalls.length, 1)
+    const text = holder.page.text()
+    assert.ok(text.includes(others.shift_code), 'another cashier\'s per-cashier row')
+    assert.equal(text.includes(own.shift_code), false, 'not the caller\'s own row')
+    assert.equal(text.includes(shopWide.shift_code), false, 'not a shop-wide row')
+  } finally { await holder.page.unmount() }
 })
 
 await runTest('a closed forgotten row leaves the section', async () => {
@@ -131,8 +168,65 @@ await runTest('a closed forgotten row leaves the section', async () => {
     const buttons = buttonsLabelled(popup.page, en.shift_action_close)
     await popup.page.click(buttons[buttons.length - 1])
     assert.equal(popup.closes.length, 1, 'one close request')
-    await popup.page.click(popup.page.button(en.back))
     assert.equal(sectionBoxes(popup.page).length, 0, 'the row is gone from the section')
+  } finally { await popup.page.unmount() }
+})
+
+const closeFromSection = async (popup: Awaited<ReturnType<typeof mountPopup>>, row: { shift_code: string }, openRow = true) => {
+  if (openRow) await popup.page.click(buttonsLabelled(popup.page, row.shift_code)[0])
+  await popup.page.type(popup.page.find((node) => node.tagName === 'INPUT' && (node.getAttribute('aria-label') ?? '') === en.shift_late_reason, 'the reason box'), 'Forgot')
+  const buttons = buttonsLabelled(popup.page, en.shift_action_close)
+  await popup.page.click(buttons[buttons.length - 1])
+}
+const alerts = (page: Awaited<ReturnType<typeof mountPopup>>['page']) => page.findAll((node) => node.getAttribute('role') === 'alert')
+
+await runTest('after a holder closes another cashier\'s forgotten shift the popup shows the notice and the list, never "Shift not found."', async () => {
+  const popup = await mountPopup(HOLDER, { forgotten: [others], history404AfterClose: true })
+  try {
+    await closeFromSection(popup, others)
+    assert.equal(popup.closes.length, 1, 'one close request')
+    assert.deepEqual(popup.notices.map(([, tone]) => tone), ['success'], 'the success notice, and no error notice')
+    assert.equal(popup.notices[0][0], en.shift_close_saved)
+    assert.equal(popup.page.text().includes('Shift not found.'), false, 'no "Shift not found."')
+    assert.equal(alerts(popup.page).length, 0, 'no error alert')
+    assert.equal(popup.historyReads.length, 1, 'the history was read once (opening), not again after the close')
+    assert.equal(sectionBoxes(popup.page).length, 0, 'the row is gone from the section')
+    assert.equal(buttonsLabelled(popup.page, en.back).length, 0, 'back on the list, not on a detail')
+  } finally { await popup.page.unmount() }
+})
+
+await runTest('a holder\'s replayed close answer (no shift wrapper) is a success: notice, list, no error', async () => {
+  const popup = await mountPopup(HOLDER, { forgotten: [others], history404AfterClose: true, closeResult: (row) => ({ shift: null, replayed: true, already_closed: true, is_open: false, id: (row as { id: number }).id }) })
+  try {
+    await closeFromSection(popup, others)
+    assert.deepEqual(popup.notices.map(([, tone]) => tone), ['success'])
+    assert.equal(alerts(popup.page).length, 0, 'no error alert')
+    assert.equal(popup.page.text().includes('Shift not found.'), false)
+    assert.equal(sectionBoxes(popup.page).length, 0)
+    assert.equal(buttonsLabelled(popup.page, en.back).length, 0)
+  } finally { await popup.page.unmount() }
+})
+
+await runTest('a replayed close answer on a row reached through the list is a success too, never a crash or an alert', async () => {
+  const popup = await mountPopup(HOLDER, { list: [own], closeResult: (row) => ({ shift: null, replayed: true, already_closed: true, is_open: false, id: (row as { id: number }).id }) })
+  try {
+    await popup.page.click(buttonsLabelled(popup.page, own.shift_code)[0])
+    await popup.page.click(buttonsLabelled(popup.page, en.shift_action_close)[0])
+    await closeFromSection(popup, own, false)
+    assert.deepEqual(popup.notices.map(([, tone]) => tone), ['success'])
+    assert.equal(alerts(popup.page).length, 0, 'no error alert')
+    assert.equal(buttonsLabelled(popup.page, en.shift_action_close).length, 0, 'the detail is closed: back on the list')
+  } finally { await popup.page.unmount() }
+})
+
+await runTest('the opener\'s own close keeps the refresh: the detail is read again and stays open', async () => {
+  const popup = await mountPopup(HOLDER, { list: [own] })
+  try {
+    await popup.page.click(buttonsLabelled(popup.page, own.shift_code)[0])
+    await popup.page.click(buttonsLabelled(popup.page, en.shift_action_close)[0])
+    await closeFromSection(popup, own, false)
+    assert.equal(popup.historyReads.length, 2, 'opened, then refreshed after the close')
+    assert.equal(buttonsLabelled(popup.page, en.back).length, 1, 'still on the detail')
   } finally { await popup.page.unmount() }
 })
 
