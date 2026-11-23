@@ -156,6 +156,7 @@ function portalFixture({ state, planTier }) {
     './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
     './passwordHash': passwordHash,
     './failedSignInCost': floorModule,
+    './memberCode': loadReal('lib/memberCode.ts'),
   })
   const env = planTier ? { PLAN_TIER: planTier } : {}
   return { rawDb, portal, env, passwordHash }

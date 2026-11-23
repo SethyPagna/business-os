@@ -25,8 +25,8 @@
    "SELECT key, value FROM settings"
   ],
   [
-   "fb38170632a3",
-   "SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (?,?,?,?,?,?,?,?,?,?,?,?"
+   "24f2d7c9769d",
+   "SELECT contact_id, membership_id, member_code, created_at FROM portal_accounts WHERE contact_id IN (?,?,?,?,?,"
   ]
  ],
  "customers-search": [
@@ -35,12 +35,8 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
-  ],
-  [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
    "137558dcd65b",
@@ -59,8 +55,8 @@
    "SELECT key, value FROM settings"
   ],
   [
-   "fb38170632a3",
-   "SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (?,?,?,?,?,?,?,?,?,?,?,?"
+   "24f2d7c9769d",
+   "SELECT contact_id, membership_id, member_code, created_at FROM portal_accounts WHERE contact_id IN (?,?,?,?,?,"
   ]
  ],
  "customers-phone-search": [
@@ -69,23 +65,19 @@
    "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "1b6449cc3af3",
+   "SELECT namespace, version FROM cache_versions WHERE namespace IN (?,?)"
   ],
   [
-   "e7fc997dccb2",
-   "SELECT version FROM cache_versions WHERE namespace = ?1"
+   "7e5a85a1415b",
+   "SELECT COUNT(*) AS count FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) AND ((id IN (SELECT rowid FR"
   ],
   [
-   "d0306b1c67bf",
-   "SELECT COUNT(*) AS count FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) AND (id IN (SELECT rowid FRO"
+   "0c0b24197eda",
+   "SELECT * FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) AND ((id IN (SELECT rowid FROM customers_fts"
   ],
   [
-   "01f3a70381af",
-   "SELECT * FROM customers WHERE NOT (COALESCE(is_anonymous, 0) = 1) AND (id IN (SELECT rowid FROM customers_fts "
-  ],
-  [
-   "c9995e7664eb",
+   "1fb58325cc0b",
    "SELECT DISTINCT substr(date(created_at, '+7 hours'), 1, 4) AS year FROM customers WHERE NOT (COALESCE(is_anony"
   ],
   [
@@ -93,8 +85,8 @@
    "SELECT key, value FROM settings"
   ],
   [
-   "f3e73bf3bbe4",
-   "SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (?)"
+   "131ebbb060fc",
+   "SELECT contact_id, membership_id, member_code, created_at FROM portal_accounts WHERE contact_id IN (?)"
   ]
  ],
  "w-customer-create": [

@@ -116,6 +116,7 @@ const session = loadReal('lib/portalSession.ts', {
     './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
     './passwordHash': loadRealPasswordHash(),
     './failedSignInCost': loadRealFailedSignInCost(),
+    './memberCode': loadReal('lib/memberCode.ts'),
   }),
   './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   'hono/cookie': cookieStub,

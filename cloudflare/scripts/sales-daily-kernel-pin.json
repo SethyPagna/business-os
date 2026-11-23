@@ -1,6 +1,6 @@
 {
- "version": 6,
- "aggregate": "cda86a72797044a9dd46",
+ "version": 8,
+ "aggregate": "0924ce2f785e8a5fe0cf",
  "history": [
   {
    "version": 1,
@@ -25,6 +25,14 @@
   {
    "version": 6,
    "aggregate": "cda86a72797044a9dd46"
+  },
+  {
+   "version": 7,
+   "aggregate": "8618a56c3a1817692182"
+  },
+  {
+   "version": 8,
+   "aggregate": "0924ce2f785e8a5fe0cf"
   }
  ],
  "files": {
@@ -210,7 +218,9 @@
     "const DATA_EPOCH_KEY": "60f86231a87982bcd37c",
     "const SWITCH_ROWS_SQL": "b0ea261f9d75efe95cd7",
     "const SWITCH_ROWS_PARAMS": "a4b24a47963dd78afa1a",
-    "const KNOWN_READ_SWITCHES": "36aa9ba64a091946cff9",
+    "const KNOWN_READ_SWITCHES": "8b6e867763c1f0bf99ec",
+    "const KNOWN_READ_SWITCHES.report_atomic": "6224c58a79d2726a29b9",
+    "const KNOWN_READ_SWITCHES.report_atomic_long": "6ec4051e94dc79b28660",
     "const readSwitchMemoMs": "70f761d778b80e80bcc0",
     "const READ_SWITCH_SHADOW_MAX_RATE": "87e382cd4dde2d8eb187",
     "const SWITCH_HEADER": "606e68d82f328a520997",
@@ -294,7 +304,7 @@
     "const REPORT_ATOMIC_LONG_SWITCH": "0e37ac6c20c7d2110c05",
     "const sampler": "6449c59b93d675d35123",
     "function setReportShadowSamplerForTests": "e940f692bc952f77589f",
-    "function reportAtomicMode": "0c4e1eed6f03de536af8",
+    "function reportAtomicMode": "ddef2b28f0f5066c66ff",
     "function reportCanonicalJson": "3af3e9d996ab9218dcf5",
     "function differingPaths": "0e1fbd538e085aace3d2",
     "function shadowCompare": "d768415ab11a00b01408",

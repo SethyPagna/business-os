@@ -98,6 +98,7 @@ const { signupPortalAccount, signinPortalAccount, PORTAL_CONSENT_VERSION } = loa
   './anonymousCustomer': anonymousCustomer,
   './passwordHash': loadRealPasswordHash(),
   './failedSignInCost': loadRealFailedSignInCost(),
+  './memberCode': loadReal('lib/memberCode.ts'),
 })
 
 const env = {}
@@ -148,6 +149,7 @@ function makeIsolatedPortal(membershipOverride = membershipNumber, hooks = {}) {
     './anonymousCustomer': anonymousCustomer,
     './passwordHash': loadRealPasswordHash(),
     './failedSignInCost': loadRealFailedSignInCost(),
+    './memberCode': loadReal('lib/memberCode.ts'),
   })
   return {
     signup: signup2,

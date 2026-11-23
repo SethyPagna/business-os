@@ -52,9 +52,11 @@ function randomToken(): string {
 
 export type PortalAccount = {
   id: number
-  membership_id: string
+  // The LC-##### an account from before members were separate was issued; NULL for every member created since.
+  membership_id: string | null
+  member_code: string | null
   name: string
-  phone: string
+  phone: string | null
   email: string | null
   contact_id: number | null
 }
@@ -64,6 +66,11 @@ export type PortalAccountState =
   // accountId lets the renew endpoint (and nothing else) act for the session.
   | { status: 'reconsent_required'; account: null; accountId: number; membershipId: string }
   | { status: 'unauthenticated'; account: null }
+
+// The id staff and the audit log see for an account: its LC number if it has one, else its W- code, else the row id.
+export function portalActorLabel(row: { id: number; membership_id?: string | null; member_code?: string | null }): string {
+  return String(row.membership_id ?? '').trim() || String(row.member_code ?? '').trim() || `account-${row.id}`
+}
 
 export async function createPortalSession(
   env: Env,
@@ -108,7 +115,7 @@ export async function getPortalAccountState<E extends { Bindings: Env } = { Bind
   const nowIso = new Date().toISOString()
   const db = getDb(c.env)
   const row = await db.prepare(`
-    SELECT a.id, a.membership_id, a.name, a.phone, a.email, a.contact_id,
+    SELECT a.id, a.membership_id, a.member_code, a.name, a.phone, a.email, a.contact_id,
            a.consent_version, a.consent_at, a.age_confirmed_at
     FROM portal_sessions s
     JOIN portal_accounts a ON a.id = s.account_id
@@ -116,12 +123,13 @@ export async function getPortalAccountState<E extends { Bindings: Env } = { Bind
     WHERE s.token_hash = @token_hash
       AND s.revoked_at IS NULL
       AND s.expires_at > @now
+      AND a.status = 'active'
       AND (a.contact_id IS NULL OR (c.id IS NOT NULL AND ${customerIsProfileSql('c')}))
     LIMIT 1
   `).get<PortalAccount & { consent_version: string | null; consent_at: string | null; age_confirmed_at: string | null }>({ token_hash: tokenHash, now: nowIso })
   if (!row) return { status: 'unauthenticated', account: null }
   if (!portalConsentCurrent(row)) {
-    return { status: 'reconsent_required', account: null, accountId: row.id, membershipId: row.membership_id }
+    return { status: 'reconsent_required', account: null, accountId: row.id, membershipId: portalActorLabel(row) }
   }
 
   c.executionCtx.waitUntil(

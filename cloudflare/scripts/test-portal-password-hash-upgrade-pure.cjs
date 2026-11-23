@@ -96,6 +96,7 @@ const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccount
   './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   './passwordHash': passwordHash,
   './failedSignInCost': failedSignInCost,
+  './memberCode': loadReal('lib/memberCode.ts'),
 })
 
 function isCurrentRowFor(row, password) {
