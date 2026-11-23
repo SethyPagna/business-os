@@ -26,22 +26,21 @@ export default function ShiftHeaderRow({ shift, children }: Props) {
   }
   return (
     <div className="flex min-w-0 items-start justify-between gap-3">
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-        <span className="text-sm font-semibold text-gray-900 dark:text-white">{fmtDateOnly(shift.business_date)}</span>
-        {shift.shift_code ? <span aria-hidden="true" className="text-xs text-gray-400">·</span> : null}
-        {shift.shift_code ? <span className="dense-id break-all text-[10px] text-gray-400 dark:text-gray-500">{shift.shift_code}</span> : null}
-        <span aria-hidden="true" className="text-xs text-gray-400">·</span>
-        <span title={t('shift_opened_by')} className="break-words text-xs text-gray-500 dark:text-gray-400">{shift.user_name || tr('shift_staff', 'Staff')}</span>
-        <span aria-hidden="true" className="text-xs text-gray-400">·</span>
-        <span className="break-words text-xs text-gray-500 dark:text-gray-400">{shift.branch_name || tr('all_branches', 'All branches')}</span>
+      <div className="min-w-0 flex-1 overflow-hidden py-px">
+      <div className="-ml-3 flex min-w-0 flex-wrap items-baseline gap-y-0.5">
+        <span className="shift-hdr-item text-sm font-semibold text-gray-900 dark:text-white">{fmtDateOnly(shift.business_date)}</span>
+        {shift.shift_code ? <span className="shift-hdr-item dense-id break-all text-[10px] text-gray-400 dark:text-gray-500">{shift.shift_code}</span> : null}
+        <span title={t('shift_opened_by')} className="shift-hdr-item break-words text-xs text-gray-500 dark:text-gray-400">{shift.user_name || tr('shift_staff', 'Staff')}</span>
+        <span className="shift-hdr-item break-words text-xs text-gray-500 dark:text-gray-400">{shift.branch_name || tr('all_branches', 'All branches')}</span>
         {shift.branch_active === false ? (
           <span
-            className="inline-flex rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 dark:bg-zinc-800 dark:text-gray-300"
+            className="ml-1.5 inline-flex rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600 dark:bg-zinc-800 dark:text-gray-300"
             title={tr('shift_branch_inactive_hint', 'This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.')}
           >
             {tr('shift_branch_inactive', 'Branch inactive')}
           </span>
         ) : null}
+      </div>
       </div>
       {children ? <div className="flex shrink-0 items-center gap-1.5">{children}</div> : null}
     </div>

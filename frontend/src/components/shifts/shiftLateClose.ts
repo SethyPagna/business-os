@@ -33,6 +33,11 @@ export function holdsLateClosePermission(merged: Record<string, unknown>, isAdmi
 }
 
 /** Whether a chosen close instant lies on the shift's own day, no later than 23:59:59. */
+/** The shift's day as the app writes dates (dd/mm/yyyy), for the closing-time label. Empty when the date is not a business date. */
+export function lateCloseDayLabel(businessDate: string): string {
+  return DATE_PATTERN.test(businessDate) ? businessDate.slice(8, 10) + '/' + businessDate.slice(5, 7) + '/' + businessDate.slice(0, 4) : ''
+}
+
 export function lateCloseTimeOnDay(businessDate: string, closeMs: number): boolean {
   const bounds = lateCloseBounds(businessDate)
   return !!bounds && Number.isFinite(closeMs) && closeMs >= bounds.startMs && closeMs <= bounds.lastSecondMs

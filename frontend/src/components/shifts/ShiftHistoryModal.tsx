@@ -614,7 +614,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
       </button>
       {open ? (
         <Modal
-          title={selected ? `${fmtDateOnly(selected.business_date)} · ${selected.shift_code}` : t('shift_history')}
+          title={selected ? <span className="whitespace-normal break-all">{`${fmtDateOnly(selected.business_date)} · ${selected.shift_code}`}</span> : t('shift_history')}
           onClose={dismiss}
           closeDisabled={saving}
           size="xl"
@@ -670,7 +670,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                         {!closeIsLate && canChooseShiftTime() ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_count_at_closing_time')}</p> : null}
                         {!closeIsLate && canChooseShiftTime() && selected.close_before ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300"><span className="font-medium">{t('shift_previous_open_close_before')}</span> · {fmtDateTime24(selected.close_before)}</p> : null}</div>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
-                        {closeIsLate ? <div className="space-y-3 sm:col-span-2"><LateCloseFields reason={close.reason} time={close.lateTime} disabled={saving || pending} onReason={(value) => setClose({ ...close, reason: value })} onTime={(value) => setClose({ ...close, lateTime: value })} /></div> : null}
+                        {closeIsLate ? <div className="space-y-3 sm:col-span-2"><LateCloseFields reason={close.reason} time={close.lateTime} day={selected?.business_date ?? ''} disabled={saving || pending} onReason={(value) => setClose({ ...close, reason: value })} onTime={(value) => setClose({ ...close, lateTime: value })} /></div> : null}
                         {!closeIsLate && canChooseShiftTime() ? <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div> : null}
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
                         {closeIsLate

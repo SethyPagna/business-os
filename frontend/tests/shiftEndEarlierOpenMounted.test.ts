@@ -125,10 +125,10 @@ await runTest('a same-day End shift shows no reason box and no time picker, and 
   const end = await mountEnd({ earlierOpen: false })
   try {
     const lateInputs = end.page.findAll((node) => node.tagName === 'INPUT'
-      && [en.shift_late_reason, en.shift_late_time].some((label) => (node.getAttribute('aria-label') ?? '').startsWith(label)))
+      && [en.shift_late_reason, en.shift_late_time.replace(' {date}', '')].some((label) => (node.getAttribute('aria-label') ?? '').startsWith(label)))
     assert.equal(lateInputs.length, 0, 'no reason field and no time field')
     assert.equal(end.page.text().includes(en.shift_late_reason), false, 'no reason label')
-    assert.equal(end.page.text().includes(en.shift_late_time), false, 'no time label')
+    assert.equal(end.page.text().includes(en.shift_late_time.replace(' {date}', '')), false, 'no time label')
     assert.equal(end.page.text().includes(en.shift_late_count_now), false, 'and the count keeps its own label')
     await end.page.click(end.submit())
     assert.equal(end.closes.length, 1, 'one close request')

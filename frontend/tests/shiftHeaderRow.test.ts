@@ -138,3 +138,28 @@ test('the Reports shift print subtitle is date · ID · cashier · branch', () =
   const report = read('../src/components/sales/reports/ShiftReport.tsx')
   assert.match(report, /subtitle: \[fmtDateOnly\(shift\.business_date\), shift\.shift_code, /)
 })
+
+test('the separators are drawn by the item, never a text node, so a dot cannot dangle at a wrapped line end', () => {
+  const box = headerContainer(render(shiftRow({ branch_active: false } as Partial<Shift>)))
+  assert.ok(!box.includes('·'), 'no "·" character anywhere in the row markup')
+  assert.ok(!/<span[^>]*>\s*[·|•/-]\s*<\/span>/.test(box), 'no span exists only to hold a separator')
+  for (const value of ['22/11/2026', CODE, '>Za<', '>LC Store<']) {
+    const item = box.match(new RegExp(`<span[^>]*class="([^"]*)"[^>]*>${value.replace(/[<>]/g, '')}</span>`))
+    assert.ok(item, `${value} is its own item`)
+    assert.match(item[1], /\bshift-hdr-item\b/, `${value} carries its own separator class`)
+  }
+  assert.match(box, /^<div class="(?:[^"]* )?-ml-3(?: |")/, 'the row is shifted left by the separator gap')
+  const html = render(shiftRow({ branch_active: false } as Partial<Shift>))
+  assert.ok(html.slice(0, html.indexOf(box)).match(/<div class="[^"]*\boverflow-hidden\b[^"]*"[^>]*>$/), 'inside a clipping box, so a dot at a line start is cut off')
+  const css = read('../src/styles/main.css')
+  assert.match(css, /\.shift-hdr-item::before \{ content:"\\00b7"; position:absolute;/, 'the dot is generated content in the item\'s left gap')
+  assert.match(css, /\.shift-hdr-item \{ position:relative; padding-left:\.75rem; \}/, 'and the gap equals the row\'s negative margin (-ml-3 = .75rem)')
+})
+
+test('the Shifts popup title wraps the full ID: no truncate, ellipsis, clipping or nowrap, and the ID is in it', () => {
+  const modal = read('../src/components/shifts/ShiftHistoryModal.tsx')
+  const line = modal.split('\n').find((row) => row.includes('title={selected ?')) ?? ''
+  assert.ok(line.includes('selected.shift_code'), 'the title carries the whole shift code')
+  assert.match(line, /className="[^"]*\bwhitespace-normal\b[^"]*\bbreak-all\b/, 'it wraps')
+  assert.ok(!/truncate|ellipsis|overflow-hidden|whitespace-nowrap|line-clamp/.test(line), 'and never truncates')
+})

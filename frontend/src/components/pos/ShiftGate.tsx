@@ -9,7 +9,7 @@ import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { CheckConnectionButton } from '../shared/SavingBlockedNote.tsx'
 import { fmtDate, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import { closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftLocalDateTimeFromMs, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
-import { LATE_CLOSE_DEFAULT_TIME, LATE_REASON_MAX, lateCloseDefaultTime, lateCloseIsoForTime, lateReason } from '../shifts/shiftLateClose.ts'
+import { LATE_CLOSE_DEFAULT_TIME, LATE_REASON_MAX, lateCloseDayLabel, lateCloseDefaultTime, lateCloseIsoForTime, lateReason } from '../shifts/shiftLateClose.ts'
 import { shiftCountIssue, shiftRielCountInvalid } from '../shifts/shiftCountRules.ts'
 import { TimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
@@ -300,6 +300,8 @@ function NoteFold({ note, onChange, disabled }: { note: string; onChange: (value
 /** What both entry points hold: one draft, one submit, one set of reasons. */
 type CarryOverCloseForm = {
   draft: CarryOverCloseDraft
+  /** The shift's business day: the closing time is a time on it. */
+  day: string
   set: (patch: Partial<CarryOverCloseDraft>) => void
   dirty: boolean
   busy: boolean
@@ -311,10 +313,11 @@ type CarryOverCloseForm = {
 }
 
 /** The late close's reason and day-bounded time, shared by the POS prompt, the POS header panel and the Shifts popup. */
-export function LateCloseFields({ reason, time, onReason, onTime, disabled }: {
-  reason: string; time: string; onReason: (value: string) => void; onTime: (value: string) => void; disabled: boolean
+export function LateCloseFields({ reason, time, day, onReason, onTime, disabled }: {
+  reason: string; time: string; day: string; onReason: (value: string) => void; onTime: (value: string) => void; disabled: boolean
 }) {
   const { t } = useApp() as ShiftGateContext
+  const timeLabel = t('shift_late_time').replace('{date}', lateCloseDayLabel(day))
   return (
     <>
       <label className="block">
@@ -325,8 +328,8 @@ export function LateCloseFields({ reason, time, onReason, onTime, disabled }: {
         />
       </label>
       <div>
-        <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{t('shift_late_time')}</span>
-        <TimeEntryInput className="mt-1" value={time} disabled={disabled} onChange={onTime} t={t} ariaLabel={t('shift_late_time')} />
+        <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{timeLabel}</span>
+        <TimeEntryInput className="mt-1" value={time} disabled={disabled} onChange={onTime} t={t} ariaLabel={timeLabel} />
         <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_late_time_hint')}</p>
       </div>
     </>
@@ -444,7 +447,7 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
   }
 
   return {
-    draft, busy, pending, submit,
+    draft, busy, pending, submit, day: shift?.business_date ?? '',
     set: (patch) => setDraft((current) => ({ ...current, ...patch })),
     dirty: draft.reason.trim() !== '' || draft.countedUsd.trim() !== '' || draft.countedKhr.trim() !== ''
       || draft.additionalUsd.trim() !== '' || draft.additionalKhr.trim() !== '' || draft.note.trim() !== '',
@@ -503,7 +506,7 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
   return (
     <>
       <LateCloseFields
-        reason={form.draft.reason} time={form.draft.time} disabled={frozen}
+        reason={form.draft.reason} time={form.draft.time} day={form.day} disabled={frozen}
         onReason={(value) => form.set({ reason: value })} onTime={(value) => form.set({ time: value })}
       />
 

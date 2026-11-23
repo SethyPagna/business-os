@@ -395,16 +395,27 @@ for (const key of ['shift_previous_open_title', 'shift_previous_open_hint', 'shi
   checks += 5
   console.log(`  ok - ${key} is written in both packs and rendered`)
 }
-// The hint has to say the one thing the cashier cannot guess, and say it
-// RIGHT: the closing time must precede the NEXT shift opened after this row,
-// or the Worker rejects the close with a 409. The old copy named today's
-// opening, which is the wrong instant whenever a second stale day sits between
-// them -- so the words it used are pinned out as well as the words it needs.
-assert.match(en.shift_previous_open_hint, /earlier than the next shift that was opened after it/)
-assert.doesNotMatch(en.shift_previous_open_hint, /earlier than that opening|yesterday|today's opening/)
+// The prompt only ever shows a row left open on an EARLIER day, so its hint states the late-close rule (close at a time on that
+// day, and say why). The old "earlier than the next shift that was opened after it" rule no longer applies to this prompt and is
+// pinned out, so it cannot come back.
+assert.match(en.shift_previous_open_hint, /left open on an earlier day/)
+assert.match(en.shift_previous_open_hint, /Close it at a time on that day and say why/)
+assert.doesNotMatch(en.shift_previous_open_hint, /earlier than the next shift|next shift that was opened|nothing closes it automatically/)
 assert.doesNotMatch(km.shift_previous_open_hint, /ថ្ងៃនេះ/) // "today", the instant the rule is NOT about
-checks += 3
-console.log('  ok - the hint states the ordering rule the Worker actually enforces, in both packs')
+checks += 4
+console.log('  ok - the hint states the late-close rule, in both packs')
+// The closing-time label names the shift's own day (dd/mm/yyyy) on both late forms; the wording of the two refusals is the Worker's sentence.
+const dayLabels = await import('../src/components/shifts/shiftLateClose.ts')
+assert.equal(en.shift_late_time, 'Closing time on {date}')
+assert.ok(km.shift_late_time.includes('{date}'), 'the Khmer label carries the day too')
+assert.equal(dayLabels.lateCloseDayLabel('2026-11-22'), '22/11/2026')
+assert.equal(dayLabels.lateCloseDayLabel('not a date'), '')
+assert.ok(gate.includes('time={form.draft.time} day={form.day}'), "the POS form passes the shift's day to the time label")
+assert.ok(read('src/components/shifts/ShiftHistoryModal.tsx').includes("day={selected?.business_date ?? ''}"), "the Shifts popup late form passes the shift's day too")
+assert.equal(en.shift_previous_open_locked, 'Only the cashier who opened it, an administrator, or someone allowed can close it.')
+assert.equal(en.shift_late_close_not_permitted, en.shift_previous_open_locked, "the same sentence as the Worker's 403")
+assert.equal(km.shift_late_close_not_permitted, km.shift_previous_open_locked, 'the same meaning in Khmer')
+checks += 9
 
 // ---- 10. EXECUTED: the two rules a spelling check cannot prove ------------
 //

@@ -12,6 +12,8 @@ import { accessibleText, createHarness, propsOf, type MemoryNode } from './mount
 
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+// The closing-time label names the shift's own day (the fixture's business_date is 2026-10-13), in the app's dd/mm/yyyy.
+const LATE_TIME_EN = en.shift_late_time.replace('{date}', '13/10/2026')
 
 let failed = 0
 async function runTest(name: string, fn: () => Promise<void> | void): Promise<void> {
@@ -63,10 +65,10 @@ await runTest('a closable earlier day with today not open: reason box, a time fi
   const gate = await mountGate(null)
   try {
     assert.equal(gate.labelled(en.shift_late_reason).length, 1, 'the reason box')
-    assert.equal(gate.labelled(en.shift_late_time).length, 1, 'one time field')
-    assert.equal(gate.labelled(`${en.shift_late_time} · ${en.date}`).length, 0, 'and no date field: the day is the shift\'s own')
+    assert.equal(gate.labelled(LATE_TIME_EN).length, 1, 'one time field')
+    assert.equal(gate.labelled(`${LATE_TIME_EN} · ${en.date}`).length, 0, 'and no date field: the day is the shift\'s own')
     assert.equal(gate.labelled(en.date).length, 0)
-    assert.equal(propsOf(gate.labelled(en.shift_late_time)[0]).value, '23:59', 'it starts at 23:59')
+    assert.equal(propsOf(gate.labelled(LATE_TIME_EN)[0]).value, '23:59', 'it starts at 23:59')
     assert.ok(gate.page.text().includes(en.shift_late_count_now), 'the count is labelled Cash in drawer now')
     assert.ok(gate.page.text().includes(en.shift_late_count_hint), 'with its hint')
     assert.equal(gate.page.text().includes(en.shift_late_not_counted), false)
@@ -114,7 +116,7 @@ await runTest('someone the Worker does not let close the row is offered no form 
   const gate = await mountGate(null, false)
   try {
     assert.equal(gate.labelled(en.shift_late_reason).length, 0, 'no reason box')
-    assert.equal(gate.labelled(en.shift_late_time).length, 0, 'no time field')
+    assert.equal(gate.labelled(LATE_TIME_EN).length, 0, 'no time field')
     assert.equal(gate.closeButton(), undefined, 'no Close button that can only fail')
     assert.ok(gate.page.text().includes(en.shift_previous_open_locked))
     const instead = gate.page.button(en.shift_open_today_instead)
@@ -131,7 +133,7 @@ await runTest('the late-close lines read in Khmer', async () => {
   const gate = await mountGate(null, true, 'km')
   try {
     for (const key of ['shift_late_reason', 'shift_late_time', 'shift_late_count_now', 'shift_late_count_hint']) {
-      assert.ok(gate.page.text().includes(km[key]), key)
+      assert.ok(gate.page.text().includes(km[key].replace('{date}', '13/10/2026')), key)
       assert.notEqual(km[key], en[key])
       assert.match(km[key], /[ក-៿]/)
     }
