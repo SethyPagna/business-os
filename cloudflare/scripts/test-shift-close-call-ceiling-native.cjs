@@ -375,13 +375,19 @@ const withoutLateFacts = (value) => {
 }
 const figuresWithoutLateFacts = (json) => {
   if (!json) return json
-  return JSON.stringify(JSON.parse(json), (key, val) => key === 'needs_review' ? undefined : key === 'review_codes' && Array.isArray(val) ? val.filter((code) => code !== LATE_REVIEW_CODE) : val)
+  const figures = JSON.parse(json)
+  // The stored window ends where the shift closed: the same closed_at fact, checked on its own below.
+  if (figures && figures.window) delete figures.window.closed_at
+  return JSON.stringify(figures, (key, val) => key === 'needs_review' ? undefined : key === 'review_codes' && Array.isArray(val) ? val.filter((code) => code !== LATE_REVIEW_CODE) : val)
 }
 const NL = String.fromCharCode(10)
 const CLOSED_LATE_ROW = new RegExp('Closed late|បិទយឺត')
-const CLOSE_ROW = /^Close(\s|$|:)/
+// Rows start with the bullet "· ". The close-time row is "· Close/បិទ: <date time>".
+const CLOSE_ROW = new RegExp('^\\W*Close/បិទ:')
+// telegram.ts leaves out "Closed by" when the "Closed late by" row already names the same account, so the base's row is set aside too.
+const CLOSED_BY_ROW = new RegExp('^\\W*Closed by/បិទដោយ:')
 const HAS_ZONE = /(Z|[+-]\d\d:\d\d)$/i
-const textsWithoutLateFacts = (run) => scrub(JSON.stringify(run.telegram.map((message) => message.split(NL).filter((row) => !CLOSED_LATE_ROW.test(row) && !CLOSE_ROW.test(row)).join(NL))))
+const textsWithoutLateFacts = (run) => scrub(JSON.stringify(run.telegram.map((message) => message.split(NL).filter((row) => !CLOSED_LATE_ROW.test(row) && !CLOSE_ROW.test(row) && !CLOSED_BY_ROW.test(row)).join(NL))))
 const businessDayLastSecondMs = (businessDate) => Date.parse(businessDate + 'T00:00:00Z') - 7 * 3600e3 + 24 * 3600e3 - 1000
 const toMs = (stamp) => Date.parse(HAS_ZONE.test(String(stamp)) ? String(stamp) : String(stamp).replace(' ', 'T') + 'Z')
 async function main() {
@@ -433,6 +439,14 @@ async function main() {
       assert.ok(shift.business_date < '2026-10-20', `${scenario.name}: the shift is from an earlier business day`)
       assert.ok(shift.reconciliation.review_codes.includes(LATE_REVIEW_CODE), `${scenario.name}: review code ${JSON.stringify(shift.reconciliation.review_codes)}`)
       assert.equal(shift.reconciliation.needs_review, true, `${scenario.name}: needs_review`)
+      const stored = JSON.parse(newRun.figures)
+      assert.equal(toMs(stored.window.closed_at), businessDayLastSecondMs(shift.business_date), `${scenario.name}: the stored figures window ends at ${stored.window.closed_at}`)
+      if (scenario.telegramOn !== false) {
+        const rows = newRun.telegram[0].split(NL)
+        const [y, m, d] = shift.business_date.split('-')
+        assert.ok(rows.some((row) => CLOSE_ROW.test(row) && row.includes(`${d}/${m}/${y} 23:59`)), `${scenario.name}: the Close row shows the day end: ${rows.find((row) => CLOSE_ROW.test(row))}`)
+        assert.ok(rows.some((row) => CLOSED_LATE_ROW.test(row) && row.includes(':')), `${scenario.name}: a Closed late by row with its reason is printed`)
+      }
     }
   })
 

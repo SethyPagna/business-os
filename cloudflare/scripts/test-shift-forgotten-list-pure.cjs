@@ -2,7 +2,8 @@
 // earlier-day shifts of other cashiers (per_account mode lists only the caller's own rows). Measured in a pure harness:
 //   - statements: ONE, whatever the number of rows: each row's next-segment opening is a correlated scalar subquery inside the list statement
 //     (NEXT_OPENING_SQL, the rule readAdjacentShift/intervalError use), so 1, 3 and the maximum number of rows cost the same; with a
-//     branch filter one more (branchExists). It reads no shift policy, no setting and no sale.
+//     branch filter one more (branchExists). It reads no setting and no sale. It reads the shift policy (one statement) only for a
+//     non-administrator whose list holds another cashier's shop-wide row, to answer can_edit exactly (6.0.2980).
 //   - rows: the plan scans the PARTIAL index idx_shift_sessions_open (WHERE closed_at IS NULL: the open rows AND the rows cancelled while open, because a cancel never sets
 //     closed_at; the index cannot tell them apart, so cancelled_at IS NULL is a row filter), so on 2,000 stored shifts it reads those rows
 //     and nothing else; a normal day is a handful (asserted at most 50).
