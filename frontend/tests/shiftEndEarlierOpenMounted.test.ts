@@ -75,11 +75,11 @@ async function mountEnd(options: { user?: typeof EMPLOYEE | typeof ADMIN; earlie
   return { page, closes, notices, submit, pack }
 }
 
-await runTest('an employee with an earlier drawer open: the panel says an administrator must close it first, and End is off', async () => {
+await runTest('an employee with an earlier drawer open: the panel tells the cashier who may close it to close it first, and End is off', async () => {
   const end = await mountEnd({ earlierOpen: true })
   try {
-    assert.ok(end.page.text().includes(en.shift_earlier_admin_must_close_first), 'the translated sentence is on the panel')
-    assert.equal(en.shift_earlier_admin_must_close_first, 'An administrator must close the earlier shift first.')
+    assert.ok(end.page.text().includes(en.shift_earlier_close_first), 'the translated sentence is on the panel')
+    assert.equal(en.shift_earlier_close_first, 'Close the earlier shift first.')
     assert.equal(propsOf(end.submit()).disabled, true, 'End cannot only fail')
     assert.deepEqual(end.closes, [], 'nothing was sent')
   } finally {
@@ -90,7 +90,7 @@ await runTest('an employee with an earlier drawer open: the panel says an admini
 await runTest('an administrator is not blocked by the earlier drawer on the panel', async () => {
   const end = await mountEnd({ user: ADMIN, earlierOpen: true })
   try {
-    assert.equal(end.page.text().includes(en.shift_earlier_admin_must_close_first), false)
+    assert.equal(end.page.text().includes(en.shift_earlier_close_first), false)
     assert.notEqual(propsOf(end.submit()).disabled, true)
   } finally {
     await end.page.unmount()
@@ -99,6 +99,7 @@ await runTest('an administrator is not blocked by the earlier drawer on the pane
 
 for (const [code, english] of [
   ['shift_earlier_admin_must_close_first', 'An administrator must close the earlier shift first.'],
+  ['shift_earlier_close_first', 'Close the earlier shift first.'],
   ['shift_overlaps_previous_segment', 'Opening time overlaps the previous shift segment.'],
 ] as const) {
   for (const language of ['en', 'km'] as const) {
@@ -119,6 +120,24 @@ for (const [code, english] of [
     })
   }
 }
+
+await runTest('a same-day End shift shows no reason box and no time picker, and sends no reason and no time', async () => {
+  const end = await mountEnd({ earlierOpen: false })
+  try {
+    const lateInputs = end.page.findAll((node) => node.tagName === 'INPUT'
+      && [en.shift_late_reason, en.shift_late_time].some((label) => (node.getAttribute('aria-label') ?? '').startsWith(label)))
+    assert.equal(lateInputs.length, 0, 'no reason field and no time field')
+    assert.equal(end.page.text().includes(en.shift_late_reason), false, 'no reason label')
+    assert.equal(end.page.text().includes(en.shift_late_time), false, 'no time label')
+    assert.equal(end.page.text().includes(en.shift_late_count_now), false, 'and the count keeps its own label')
+    await end.page.click(end.submit())
+    assert.equal(end.closes.length, 1, 'one close request')
+    assert.equal('reason' in end.closes[0], false, 'the same-day close sends no reason')
+    assert.equal(end.closes[0].closedAt, undefined, 'and no chosen time')
+  } finally {
+    await end.page.unmount()
+  }
+})
 
 await runTest('the new sentence exists in both packs and differs', () => {
   assert.match(km.shift_earlier_admin_must_close_first, /[ក-៿]/)

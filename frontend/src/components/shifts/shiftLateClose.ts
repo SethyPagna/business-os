@@ -54,3 +54,22 @@ export function lateCloseIsoForTime(businessDate: string, time: string): string 
 export function offersLateClose(input: { isOwner: boolean; isAdministrator: boolean; merged: Record<string, unknown> }): boolean {
   return input.isOwner || holdsLateClosePermission(input.merged, input.isAdministrator)
 }
+
+const MINUTE_MS = 60 * 1000
+
+/**
+ * The picker's starting 'HH:mm': 23:59 of the shift's own day, or a minute before the next segment's opening when that
+ * opened earlier the same day, and never before the row's own opening. The Worker still checks the last money record.
+ */
+export function lateCloseDefaultTime(businessDate: string, closeBefore: string | null | undefined, ownOpenedAt: string | null | undefined): string {
+  const bounds = lateCloseBounds(businessDate)
+  if (!bounds) return LATE_CLOSE_DEFAULT_TIME
+  let ms = bounds.startMs + (24 * 60 - 1) * MINUTE_MS
+  const beforeMs = closeBefore ? Date.parse(closeBefore) : NaN
+  if (Number.isFinite(beforeMs)) ms = Math.min(ms, Math.floor((beforeMs - MINUTE_MS) / MINUTE_MS) * MINUTE_MS)
+  const ownMs = ownOpenedAt ? Date.parse(ownOpenedAt) : NaN
+  if (Number.isFinite(ownMs)) ms = Math.max(ms, Math.ceil(ownMs / MINUTE_MS) * MINUTE_MS)
+  ms = Math.min(Math.max(ms, bounds.startMs), bounds.startMs + (24 * 60 - 1) * MINUTE_MS)
+  const minutes = Math.round((ms - bounds.startMs) / MINUTE_MS)
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}

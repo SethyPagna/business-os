@@ -27,6 +27,7 @@ globalThis.window = Object.assign(new EventTarget(), {
 }) as unknown as Window & typeof globalThis
 const transportModule = await import('../src/api/shiftTransport.ts')
 const shiftCountRules = await import('../src/components/shifts/shiftCountRules.ts') // the riel rule ShiftGate / ShiftHistoryModal ask
+const shiftLateClose = await import('../src/components/shifts/shiftLateClose.ts')
 const model = await import('../src/components/shifts/shiftReportModel.ts')
 
 const OPENED_AT = '2026-10-13T01:07:00.000Z'
@@ -94,6 +95,7 @@ async function summaryFacts(closed: Record<string, unknown>): Promise<Array<[str
     if (name.includes('useSavingGate')) return { useSavingGate: () => ({ blocked: false, reason: '' }) }
     if (name.includes('shiftReportModel')) return model
     if (name.includes('shiftCountRules')) return shiftCountRules
+    if (name.includes('shiftLateClose')) return shiftLateClose
     if (name.includes('shiftTransport')) return {
       ...transportModule,
       fetchCurrentShift: async () => currentShift,

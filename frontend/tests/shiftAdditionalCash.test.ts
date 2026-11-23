@@ -114,15 +114,23 @@ test('the figures block and the Reports export share that one order', () => {
   }
 })
 
-test('the POS close form asks for the additional before the counted drawer', () => {
+test('the POS close forms ask for the additional before the counted drawer', () => {
   const gate = read('../src/components/pos/ShiftGate.tsx')
-  const additional = gate.indexOf("label={t('shift_additional_cash')}")
-  const counted = gate.indexOf("label={t('shift_counted_cash')}")
+  // The same-day End Shift form: opening, then the additional (it takes the focus), then the closing count.
+  const lateStart = gate.indexOf('<LateCloseFields')
+  const lateCount = gate.indexOf('<LateCountField', lateStart)
+  const additional = gate.indexOf("label={t('shift_additional_cash')}", lateCount)
+  const counted = gate.indexOf("label={t('shift_counted_cash')}", additional)
   assert.ok(additional > 0 && counted > additional, 'the additional pair renders before the closing count')
   // The first field of the form is the one that takes the focus, so the
   // cashier is not typed into a field the form already scrolled past.
   assert.match(gate.slice(gate.lastIndexOf('<ShiftCountPair', additional), additional), /autoFocus/)
   assert.doesNotMatch(gate.slice(gate.lastIndexOf('<ShiftCountPair', counted), counted), /autoFocus/)
+  // The late close of an earlier day: the reason box first, with the focus, then the additional, then the count.
+  const lateAdditional = gate.indexOf("label={t('shift_additional_cash')}", lateStart)
+  assert.ok(lateStart > 0 && lateCount > lateAdditional && lateAdditional > lateStart, 'the late form asks the reason, then the additional, then the count')
+  assert.match(gate.slice(gate.indexOf('export function LateCloseFields'), gate.indexOf('export function LateCountField')), /autoFocus maxLength=\{LATE_REASON_MAX\}/)
+  assert.doesNotMatch(gate.slice(gate.lastIndexOf('<ShiftCountPair', lateAdditional), lateAdditional), /autoFocus/)
   // ... and the post-close summary chain reads in the same direction.
   const openedWith = gate.indexOf("t('shift_opened_with')")
   const additionalFact = gate.indexOf("t('shift_recon_additional_cash')")
