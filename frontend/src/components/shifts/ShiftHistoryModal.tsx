@@ -150,6 +150,26 @@ function jsonRecord(raw: string): Record<string, unknown> {
   } catch { return {} }
 }
 
+/** The standing "closed late" review of one shift: the newest journal row that evaluated the times names who closed it late and why. */
+export function lateCloseReview(rows: ShiftAmendment[]): { by: string; reason: string } | null {
+  const newest = rows.filter((row) => Array.isArray(jsonRecord(row.after_json).time_review)).sort((a, b) => b.id - a.id)[0]
+  const entries = newest ? jsonRecord(newest.after_json).time_review as Array<{ code?: unknown; by?: unknown; reason?: unknown }> : []
+  const entry = entries.find((item) => item?.code === 'closed_late')
+  return entry ? { by: typeof entry.by === 'string' ? entry.by : '', reason: typeof entry.reason === 'string' ? entry.reason : '' } : null
+}
+
+export function ClosedLateNote({ rows }: { rows: ShiftAmendment[] }) {
+  const { t } = useApp() as { t: (key: string) => string }
+  const review = lateCloseReview(rows)
+  if (!review) return null
+  return (
+    <p className="mb-2 flex min-w-0 flex-wrap items-baseline gap-2 text-xs">
+      <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{t('shift_closed_late')}</span>
+      {review.reason ? <span className="min-w-0 break-words text-gray-700 dark:text-gray-200">{review.by ? `${review.by}: ` : ''}{review.reason}</span> : null}
+    </p>
+  )
+}
+
 /** Exported for tests/shiftAmendForm.test.ts, which renders the real
  * before -> after list rather than grepping this file for it. */
 export function AmendmentList({ rows, segments = [] }: { rows: ShiftAmendment[]; segments?: Shift[] }) {
@@ -712,6 +732,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
 
               <section aria-busy={detailsLoading}>
                 <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">{t('shift_amendments')}</h3>
+                {!detailsLoading && !detailsError && selected.closed_at ? <ClosedLateNote rows={amendments.filter((row) => row.shift_session_id === selected.id)} /> : null}
                 {!detailsLoading && !detailsError ? <AmendmentList rows={amendments} segments={segments} /> : null}
               </section>
             </div>
