@@ -453,9 +453,8 @@ async function main() {
     assert.equal(first.status, 200, JSON.stringify(first.body))
     const retry = await close(w, late, { reason: REASON, client_request_id: id })
     assert.equal(retry.status, 200, JSON.stringify(retry.body))
-    assert.equal(retry.body.mutation_committed, true)
-    assert.equal(retry.body.already_closed, true)
-    assert.equal(retry.body.shift.id, late.id)
+    assert.equal(retry.body.replayed, true)
+    assert.equal(retry.body.id, late.id)
     assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='shift.close'").get().n, 1, 'the retry wrote nothing')
     const other = user(13, 'otherholder', { pos: true, shift_close_forgotten: true })
     for (const who of [other, COLLEAGUE, STRING_HOLDER]) {
@@ -517,6 +516,124 @@ async function main() {
     assert.equal((await w.h.json('GET', '/?forgotten=1&branch_id=1')).body.shifts.length, 2)
     const branch = await w.h.json('GET', '/?forgotten=1&branch_id=2')
     assert.deepEqual(branch.body.shifts, [])
+  })
+
+  await check('21. the holder retry (N1): a stored receipt replays only for the addressed shift; the holder gets a minimal body; the opener and an administrator keep the full replay', async () => {
+    const id = 'holder-retry-ruling-0001'
+    const w = world(); const late = w.dayOne()
+    w.h.as(HOLDER)
+    const first = await close(w, late, { reason: REASON, client_request_id: id })
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    const retry = await close(w, late, { reason: REASON, client_request_id: id })
+    assert.equal(retry.status, 200, JSON.stringify(retry.body))
+    assert.deepEqual(Object.keys(retry.body).sort(), ['closed_at', 'id', 'replayed', 'status'], 'the holder replay carries only the shift id, status, closed_at and replayed')
+    assert.deepEqual(retry.body, { id: late.id, status: 'closed', closed_at: w.dayEnd(w.yesterday), replayed: true })
+    const hiddenClosed = w.open(w.yesterday, { user_id: 8, user_name: 'colleague', shift_code: 'S-LATE-HIDDEN-CLOSED', closed_at: `${w.yesterday}T15:00:00.000Z`, closed_by_user_id: 8, closed_by_user_name: 'colleague' })
+    const hiddenSameDay = w.dayTwo({ user_id: 8, user_name: 'colleague', shift_code: 'S-LATE-HIDDEN-TODAY' })
+    for (const hidden of [hiddenClosed, hiddenSameDay]) {
+      const reused = await close(w, hidden, { reason: REASON, client_request_id: id })
+      assert.equal(reused.status, 404, `${hidden.shift_code}: a request id reused on a hidden shift answers what an unknown request answers: ${JSON.stringify(reused.body)}`)
+      assert.equal(reused.body.error, 'Shift not found.')
+      const unknown = await close(w, hidden, { reason: REASON, client_request_id: 'never-used-request-id-0001' })
+      assert.deepEqual(reused, unknown, `${hidden.shift_code}: the same answer as a fresh request id`)
+      const legacy = await w.h.json('POST', '/close', { shift_id: hidden.id, expected_revision: hidden.revision, reason: REASON, client_request_id: id })
+      assert.equal(legacy.status, 404, `${hidden.shift_code} legacy close: ${JSON.stringify(legacy.body)}`)
+    }
+    assert.equal(w.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='shift.close'").get().n, 1, 'nothing was written')
+
+    const own = world(); const mine = own.dayOne()
+    own.h.as(CASHIER)
+    const ownFirst = await close(own, mine, { reason: REASON, client_request_id: id })
+    assert.equal(ownFirst.status, 200, JSON.stringify(ownFirst.body))
+    const ownRetry = await close(own, mine, { reason: REASON, client_request_id: id })
+    assert.equal(ownRetry.status, 200, JSON.stringify(ownRetry.body))
+    assert.deepEqual(Object.keys(ownRetry.body).sort(), ['already_closed', 'is_open', 'mutation_committed', 'shift'], 'the opener replay is the full replay as before')
+    assert.equal(ownRetry.body.shift.opening_float_usd, 20)
+    assert.equal(ownRetry.body.shift.id, mine.id)
+    const boss = world(); const bossRow = boss.dayOne()
+    boss.h.as(ADMIN)
+    assert.equal((await close(boss, bossRow, { reason: REASON, client_request_id: id })).status, 200)
+    const bossRetry = await close(boss, bossRow, { reason: REASON, client_request_id: id })
+    assert.equal(bossRetry.status, 200)
+    assert.deepEqual(Object.keys(bossRetry.body).sort(), ['already_closed', 'is_open', 'mutation_committed', 'shift'], 'an administrator keeps the full replay')
+
+    const withdrawn = world(); const row = withdrawn.dayOne()
+    withdrawn.h.as(HOLDER)
+    assert.equal((await close(withdrawn, row, { reason: REASON, client_request_id: id })).status, 200)
+    withdrawn.h.as(user(10, 'holder', { pos: true }))
+    const after = await close(withdrawn, row, { reason: REASON, client_request_id: id })
+    assert.equal(after.status, 404, `a holder whose grant was withdrawn gets 404: ${JSON.stringify(after.body)}`)
+    assert.equal(after.body.replayed, undefined)
+  })
+
+  await check('22. the widening reaches only the late close and the history read: reopen, cancel, amend and every keyed request stay 404 or refused as at 27ccac698', async () => {
+    const w = world(); const late = w.dayOne()
+    w.h.as(HOLDER)
+    const before = JSON.stringify(w.stored(late.id))
+    const reopen = { expected_revision: late.revision, reason: 'forgot a sale' }
+    const plainReopen = await w.h.json('POST', `/${late.id}/reopen`, reopen)
+    assert.equal(plainReopen.status, 404, `plain reopen: ${JSON.stringify(plainReopen.body)}`)
+    const keyedReopen = await w.h.json('POST', `/${late.id}/reopen`, { ...reopen, client_request_id: 'holder-reopen-request-0001' })
+    assert.equal(keyedReopen.status, 404, `keyed reopen (the request check is not widened): ${JSON.stringify(keyedReopen.body)}`)
+    const keyedAmend = await w.h.json('PATCH', `/${late.id}`, { expected_revision: late.revision, reason: 'x', opening_float_usd: 5, client_request_id: 'holder-amend-request-0002' })
+    assert.equal(keyedAmend.status, 404, 'keyed amend')
+    for (const body of [{ expected_revision: late.revision, reason: 'x' }, { expected_revision: late.revision, reason: 'x', client_request_id: 'holder-cancel-request-0001' }]) {
+      const cancel = await w.h.json('POST', `/${late.id}/cancel`, body)
+      assert.equal(cancel.status, 403, `cancel stays administrator-only: ${JSON.stringify(cancel.body)}`)
+    }
+    assert.equal(JSON.stringify(w.stored(late.id)), before, 'nothing was written')
+    assert.equal((await w.h.json('GET', `/${late.id}/history`)).status, 200, 'the history read is the one widened read')
+    assert.equal((await close(w, late, { reason: REASON, client_request_id: 'holder-close-request-0003' })).status, 200, 'and the late close')
+  })
+
+  await check('23. the grant table: the route holdsLateClose answers every shape of the shared fixture (the screen asserts the same table)', async () => {
+    const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'shift-late-close-cases.json'), 'utf8')).grantUsers
+    assert.ok(cases.length >= 9)
+    const w = world()
+    for (const [index, row] of cases.entries()) {
+      w.h.as({ id: 40 + index, name: row.name, username: row.name, role_code: row.role_code, permissions: row.permissions, role_permissions: row.role_permissions })
+      const res = await w.h.json('GET', '/?forgotten=1')
+      if (row.allowed) assert.equal(res.status, 200, `${row.name}: ${JSON.stringify(res.body)}`)
+      else {
+        assert.equal(res.status, 403, `${row.name}: ${JSON.stringify(res.body)}`)
+        assert.equal(res.body.code, 'shift_late_close_not_permitted', `${row.name}: refused for the grant, not for shift use`)
+      }
+    }
+  })
+
+  await check('24. can_edit is true only when the Worker accepts the amend from this caller (N6)', async () => {
+    const edit = (res, id) => res.body.shifts.find((shift) => shift.id === id).capabilities
+    const w = world(); const theirs = w.dayOne({ user_id: 8, user_name: 'colleague', shift_code: 'S-LATE-THEIRS' }); const mine = w.dayOne({ user_id: 10, user_name: 'holder', shift_code: 'S-LATE-MINE' })
+    w.h.as(HOLDER)
+    const list = await w.h.json('GET', '/?forgotten=1')
+    assert.equal(edit(list, theirs.id).can_edit, false, 'the forgotten list: a row the holder reached only through the widening')
+    assert.equal(edit(list, theirs.id).can_close, true)
+    assert.equal(edit(list, mine.id).can_edit, true, 'the holder own row')
+    const history = await w.h.json('GET', `/${theirs.id}/history`)
+    assert.equal(history.status, 200)
+    assert.equal(history.body.shift.capabilities.can_edit, false, 'the history read of a widened row')
+    assert.equal(history.body.segments[0].capabilities.can_edit, false, 'and its segments')
+    assert.equal((await w.h.json('PATCH', `/${theirs.id}`, { expected_revision: theirs.revision, reason: 'x', opening_float_usd: 5 })).status, 404, 'the Worker refuses the amend the flag says no to')
+    w.h.as(ADMIN)
+    const adminList = await w.h.json('GET', '/?forgotten=1')
+    assert.equal(edit(adminList, theirs.id).can_edit, true, 'an administrator keeps true')
+    assert.equal(edit(adminList, mine.id).can_edit, true)
+    assert.equal((await w.h.json('GET', `/${theirs.id}/history`)).body.shift.capabilities.can_edit, true)
+
+    const shop = world(); shop.sqlite.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('shift_scope_mode','shop_wide')").run()
+    const shared = shop.dayOne({ scope_mode: 'shop_wide', user_id: 8, user_name: 'colleague', shift_code: 'S-LATE-SHARED' })
+    shop.h.as(HOLDER)
+    assert.equal(edit(await shop.h.json('GET', '/?forgotten=1'), shared.id).can_edit, true, 'shop-wide mode: the holder may amend a shop-wide row, so the flag is true')
+    assert.equal((await shop.h.json('GET', `/${shared.id}/history`)).body.shift.capabilities.can_edit, true)
+    assert.equal((await shop.h.json('PATCH', `/${shared.id}`, { expected_revision: shared.revision, reason: 'x', opening_float_usd: 21 })).status, 200, 'and the Worker accepts it')
+    const today = shop.dayTwo({ scope_mode: 'shop_wide', user_id: 7, shift_code: 'S-LATE-SHARED-TODAY' })
+    shop.h.as(COLLEAGUE)
+    assert.equal(edit(await shop.h.json('GET', '/'), today.id).can_edit, true, 'a shop-wide caller keeps true on the normal list')
+
+    const left = world(); const leftover = left.dayOne({ scope_mode: 'shop_wide', user_id: 8, user_name: 'colleague', shift_code: 'S-LATE-LEFTOVER' })
+    left.h.as(HOLDER)
+    assert.equal(edit(await left.h.json('GET', '/?forgotten=1'), leftover.id).can_edit, false, 'per-account mode with a left-over shop-wide row: the Worker would refuse')
+    assert.equal((await left.h.json('GET', `/${leftover.id}/history`)).body.shift.capabilities.can_edit, false)
   })
 
   if (failed.length) { console.log(`\n${failed.length} FAILED, ${passed} passed`); process.exit(1) }

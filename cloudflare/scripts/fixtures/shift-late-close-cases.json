@@ -36,5 +36,17 @@
     { "merged": { "shift_close_forgotten": "yes" }, "admin": false, "allowed": false },
     { "merged": {}, "admin": true, "allowed": true },
     { "merged": { "shift_close_forgotten": false }, "admin": true, "allowed": true }
+  ],
+  "grantUsers": [
+    { "name": "administrator", "role_code": "admin", "permissions": "{\"pos\": true}", "role_permissions": null, "allowed": true },
+    { "name": "all grant", "role_code": "cashier", "permissions": "{\"pos\": true,\"all\": true}", "role_permissions": null, "allowed": true },
+    { "name": "role-level grant (Manager)", "role_code": "manager", "permissions": "{\"pos\": true}", "role_permissions": "{\"shift_close_forgotten\": true}", "allowed": true },
+    { "name": "user-level true", "role_code": "cashier", "permissions": "{\"pos\": true,\"shift_close_forgotten\": true}", "role_permissions": null, "allowed": true },
+    { "name": "user-level true string", "role_code": "cashier", "permissions": "{\"pos\": true,\"shift_close_forgotten\": \"true\"}", "role_permissions": null, "allowed": false },
+    { "name": "user-level numeric 1", "role_code": "cashier", "permissions": "{\"pos\": true,\"shift_close_forgotten\": 1}", "role_permissions": null, "allowed": false },
+    { "name": "user-level false over a role grant", "role_code": "manager", "permissions": "{\"pos\": true,\"shift_close_forgotten\": false}", "role_permissions": "{\"shift_close_forgotten\": true}", "allowed": false },
+    { "name": "review", "role_code": "cashier", "permissions": "{\"pos\": true,\"shift_close_forgotten\": \"review\"}", "role_permissions": null, "allowed": false },
+    { "name": "double-encoded JSON string", "role_code": "cashier", "permissions": "\"{\\\"pos\\\": true,\\\"shift_close_forgotten\\\": true}\"", "role_permissions": "{\"pos\": true}", "allowed": false },
+    { "name": "no grant", "role_code": "cashier", "permissions": "{\"pos\": true}", "role_permissions": null, "allowed": false }
   ]
 }

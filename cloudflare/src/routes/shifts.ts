@@ -61,30 +61,33 @@ app.use('*', async (c, next) => {
   // No branch-activity check here: a committed receipt replays even after its
   // branch was retired, and each handler decides what an inactive branch
   // allows (N7 -- close and cancel yes, amend and reopen no).
-  const replay = async () => {
+  let policyRead: ShiftPolicy | undefined
+  const replay = async (forShift = false) => {
     const receipt = await db.prepare(`SELECT entity_id, details FROM audit_logs
       WHERE +user_id = CAST(@actor AS INTEGER) AND action=@action AND json_valid(details)
         AND json_extract(details,'$.request.id')=@requestId ORDER BY id DESC LIMIT 1`)
       .get<{ entity_id: string; details: string }>({ actor: user.id, action: `shift.${action}`, requestId: body.client_request_id })
     if (!receipt) return null
+    if (forShift && Number(receipt.entity_id) !== target.id) return null
     const request = JSON.parse(receipt.details).request
     if (JSON.stringify(request) !== JSON.stringify(mutationRequest(body, target.id))) return c.json({ error: 'Shift request identity was reused with different values.' }, 409)
     const saved = await readShiftById(db, Number(receipt.entity_id))
     if (!saved) return c.json({ error: 'Committed shift could not be read back.' }, 503)
+    if (action === 'close' && policyRead && !canSeeShift(user, policyRead, target)) return c.json({ id: saved.id, status: saved.cancelled_at ? 'cancelled' : saved.closed_at ? 'closed' : 'open', closed_at: saved.closed_at, replayed: true }, 200)
     return c.json({ shift: await reconciledShift(c.env, user, saved), mutation_committed: true,
       ...(action === 'close' ? { already_closed: true, is_open: false } : {}),
       ...(action === 'cancel' ? { cancelled: true } : {}),
       ...(action === 'reopen' ? { reopened_from_shift_id: target.id } : {}),
     }, 200)
   }
-  let policyRead: ShiftPolicy | undefined
   if (action !== 'cancel') {
     policyRead = await readShiftPolicy(db)
     const visible = action === 'close' ? canSeeShiftToClose(user, policyRead, target) : canSeeShift(user, policyRead, target)
     if (!visible) {
       // A grant holder's retry of a late close it committed: the row is closed now and no longer theirs to see, but the receipt is
-      // theirs (looked up by this account and this request id), so the stored result comes back instead of a 404.
-      if (action === 'close' && holdsLateClose(user)) { const prior = await replay(); if (prior) return prior }
+      // theirs (this account, this request id, and only for this very shift: another shift answers 404 as an unknown id does).
+      // The answer is the minimal one (id, status, closed_at), never the row.
+      if (action === 'close' && holdsLateClose(user)) { const prior = await replay(true); if (prior) return prior }
       return c.json({ error: 'Shift not found.' }, 404)
     }
   }
@@ -655,14 +658,16 @@ function canMutateShift(user: SessionUser, shift: ShiftRow): boolean {
 function canAmendShift(user: SessionUser, shift: ShiftRow): boolean {
   return canUseShifts(user) && !shift.cancelled_at
 }
-function responseShift(user: SessionUser, row: ShiftDbRow): ShiftResponseRow {
+/** `policy` makes can_edit exact (the amend follows canSeeShift). Without it a row is taken as seen when it is the caller's own, the caller is an administrator, or it is a shop-wide row. */
+function responseShift(user: SessionUser, row: ShiftDbRow, policy?: ShiftPolicy): ShiftResponseRow {
   const shift = storedShift(row)
+  const reach = policy ? canSeeShift(user, policy, shift) : canManageShifts(user) || shift.user_id === user.id || shift.scope_mode === 'shop_wide'
   const cancelled = !!shift.cancelled_at; const canMutate = canMutateShift(user, shift) && !cancelled
   // Absent (a row read without SHIFT_COLUMNS) is treated as active, the
   // behaviour every such caller had before N7.
   const branchActive = row.branch_active == null || Number(row.branch_active) === 1
   return { ...shift, amendment_count: Number(row.amendment_count) || 0, branch_active: branchActive, capabilities: {
-    can_edit: canAmendShift(user, shift) && branchActive,
+    can_edit: canAmendShift(user, shift) && branchActive && reach,
     can_close: (canMutate || (!cancelled && holdsLateClose(user) && isOpenOnEarlierDay(shift, Date.now()))) && !shift.closed_at,
     can_reopen: canMutate && branchActive && !!shift.closed_at && !row.has_reopened_child
       && shift.business_date === businessDateFor(new Date().toISOString()),
@@ -1181,7 +1186,9 @@ app.get('/', async (c) => {
       WHERE closed_at IS NULL AND cancelled_at IS NULL AND business_date < @today AND (@branchId IS NULL OR branch_id = @branchId)
       ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT @limit`)
       .all<ShiftDbRow & { next_opened_at: string | null }>({ today: businessToday(Date.now()), branchId, limit: getPlanLimits(c.env).forgottenShiftListMax })
-    return c.json({ shifts: forgotten.map(({ next_opened_at: closeBefore, ...row }) => ({ ...responseShift(user, row), close_before: closeBefore ?? null })), scope: 'forgotten' })
+    // can_edit follows the amend rule (canSeeShift): only a foreign shop-wide row needs the policy, so the read is made only then.
+    const policy = !canManageShifts(user) && forgotten.some((row) => row.user_id !== user.id && row.scope_mode === 'shop_wide') ? await readShiftPolicy(db) : undefined
+    return c.json({ shifts: forgotten.map(({ next_opened_at: closeBefore, ...row }) => ({ ...responseShift(user, row, policy), close_before: closeBefore ?? null })), scope: 'forgotten' })
   }
   const rawUserId = c.req.query('user_id')
   const parsedUserId = rawUserId == null || rawUserId.trim() === '' ? null : Number(rawUserId)
@@ -1300,7 +1307,10 @@ app.get('/:id/history', async (c) => {
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   // 404, not 403: a caller who may not see this shift must not learn that it
   // exists, which id probing would otherwise reveal one status code at a time.
-  if (!canSeeShiftToClose(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
+  const policy = await readShiftPolicy(db)
+  if (!canSeeShiftToClose(user, policy, shift)) return c.json({ error: 'Shift not found.' }, 404)
+  // can_edit is true only where the amend would be accepted: the amend follows canSeeShift, which this read (widened for a holder) does not.
+  const exactEdit = <T extends { capabilities: ShiftCapabilities } & ShiftRow>(row: T): T => ({ ...row, capabilities: { ...row.capabilities, can_edit: row.capabilities.can_edit && canSeeShift(user, policy, row) } })
   // The whole RECORD, not the one segment. The list shows a reopened shift as
   // a single row, so its detail has to carry what that row stands for: every
   // segment oldest first, and every amendment of every segment on one
@@ -1316,11 +1326,12 @@ app.get('/:id/history', async (c) => {
     before_json, after_json, created_at FROM shift_session_amendments
     WHERE shift_session_id IN (${ids.map((_value, index) => `@id${index}`).join(',')})
     ORDER BY created_at ASC, id ASC`).all(idParams)
-  return c.json({
+  const record = {
     shift: await reconciledShift(c.env, user, shift),
     segments: await Promise.all(segments.map((segment) => presentShift(db, user, segment))),
     amendments,
-  })
+  }
+  return c.json({ ...record, shift: exactEdit(record.shift), segments: record.segments.map(exactEdit) })
 })
 
 /**
