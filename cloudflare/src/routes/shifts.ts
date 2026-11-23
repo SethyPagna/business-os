@@ -478,9 +478,13 @@ function timesChanged(before: ShiftRow, requestedOpenedAt: string, requestedClos
  * segment is still there is not something an employee can mend (they pick no time and may not close that drawer), so
  * they are told whose move it is.
  */
-function overlapRefusal(message: string, closer?: SessionUser) {
+function overlapRefusal(message: string, closer?: SessionUser, earlier?: ShiftDbRow | null) {
   if (!message.startsWith('Opening')) return { error: message, code: 'shift_overlaps_next_segment' }
   if (closer && !canManageShifts(closer)) {
+    // The earlier shift is the closer's to end when they opened it or hold the late-close grant; then they are told to do it.
+    if (holdsLateClose(closer) || (earlier != null && earlier.user_id === closer.id)) {
+      return { error: 'Close the earlier shift first.', code: 'shift_earlier_close_first' }
+    }
     return { error: 'An administrator must close the earlier shift first.', code: 'shift_earlier_admin_must_close_first' }
   }
   return { error: message, code: 'shift_overlaps_previous_segment' }
@@ -853,12 +857,13 @@ async function readAdjacentShift(db: D1Compat, shift: ShiftRow, openedAt: string
       ...(shift.scope_mode === 'shop_wide' ? {} : { userId: shift.user_id }), openedAt,
     })
 }
-async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, closedAt: string | null, known?: { next: ShiftDbRow | null }): Promise<string | null> {
+async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, closedAt: string | null, known?: { next: ShiftDbRow | null }, seen?: { previous: ShiftDbRow | null }): Promise<string | null> {
   // `known.next` is a next segment the caller already read for this very shift and opening: the same statement is not sent twice.
   const [previous, next] = await Promise.all([
     readAdjacentShift(db, shift, openedAt, 'previous'),
     known ? known.next : readAdjacentShift(db, shift, openedAt, 'next'),
   ])
+  if (seen) seen.previous = previous ?? null
   if (previous && (!previous.closed_at || utcMs(previous.closed_at) > utcMs(openedAt))) {
     return 'Opening time overlaps the previous shift segment.'
   }
@@ -1571,8 +1576,9 @@ app.post('/close', async (c) => {
   const timing = await closeTimeVerdict(c.env, user, shift, Date.parse(nowIso), Date.parse(nowIso))
   if (timing.refusal) return c.json(timing.refusal, 409)
   const closedAt = new Date(timing.closedAtMs).toISOString()
-  const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
-  if (overlap) return c.json(overlapRefusal(overlap, user), 409)
+  const seenEarlier: { previous: ShiftDbRow | null } = { previous: null }
+  const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt, undefined, seenEarlier)
+  if (overlap) return c.json(overlapRefusal(overlap, user, seenEarlier.previous), 409)
   // Asked last, of counts about to be written: a retried or refused close answers as it did before the rule.
   if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const closing = { ...storedShift(shift), closed_at: closedAt,
@@ -1650,8 +1656,9 @@ app.post('/:id/close', async (c) => {
   if (timing.refusal) return c.json(timing.refusal, 409)
   if (late && bounds && timing.closedAtMs > bounds.lastSecondMs) return c.json(SHIFT_LATE_OUTSIDE_DAY, 409)
   const closedAt = new Date(timing.closedAtMs).toISOString()
-  const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt, late ? { next: lateNext ?? null } : undefined)
-  if (overlap) return c.json(overlapRefusal(overlap, user), 409)
+  const seenEarlier: { previous: ShiftDbRow | null } = { previous: null }
+  const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt, late ? { next: lateNext ?? null } : undefined, seenEarlier)
+  if (overlap) return c.json(overlapRefusal(overlap, user, seenEarlier.previous), 409)
   if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,

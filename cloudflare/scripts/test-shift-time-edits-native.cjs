@@ -408,8 +408,8 @@ async function main() {
       const todays = (await first("SELECT id, revision FROM shift_sessions WHERE user_id=? AND shift_code != 'S-STALE-S2'", people.s2a.id))
       await untouched('end of today while the earlier drawer is open', todays.id, async () => {
         const ended = await call('s2a', 'POST', `/${todays.id}/close`, { expected_revision: todays.revision, closing_counted_usd: 20, closing_counted_khr: 0 })
-        refused('employee ends today', ended, 'shift_earlier_admin_must_close_first')
-        assert.equal(ended.json.error, 'An administrator must close the earlier shift first.')
+        refused('employee ends today', ended, 'shift_earlier_close_first')
+        assert.equal(ended.json.error, 'Close the earlier shift first.')
         const adminEnds = await call('admin', 'POST', `/${todays.id}/close`, { expected_revision: todays.revision, closing_counted_usd: 20, closing_counted_khr: 0 })
         refused('administrator ends today', adminEnds, 'shift_overlaps_previous_segment')
       })

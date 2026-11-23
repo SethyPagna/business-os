@@ -556,9 +556,9 @@ async function main() {
     expected_revision: newerDay.revision, reason: 'Forgot to close',
   })
   assert.equal(closeNewerFirst.status, 409, 'closing the nearer day first is refused while an older day is still open')
-  assert.equal(closeNewerFirst.body.error, 'An administrator must close the earlier shift first.',
-    'the cashier is told whose move it is, not that two times overlap')
-  assert.equal(closeNewerFirst.body.code, 'shift_earlier_admin_must_close_first')
+  assert.equal(closeNewerFirst.body.error, 'Close the earlier shift first.',
+    'the cashier opened the earlier shift, so is told to close it, not that an administrator must')
+  assert.equal(closeNewerFirst.body.code, 'shift_earlier_close_first')
   order.as(ADMIN)
   const adminNewerFirst = await order.json('POST', `/${newerDay.id}/close`, {
     expected_revision: newerDay.revision, reason: 'Forgot to close',
@@ -670,6 +670,28 @@ async function main() {
   assert.equal(wideClose.status, 200, `the exempt admin ends the foreign shop-wide row: ${JSON.stringify(wideClose.body)}`)
   assert.equal((await wide.json('GET', '/current?branch_id=1')).body.previous_open_shift, null,
     'and once ended it is gone for that account too')
+
+  // (l) Who is told what when an earlier segment blocks today's close: the opener or a holder is told to close it; anyone else
+  // keeps the administrator sentence.
+  const HOLDER = { id: 10, name: 'Holder', username: 'holder', permissions: JSON.stringify({ pos: true, shift_close_forgotten: true }) }
+  const blockedClose = async (closer, code) => {
+    const blockDb = database()
+    const block = harness(blockDb)
+    blockDb.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('shift_scope_mode','shop_wide')").run()
+    openYesterday(blockDb, { shift_code: 'S-BLOCK-STALE', scope_mode: 'shop_wide' })
+    const today = openOnDate(blockDb, days(blockDb).today, {
+      shift_code: code, scope_mode: 'shop_wide', user_id: closer.id, user_name: closer.username, opened_at: new Date(Date.now() - 60 * 1000).toISOString(),
+    })
+    block.as(closer)
+    return block.json('POST', `/${today.id}/close`, { expected_revision: today.revision })
+  }
+  const otherBlocked = await blockedClose(OTHER_CASHIER, 'S-BLOCK-OTHER')
+  assert.equal(otherBlocked.status, 409, JSON.stringify(otherBlocked.body))
+  assert.equal(otherBlocked.body.code, 'shift_earlier_admin_must_close_first', 'someone who may not close the earlier shift keeps the old code')
+  assert.equal(otherBlocked.body.error, 'An administrator must close the earlier shift first.')
+  const holderBlocked = await blockedClose(HOLDER, 'S-BLOCK-HOLDER')
+  assert.equal(holderBlocked.status, 409, JSON.stringify(holderBlocked.body))
+  assert.equal(holderBlocked.body.code, 'shift_earlier_close_first', 'a holder may close the earlier shift, so is told to')
 
   console.log('PASS a shift left open on a previous business day is discoverable by every account that may end it, '
     + 'closable once at the bound the Worker itself enforces, and never replaces the daily prompt')
