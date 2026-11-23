@@ -28,6 +28,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
     portal_faq: true,
     portal_about: true,
     pos: true,
+    shift_close_forgotten: true,
     products: true,
     product_cost_view: false,
     product_cost_edit: false,
@@ -63,6 +64,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRole
   },
   employee: {
     pos: true,
+    shift_close_forgotten: false,
     inventory_checks: true,
     inventory_check_show_price: true,
     inventory_check_show_barcode: true,
