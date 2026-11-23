@@ -1,6 +1,7 @@
 // The forgotten-shifts list (GET /api/shifts?forgotten=1): the cheapest read that lets a grant holder or an administrator find the open
 // earlier-day shifts of other cashiers (per_account mode lists only the caller's own rows). Measured in a pure harness:
-//   - statements: one list read, plus one next-segment seek per row (the closeBoundFor the normal list pays for an open row); with a
+//   - statements: ONE, whatever the number of rows: each row's next-segment opening is a correlated scalar subquery inside the list statement
+//     (NEXT_OPENING_SQL, the rule readAdjacentShift/intervalError use), so 1, 3 and the maximum number of rows cost the same; with a
 //     branch filter one more (branchExists). It reads no shift policy, no setting and no sale.
 //   - rows: the plan scans the PARTIAL index idx_shift_sessions_open (open rows only), so on 2,000 stored shifts it reads the open rows
 //     and nothing else; a normal day is a handful (asserted at most 50).
@@ -66,7 +67,7 @@ function database() {
       device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE activity (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL);
     CREATE TABLE review_log (id INTEGER PRIMARY KEY)`)
-  for (const file of ['0089_system_flags', '0118_shift_policy_and_amendments', '0119_shift_restore_guard', '0123_shift_reopen_segments', '0132_shift_opening_count_presence', '0147_shift_additional_cash']) {
+  for (const file of ['0089_system_flags', '0118_shift_policy_and_amendments', '0119_shift_restore_guard', '0123_shift_reopen_segments', '0132_shift_opening_count_presence', '0147_shift_additional_cash', '0306_shift_adjacent_indexes']) {
     db.exec(fs.readFileSync(path.join(root, 'migrations', `${file}.sql`), 'utf8'))
   }
   db.prepare('INSERT INTO branches(id,name,is_active) VALUES (1,?,1)').run('Shop')
@@ -162,6 +163,55 @@ const translate = new Function('return ' + ts.transpileModule(translateSource, {
 const hashOf = (sql, params) => crypto.createHash('sha1').update(normalize(translate(sql, params).sql)).digest('hex').slice(0, 12)
 const FINGERPRINTS = path.join(root, 'scripts', 'read-budget', 'fingerprints', 'api_shifts.json')
 
+// The separate seek a close performs (readAdjacentShift 'next'), written out as the oracle.
+function separateSeek(sqlite, row) {
+  const user = row.scope_mode === 'shop_wide' ? '' : 'AND user_id = @userId'
+  const branch = row.branch_id == null ? 'branch_id IS NULL' : 'branch_id = @branchId'
+  const found = sqlite.prepare('SELECT opened_at FROM shift_sessions WHERE id = (SELECT id FROM shift_sessions WHERE scope_mode = @scopeMode ' + user + ' AND ' + branch +
+    ' AND id != @id AND cancelled_at IS NULL AND opened_at >= @openedAt ORDER BY opened_at ASC, id ASC LIMIT 1)')
+    .get({ id: row.id, scopeMode: row.scope_mode, openedAt: row.opened_at, ...(row.branch_id == null ? {} : { branchId: row.branch_id }), ...(row.scope_mode === 'shop_wide' ? {} : { userId: row.user_id }) })
+  return found ? found.opened_at : null
+}
+async function sameDayAndRowCount() {
+  const counts = {}
+  for (const rows of [1, 3, 50, 60]) {
+    const w = world()
+    for (let i = 0; i < rows; i += 1) w.open(w.yesterday, { user_id: 200 + i, user_name: 'c' + i, shift_code: 'S-N-' + i, opened_at: w.yesterday + 'T13:' + String(10 + (i % 40)).padStart(2, '0') + ':00.000Z' })
+    w.h.as(HOLDER)
+    stats.prepare = 0; stats.sqls.length = 0
+    const res = await w.h.json('GET', '/?forgotten=1')
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    assert.equal(res.body.shifts.length, Math.min(rows, 50), 'rows capped at the plan limit')
+    counts[rows] = stats.prepare
+  }
+  console.log('statements at 1, 3, 50 (max), 60 rows:', JSON.stringify(counts))
+  assert.deepEqual(Object.values(counts), [1, 1, 1, 1], 'the statement count is the same for 1, 3 and the maximum number of rows')
+
+  const w = world()
+  w.sqlite.exec('DROP TRIGGER IF EXISTS shift_reopen_segment_validate_insert') // fixture only: an open row followed by a later same-day segment is the shape under test, a reopen never writes it
+  const a1 = w.open(w.yesterday, { shift_code: 'S-A1', user_id: 7, opened_at: w.yesterday + 'T13:00:00.000Z' })
+  const a2 = w.open(w.yesterday, { shift_code: 'S-A2', parent_shift_id: a1.id, user_id: 7, opened_at: w.yesterday + 'T14:00:00.000Z', closed_at: w.yesterday + 'T15:00:00.000Z', closed_by_user_id: 1, closed_by_user_name: 'x' })
+  w.open(w.yesterday, { shift_code: 'S-A3', parent_shift_id: a2.id, user_id: 7, opened_at: w.yesterday + 'T16:00:00.000Z', cancelled_at: w.yesterday + 'T16:30:00.000Z', cancelled_by_user_id: 1, cancelled_by_user_name: 'x', cancel_reason: 'r' })
+  const b1 = w.open(w.yesterday, { shift_code: 'S-B1', user_id: 8, user_name: 'colleague', opened_at: w.yesterday + 'T13:30:00.000Z' })
+  const c1 = w.open(w.yesterday, { shift_code: 'S-C1', user_id: 9, user_name: 'boss', opened_at: w.yesterday + 'T12:00:00.000Z' })
+  const s1 = w.open(w.yesterday, { shift_code: 'S-S1', scope_mode: 'shop_wide', user_id: 7, opened_at: w.yesterday + 'T11:00:00.000Z' })
+  w.open(w.yesterday, { shift_code: 'S-S2', parent_shift_id: s1.id, scope_mode: 'shop_wide', user_id: 8, user_name: 'colleague', opened_at: w.yesterday + 'T11:00:00.000Z', closed_at: w.yesterday + 'T12:30:00.000Z', closed_by_user_id: 1, closed_by_user_name: 'x' })
+  const n1 = w.open(w.yesterday, { shift_code: 'S-N1', user_id: 30, user_name: 'noBranch', branch_id: null, branch_name: null, opened_at: w.yesterday + 'T13:00:00.000Z' })
+  w.open(w.yesterday, { shift_code: 'S-N2', parent_shift_id: n1.id, user_id: 30, user_name: 'noBranch', branch_id: null, branch_name: null, opened_at: w.yesterday + 'T13:00:00.000Z', closed_at: w.yesterday + 'T13:20:00.000Z', closed_by_user_id: 1, closed_by_user_name: 'x' })
+  w.h.as(HOLDER)
+  const res = await w.h.json('GET', '/?forgotten=1')
+  assert.equal(res.status, 200, JSON.stringify(res.body))
+  const byCode = Object.fromEntries(res.body.shifts.map((shift) => [shift.shift_code, shift.close_before]))
+  const expected = [[a1, w.yesterday + 'T14:00:00.000Z'], [b1, null], [c1, null], [s1, w.yesterday + 'T11:00:00.000Z'], [n1, w.yesterday + 'T13:00:00.000Z']]
+  for (const [row, value] of expected) {
+    assert.equal(separateSeek(w.sqlite, row), value, 'the separate seek for ' + row.shift_code)
+    assert.equal(byCode[row.shift_code], value, 'the list value equals the separate seek for ' + row.shift_code)
+  }
+  assert.ok(a2 && byCode['S-A1'] === w.yesterday + 'T14:00:00.000Z', 'a same-day second segment bounds the first, a cancelled later one does not')
+  for (const shift of res.body.shifts) assert.equal(shift.close_before, separateSeek(w.sqlite, w.sqlite.prepare('SELECT * FROM shift_sessions WHERE shift_code=?').get(shift.shift_code)), 'seek parity for ' + shift.shift_code)
+  assert.ok(!res.body.shifts.some((shift) => 'next_opened_at' in shift), 'the helper column is not part of the response')
+}
+
 async function main() {
   const w = world()
   for (let day = 2; day < 2000; day += 1) {
@@ -177,8 +227,8 @@ async function main() {
   assert.equal(res.status, 200, JSON.stringify(res.body))
   assert.equal(res.body.shifts.length, 3, 'the three open earlier-day rows, not the closed ones or today')
   const listSql = stats.sqls[0]
-  console.log('forgotten list: statements', stats.prepare, '(1 list + one next-segment seek per row) for', res.body.shifts.length, 'rows; stored shifts', storedRows)
-  assert.equal(stats.prepare, 1 + res.body.shifts.length, 'one list statement plus one next-segment seek per open row; no policy, settings or sale read')
+  console.log('forgotten list: statements', stats.prepare, '(one list statement, next openings inside it) for', res.body.shifts.length, 'rows; stored shifts', storedRows)
+  assert.equal(stats.prepare, 1, 'one list statement, whatever the rows; no per-row seek, no policy, settings or sale read')
   assert.ok(!stats.sqls.some((sql) => /shift_scope_mode|FROM sales|FROM returns/i.test(sql)))
 
   const params = { today: w.today, branchId: null, limit: 50 }
@@ -189,6 +239,10 @@ async function main() {
   console.log('plan:', plan.filter((detail) => /shift_sessions/.test(detail)).slice(0, 2).join(' | '))
   assert.ok(plan.some((detail) => /SCAN shift_sessions USING (COVERING )?INDEX idx_shift_sessions_open/.test(detail)), plan.join('\n'))
   assert.ok(!plan.some((detail) => /^SCAN shift_sessions$/.test(detail)), 'no full table scan')
+  console.log('plan (subquery):', plan.filter((detail) => /SEARCH/.test(detail)).join(' | '))
+  assert.ok(plan.some((detail) => /SEARCH nx USING INDEX idx_shift_sessions_scope_branch_opened .*scope_mode=/.test(detail)), 'a shop-wide next opening is a seek on the 0306 shop index:\n' + plan.join('\n'))
+  assert.ok(plan.some((detail) => /SEARCH nx USING INDEX idx_shift_sessions_scope_user_branch_opened .*scope_mode=/.test(detail)), 'a per-account next opening is a seek on the 0306 user index:\n' + plan.join('\n'))
+  assert.ok(!plan.some((detail) => /nx USING (COVERING )?INDEX idx_shift_sessions_open/.test(detail)) && !plan.some((detail) => /SCAN nx/.test(detail)), 'the subquery never scans')
   const openRows = w.sqlite.prepare('SELECT COUNT(*) AS n FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL').get().n
   assert.equal(openRows, 4, 'the partial index holds only open rows: that is every row the list scans')
   assert.ok(openRows <= 50, 'a normal day reads at most 50 rows')
@@ -200,7 +254,7 @@ async function main() {
   w.sqlite.prepare('INSERT INTO branches(id,name,is_active) VALUES (2,?,1)').run('Other')
   stats.prepare = 0
   await w.h.json('GET', '/?forgotten=1&branch_id=1')
-  assert.equal(stats.prepare, 1 + 1 + 3, 'a branch filter adds the one branchExists statement')
+  assert.equal(stats.prepare, 1 + 1, 'a branch filter adds the one branchExists statement')
 
   console.log('FP', hashOf(listSql, params), normalize(bound.sql).slice(0, 110))
   const registered = JSON.parse(fs.readFileSync(FINGERPRINTS, 'utf8'))['shifts-forgotten']
@@ -214,6 +268,7 @@ async function main() {
   assert.ok(paged, 'the paged list ran')
   const pagedHash = hashOf(paged, { reviewer: 1, selfId: 1, shopWide: 0, requestedUserId: null, branchId: null, from: null, to: null, search: null, page: 1, pageSize: 20 })
   assert.equal(pagedHash, JSON.parse(fs.readFileSync(FINGERPRINTS, 'utf8'))['shifts-list'].find(([, head]) => /WITH matched AS/.test(head))[0], 'the paged list statement is byte-for-byte what was registered')
+  await sameDayAndRowCount()
   console.log('PASS the forgotten list reads open earlier-day rows through idx_shift_sessions_open, within the registered shape')
 }
 main().catch((error) => { console.error(error); process.exit(1) })

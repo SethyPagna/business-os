@@ -15,7 +15,7 @@
  ],
  "shifts-forgotten": [
   [
-   "c60fa7951b83",
+   "9f3aa4d6d215",
    "SELECT id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date, opened_at, CASE"
   ]
  ]

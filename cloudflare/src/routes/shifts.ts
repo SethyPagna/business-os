@@ -866,6 +866,12 @@ async function readAdjacentShift(db: D1Compat, shift: ShiftRow, openedAt: string
       ...(shift.scope_mode === 'shop_wide' ? {} : { userId: shift.user_id }), openedAt,
     })
 }
+/** The opening of the segment that follows a row, as one correlated scalar subquery: the SAME rule readAdjacentShift(..., 'next') (so intervalError) uses -- same scope, user for a
+ * per-account shift, branch, not itself, not cancelled, opened_at >= its own, earliest first with the id as tie-break -- written for the 0306 partial indexes (a CASE, because an OR on
+ * the user test would defeat them). It rides in the ONE list statement, so the count of statements does not grow with the rows. */
+const NEXT_OPENING_SQL = `CASE WHEN shift_sessions.scope_mode = 'shop_wide'
+  THEN (SELECT nx.opened_at FROM shift_sessions nx WHERE nx.scope_mode = 'shop_wide' AND nx.branch_id IS shift_sessions.branch_id AND nx.id != shift_sessions.id AND nx.cancelled_at IS NULL AND nx.opened_at >= shift_sessions.opened_at ORDER BY nx.opened_at ASC, nx.id ASC LIMIT 1)
+  ELSE (SELECT nx.opened_at FROM shift_sessions nx WHERE nx.scope_mode = shift_sessions.scope_mode AND nx.user_id = shift_sessions.user_id AND nx.branch_id IS shift_sessions.branch_id AND nx.id != shift_sessions.id AND nx.cancelled_at IS NULL AND nx.opened_at >= shift_sessions.opened_at ORDER BY nx.opened_at ASC, nx.id ASC LIMIT 1) END`
 async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, closedAt: string | null, known?: { next: ShiftDbRow | null }, seen?: { previous: ShiftDbRow | null }): Promise<string | null> {
   // `known.next` is a next segment the caller already read for this very shift and opening: the same statement is not sent twice.
   const [previous, next] = await Promise.all([
@@ -1171,11 +1177,11 @@ app.get('/', async (c) => {
   if (c.req.query('forgotten') != null) {
     if (c.req.query('forgotten') !== '1') return c.json({ error: 'Invalid forgotten-shifts request.' }, 400)
     if (!holdsLateClose(user)) return c.json(SHIFT_LATE_NOT_PERMITTED, 403)
-    const forgotten = await db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions INDEXED BY idx_shift_sessions_open
+    const forgotten = await db.prepare(`SELECT ${SHIFT_COLUMNS}, ${NEXT_OPENING_SQL} AS next_opened_at FROM shift_sessions INDEXED BY idx_shift_sessions_open
       WHERE closed_at IS NULL AND cancelled_at IS NULL AND business_date < @today AND (@branchId IS NULL OR branch_id = @branchId)
       ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT @limit`)
-      .all<ShiftDbRow>({ today: businessToday(Date.now()), branchId, limit: getPlanLimits(c.env).forgottenShiftListMax })
-    return c.json({ shifts: await Promise.all(forgotten.map((shift) => presentShift(db, user, shift))), scope: 'forgotten' })
+      .all<ShiftDbRow & { next_opened_at: string | null }>({ today: businessToday(Date.now()), branchId, limit: getPlanLimits(c.env).forgottenShiftListMax })
+    return c.json({ shifts: forgotten.map(({ next_opened_at: closeBefore, ...row }) => ({ ...responseShift(user, row), close_before: closeBefore ?? null })), scope: 'forgotten' })
   }
   const rawUserId = c.req.query('user_id')
   const parsedUserId = rawUserId == null || rawUserId.trim() === '' ? null : Number(rawUserId)
