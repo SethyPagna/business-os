@@ -143,9 +143,11 @@ export const SHIFT_REVIEW = {
   laterOpen: 'opened_at_later_time',
   /** The drawer was reopened from a close an administrator made at an earlier time, so the count it opens with may include later sales. */
   reopenedAfterEarlierClose: 'reopened_after_earlier_close',
+  /** The shift was closed on a later day than the one it opened on (lib/shiftLateClose); the entry carries the typed reason. */
+  closedLate: 'closed_late',
 } as const
 
-const TIME_REVIEW_CODES: readonly string[] = [SHIFT_REVIEW.earlierClose, SHIFT_REVIEW.laterOpen, SHIFT_REVIEW.reopenedAfterEarlierClose]
+const TIME_REVIEW_CODES: readonly string[] = [SHIFT_REVIEW.earlierClose, SHIFT_REVIEW.laterOpen, SHIFT_REVIEW.reopenedAfterEarlierClose, SHIFT_REVIEW.closedLate]
 
 export type ShiftReconciliationInput = {
   opening: Partial<ShiftCount> | null | undefined
@@ -697,7 +699,7 @@ export async function shiftLastActivityMs(
  * evaluated the times (a close, or an amend that changed one); the newest such
  * row is the shift's standing review, and an empty list is a cleared one.
  */
-export type ShiftTimeReview = { code: string; by: string }
+export type ShiftTimeReview = { code: string; by: string; reason?: string }
 
 export function shiftTimeReviewCodes(review: readonly ShiftTimeReview[] | null | undefined): string[] {
   return (review ?? []).map((entry) => entry.code)
@@ -717,7 +719,10 @@ async function readShiftTimeReviewFresh(env: Env, shiftId: number): Promise<Shif
     const parsed = JSON.parse(row.review) as unknown
     if (!Array.isArray(parsed)) return null
     return parsed
-      .map((entry) => ({ code: String((entry as { code?: unknown })?.code ?? ''), by: String((entry as { by?: unknown })?.by ?? '') }))
+      .map((entry) => {
+        const reason = (entry as { reason?: unknown })?.reason
+        return { code: String((entry as { code?: unknown })?.code ?? ''), by: String((entry as { by?: unknown })?.by ?? ''), ...(typeof reason === 'string' && reason ? { reason } : {}) }
+      })
       .filter((entry) => TIME_REVIEW_CODES.includes(entry.code))
   } catch { return null }
 }

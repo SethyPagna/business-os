@@ -4,9 +4,10 @@ import { phoneSearchAccessOf } from '../lib/phoneAccess'
 import { searchableColumnSql } from '../lib/phoneSearchGuard'
 import { CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } from '../lib/clientTimestamp'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
+import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, businessToday, localTodayExpr } from '../lib/businessDateWindow'
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
-import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
+import { getMergedPermissions, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
+import { holdsLateClosePermission, isLateClose, lateAmendmentReason, lateCloseBounds, lateReason } from '../lib/shiftLateClose'
 import { getPlanLimits } from '../lib/planTier'
 import { holdsCostViewGrant } from '../lib/acquisitionCostAccess'
 import { loadTelegramConfig, scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions, type ShiftReportSession } from '../lib/telegram'
@@ -67,8 +68,8 @@ app.use('*', async (c, next) => {
   // a caller who may not act cannot probe a receipt: amend follows
   // canAmendShift (any shifts user), and close, reopen and cancel stay with
   // the owner or an administrator.
-  const permitted = action === 'amend' ? canAmendShift(user, target) : canMutateShift(user, target)
-  if (!permitted) return c.json({ error: 'Shift permission is required.' }, 403)
+  const permitted = action === 'amend' ? canAmendShift(user, target) : action === 'close' ? canCloseShift(user, target, Date.now()) : canMutateShift(user, target)
+  if (!permitted) return c.json(action === 'close' && isOpenOnEarlierDay(target, Date.now()) ? SHIFT_LATE_NOT_PERMITTED : { error: 'Shift permission is required.' }, 403)
   // No branch-activity check here: a committed receipt replays even after its
   // branch was retired, and each handler decides what an inactive branch
   // allows (N7 -- close and cancel yes, amend and reopen no).
@@ -384,15 +385,21 @@ const CLOSE_TIME_REFUSALS = {
 } as const
 /** `closedAtMs` is the instant to stamp: the requested one, or the second after the last record when the request fell in that very second. */
 type CloseTimeVerdict = { earlier: boolean; refusal: (typeof CLOSE_TIME_REFUSALS)[keyof typeof CLOSE_TIME_REFUSALS] | null; closedAtMs: number }
-async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, requestedMs: number, nowMs: number): Promise<CloseTimeVerdict> {
-  const last = await shiftLastActivityMs(env, shift, nowMs)
+/**
+ * A late close (an earlier-day row ended today, lib/shiftLateClose) reads the last activity only inside the shift's own day and
+ * before the next segment opens (`until`), the same single statement with a bound, and is never "too early": the chosen time is
+ * on that earlier day by design.
+ */
+type LateCloseWindow = { until: string }
+async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, requestedMs: number, nowMs: number, late?: LateCloseWindow): Promise<CloseTimeVerdict> {
+  const last = late ? await shiftLastActivityMs(env, shift, nowMs, { until: late.until }) : await shiftLastActivityMs(env, shift, nowMs)
   // A close that lands in the same second as the last record is the till closing right after its last sale, not a
   // chosen earlier time: it is stamped the second after that record (never before it) instead of being refused.
   const closedAtMs = last != null && Math.floor(requestedMs / 1000) === Math.floor(last / 1000)
     && (Math.floor(last / 1000) + 1) * 1000 <= nowMs + CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
     ? (Math.floor(last / 1000) + 1) * 1000 : requestedMs
   const beforeActivity = last != null && Math.floor(closedAtMs / 1000) <= Math.floor(last / 1000)
-  const tooEarly = closedAtMs < nowMs - CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
+  const tooEarly = !late && closedAtMs < nowMs - CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS
   if (!beforeActivity && !tooEarly) return { earlier: false, refusal: null, closedAtMs }
   if (canManageShifts(user)) return { earlier: true, refusal: null, closedAtMs }
   return { earlier: true, refusal: beforeActivity ? CLOSE_TIME_REFUSALS.beforeActivity : CLOSE_TIME_REFUSALS.tooEarly, closedAtMs }
@@ -401,9 +408,10 @@ async function closeTimeVerdict(env: Env, user: SessionUser, shift: ShiftRow, re
  * The standing review a close leaves: the flag when an administrator closed at a time a cashier could not have chosen, plus the flag a
  * reopened segment carries from such a close (it stays until the segment is done), an evaluated empty list otherwise.
  */
-async function closeTimeReview(env: Env, shift: ShiftRow, timing: CloseTimeVerdict, actorName: string, memo?: ShiftReadMemo): Promise<ShiftTimeReview[]> {
+async function closeTimeReview(env: Env, shift: ShiftRow, timing: CloseTimeVerdict, actorName: string, memo?: ShiftReadMemo, lateReasonText?: string): Promise<ShiftTimeReview[]> {
   const carried = ((await readShiftTimeReview(env, shift.id, memo)) ?? []).find((entry) => entry.code === SHIFT_REVIEW.reopenedAfterEarlierClose)
-  return [...(timing.earlier ? [{ code: SHIFT_REVIEW.earlierClose, by: actorName }] : []), ...(carried ? [carried] : [])]
+  return [...(timing.earlier ? [{ code: SHIFT_REVIEW.earlierClose, by: actorName }] : []),
+    ...(lateReasonText ? [{ code: SHIFT_REVIEW.closedLate, by: actorName, reason: lateReasonText }] : []), ...(carried ? [carried] : [])]
 }
 /** What a segment reopened from `parent` inherits: the review flag of a close made at an earlier time (or one it carried itself). */
 async function reopenCarriedReview(env: Env, parent: ShiftRow): Promise<ShiftTimeReview[]> {
@@ -437,6 +445,7 @@ async function timeReviewAfterEdit(env: Env, db: D1Compat, actorName: string, be
   let close = standing.find((entry) => entry.code === SHIFT_REVIEW.earlierClose) ?? null
   let open = standing.find((entry) => entry.code === SHIFT_REVIEW.laterOpen) ?? null
   const carried = standing.find((entry) => entry.code === SHIFT_REVIEW.reopenedAfterEarlierClose) ?? null
+  const closedLate = standing.find((entry) => entry.code === SHIFT_REVIEW.closedLate) ?? null
   if (closedMoved) {
     const next = await readAdjacentShift(db, session, before.opened_at, 'next')
     const stranded = await shiftLastActivityMs(env, { ...session, opened_at: openedAt }, nowMs, { from: closedAt as string, until: next?.opened_at ?? null })
@@ -450,7 +459,7 @@ async function timeReviewAfterEdit(env: Env, db: D1Compat, actorName: string, be
     }
     open = stranded == null ? null : { code: SHIFT_REVIEW.laterOpen, by: actorName }
   }
-  return [close, open, carried].filter((entry): entry is ShiftTimeReview => entry != null)
+  return [close, closedLate, open, carried].filter((entry): entry is ShiftTimeReview => entry != null)
 }
 const SHIFT_TIME_ADMIN_ONLY = { code: 'shift_time_admin_only', error: 'Only an administrator can change the opening or closing time of a shift.' } as const
 /** The reopened segment copied the parent's count once; a later change to either side would leave it on a stale copy. */
@@ -580,6 +589,24 @@ function shiftVisibility(user: SessionUser, policy: ShiftPolicy) {
 function canSeeShift(user: SessionUser, policy: ShiftPolicy, shift: ShiftRow): boolean {
   return canManageShifts(user) || shift.user_id === user.id
     || (policy.scope_mode === 'shop_wide' && shift.scope_mode === 'shop_wide')
+    || (isOpenOnEarlierDay(shift, Date.now()) && holdsLateClose(user))
+}
+/** An open shift whose Cambodia business day is before today: the one kind of row a late close may end. */
+function isOpenOnEarlierDay(shift: ShiftRow, nowMs: number): boolean {
+  return !shift.closed_at && !shift.cancelled_at && isLateClose(shift.business_date, businessToday(nowMs))
+}
+/** The "Close forgotten shifts" grant, read strictly (lib/shiftLateClose); an administrator always holds it. */
+function holdsLateClose(user: SessionUser): boolean {
+  return holdsLateClosePermission(getMergedPermissions(user), canManageShifts(user))
+}
+const SHIFT_LATE_NOT_PERMITTED = { code: 'shift_late_close_not_permitted', error: 'Only the cashier who opened this shift, a manager or an administrator can close it.' } as const
+const SHIFT_LATE_REASON_REQUIRED = { code: 'shift_late_reason_required', error: 'A late close needs a reason.' } as const
+const SHIFT_LATE_OUTSIDE_DAY = { code: 'shift_late_close_outside_day', error: "Pick a time on the shift's own day." } as const
+const SHIFT_LATE_NOT_COUNTED = { code: 'shift_late_close_not_counted', error: 'Today is already open, so this earlier shift is closed without a cash count.' } as const
+const SHIFT_LATE_NEEDS_REASON = { code: 'shift_late_close_needs_reason', error: "Update the app to close an earlier day's shift." } as const
+/** Who may end this row: its cashier, an administrator, or (for an open earlier-day row) a holder of the late-close grant. */
+function canCloseShift(user: SessionUser, shift: ShiftRow, nowMs: number): boolean {
+  return canMutateShift(user, shift) || (isOpenOnEarlierDay(shift, nowMs) && holdsLateClose(user))
 }
 /** The row as it is STORED, which is what a before/after snapshot must hold:
  * the two derived columns above are answers about the row, not fields of it,
@@ -623,7 +650,7 @@ function responseShift(user: SessionUser, row: ShiftDbRow): ShiftResponseRow {
   const branchActive = row.branch_active == null || Number(row.branch_active) === 1
   return { ...shift, amendment_count: Number(row.amendment_count) || 0, branch_active: branchActive, capabilities: {
     can_edit: canAmendShift(user, shift) && branchActive,
-    can_close: canMutate && !shift.closed_at,
+    can_close: (canMutate || (!cancelled && holdsLateClose(user) && isOpenOnEarlierDay(shift, Date.now()))) && !shift.closed_at,
     can_reopen: canMutate && branchActive && !!shift.closed_at && !row.has_reopened_child
       && shift.business_date === businessDateFor(new Date().toISOString()),
     can_cancel: canManageShifts(user) && !cancelled && !row.has_reopened_child,
@@ -826,10 +853,11 @@ async function readAdjacentShift(db: D1Compat, shift: ShiftRow, openedAt: string
       ...(shift.scope_mode === 'shop_wide' ? {} : { userId: shift.user_id }), openedAt,
     })
 }
-async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, closedAt: string | null): Promise<string | null> {
+async function intervalError(db: D1Compat, shift: ShiftRow, openedAt: string, closedAt: string | null, known?: { next: ShiftDbRow | null }): Promise<string | null> {
+  // `known.next` is a next segment the caller already read for this very shift and opening: the same statement is not sent twice.
   const [previous, next] = await Promise.all([
     readAdjacentShift(db, shift, openedAt, 'previous'),
-    readAdjacentShift(db, shift, openedAt, 'next'),
+    known ? known.next : readAdjacentShift(db, shift, openedAt, 'next'),
   ])
   if (previous && (!previous.closed_at || utcMs(previous.closed_at) > utcMs(openedAt))) {
     return 'Opening time overlaps the previous shift segment.'
@@ -1115,7 +1143,7 @@ app.get('/current', async (c) => {
   const offered = carryOver && !(retired && body.shift && carryOver.id === body.shift.id) ? carryOver : null
   return c.json({ ...body, shift: presented,
     ...(retired ? { needs_registration: false, code: 'branch_inactive', branch_inactive: retired } : { branch_inactive: null }),
-    previous_open_shift: offered ? responseShift(user, offered) : null,
+    previous_open_shift: offered ? { ...responseShift(user, offered), late_close: true } : null,
     previous_open_close_before: offered ? closeBefore?.opened_at ?? null : null })
 })
 
@@ -1530,8 +1558,10 @@ app.post('/close', async (c) => {
   if (!canSeeShift(user, pre?.policy ?? await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   if (body.branch_id != null && shift.branch_id !== branchId) return c.json({ error: 'Shift branch does not match the requested branch.' }, 400)
   if (shift.cancelled_at) return c.json({ error: 'This shift was cancelled. Register a replacement opening first.' }, 409)
-  if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
+  if (!canCloseShift(user, shift, Date.now())) return c.json(isOpenOnEarlierDay(shift, Date.now()) ? SHIFT_LATE_NOT_PERMITTED : { error: 'Only the shift owner or an administrator can close this shift.' }, 403)
   if (shift.revision !== Number(body.expected_revision) || shift.closed_at) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
+  // An earlier-day shift is ended with a reason and a time on its own day: only POST /:id/close takes them.
+  if (isOpenOnEarlierDay(shift, Date.now())) return c.json(SHIFT_LATE_NEEDS_REASON, 409)
   // Blank is "not counted", not a refusal -- see countedMoney.
   const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
@@ -1589,15 +1619,38 @@ app.post('/:id/close', async (c) => {
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   if (!canSeeShift(user, pre?.policy ?? await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
   // No branch-activity check: closing is allowed on a retired branch (N7).
-  if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
+  if (!canCloseShift(user, shift, now)) return c.json(isOpenOnEarlierDay(shift, now) ? SHIFT_LATE_NOT_PERMITTED : { error: 'Only the shift owner or an administrator can close this shift.' }, 403)
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
   if (shift.closed_at) return c.json({ error: 'Shift is already closed.' }, 409)
   if (expectedRevision !== shift.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  if (requestedMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
-  const timing = await closeTimeVerdict(c.env, user, shift, requestedMs, now)
+  // A shift left open on an earlier day is closed late (lib/shiftLateClose): everyone gives a reason, the time is on that day (default 23:59:59),
+  // and the day's last money record may not be after it. A same-day close takes none of this path.
+  const late = isOpenOnEarlierDay(shift, now)
+  const bounds = late ? lateCloseBounds(shift.business_date, BUSINESS_UTC_OFFSET_MINUTES) : null
+  const reason = late ? lateReason(body.reason) : null
+  if (late && !reason) return c.json(SHIFT_LATE_REASON_REQUIRED, 400)
+  let chosenMs = requestedMs
+  if (late && bounds) {
+    const sent = body.closed_at
+    const parsedLate = sent == null || sent === '' ? new Date(bounds.lastSecondMs) : typeof sent === 'string' ? new Date(sent) : new Date(Number.NaN)
+    if (Number.isNaN(parsedLate.getTime())) return c.json({ error: 'A valid closing time is required.' }, 400)
+    chosenMs = parsedLate.getTime()
+    if (chosenMs > bounds.lastSecondMs) return c.json(SHIFT_LATE_OUTSIDE_DAY, 409)
+  }
+  if (chosenMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  let lateNext: ShiftDbRow | null | undefined
+  let lateWindow: LateCloseWindow | undefined
+  if (late && bounds) {
+    lateNext = await readAdjacentShift(db, storedShift(shift), shift.opened_at, 'next')
+    // Today's drawer is already open: the earlier one is closed without a count (the screen hides the field).
+    if (lateNext && (countedUsd.value != null || countedKhr.value != null)) return c.json(SHIFT_LATE_NOT_COUNTED, 400)
+    lateWindow = { until: new Date(Math.min(lateNext ? utcMs(lateNext.opened_at) : Number.POSITIVE_INFINITY, bounds.endExclusiveMs)).toISOString() }
+  }
+  const timing = await closeTimeVerdict(c.env, user, shift, chosenMs, now, lateWindow)
   if (timing.refusal) return c.json(timing.refusal, 409)
+  if (late && bounds && timing.closedAtMs > bounds.lastSecondMs) return c.json(SHIFT_LATE_OUTSIDE_DAY, 409)
   const closedAt = new Date(timing.closedAtMs).toISOString()
-  const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
+  const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt, late ? { next: lateNext ?? null } : undefined)
   if (overlap) return c.json(overlapRefusal(overlap, user), 409)
   if (!rielCashAmountValid(countedKhr.value) || !rielCashAmountValid(additionalKhr.value)) return c.json(RIEL_COUNT_REFUSAL, 400)
   const closing = { ...storedShift(shift), closed_at: closedAt,
@@ -1607,8 +1660,8 @@ app.post('/:id/close', async (c) => {
   const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id),
-    timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user), reviewMemo) }, reviewMemo)
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: reason ? lateAmendmentReason(reason) : 'Historic manual close', request: mutationRequest(body, id),
+    timeReview: await closeTimeReview(c.env, shift, timing, reviewerName(user), reviewMemo, reason ?? undefined) }, reviewMemo)
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const telegramConfig = loadTelegramConfig(c.env)
   announceShiftReport(c, result.shift, 'close', { closedBy: result.shift.closed_by_user_name ?? displayName(user), closedById: result.shift.closed_by_user_id ?? user.id }, telegramConfig)

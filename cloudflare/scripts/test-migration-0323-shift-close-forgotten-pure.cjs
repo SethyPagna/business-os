@@ -11,7 +11,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Database = require('better-sqlite3')
 
-const file = path.join(__dirname, '..', 'migrations', '0323_shift_close_forgotten_grant.sql')
+const file = path.join(__dirname, '..', 'migrations', '0323_forgotten_close_grant.sql')
 const sql = fs.readFileSync(file, 'utf8')
 const FLAG = 'shift_close_forgotten_0323_changed'
 let passed = 0

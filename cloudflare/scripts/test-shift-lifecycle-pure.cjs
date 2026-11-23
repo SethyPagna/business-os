@@ -144,6 +144,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
+    '../lib/shiftLateClose': loadReal('lib/shiftLateClose.ts'),
   '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': dbModule,
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
@@ -468,9 +469,9 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
       ('HIST-NEXT','per_account',30,'Historic',1,'Shop','2026-02-02','2026-02-02T01:00:00.000Z')`).run()
   const historic = sqlite.prepare("SELECT id,revision FROM shift_sessions WHERE shift_code='HIST-OPEN'").get()
   assert.equal((await call('POST', `/${historic.id}/close`, {
-    expected_revision: historic.revision, closed_at: '2026-02-02T02:00:00.000Z',
+    expected_revision: historic.revision, reason: 'Forgot to close', closed_at: '2026-02-02T02:00:00.000Z',
     closing_counted_usd: 1, closing_counted_khr: 1,
-  })).status, 409, 'historic close cannot overlap the next existing shift')
+  })).status, 409, 'historic close cannot run into the next existing shift (it is outside the day of the shift it closes)')
 
   // Real route + transactional SQLite: a lost ack is simulated by ignoring
   // the first success, reopening elsewhere, then replaying the frozen body.

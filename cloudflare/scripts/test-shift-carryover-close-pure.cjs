@@ -118,7 +118,7 @@ function harness(sqlite) {
   // surface which attaches them shows up as a present key. The carry-over
   // banner must never carry one (see figuresFor's comment in the route).
   const shiftReconciliation = {
-    shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time' },
+    shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time', closedLate: 'closed_late' },
     loadShiftReconciliation: async () => ({ marker: 'reconciliation-was-computed' }),
     loadShiftFigures: async () => ({ marker: 'figures-were-computed' }),
   }
@@ -127,6 +127,7 @@ function harness(sqlite) {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+    '../lib/shiftLateClose': loadReal('lib/shiftLateClose.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': dbModule,
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); await next() } },
@@ -317,7 +318,7 @@ async function main() {
   // (b) it CLOSES through the existing route, keeping its own business date
   // ========================================================================
   const closed = await app.json('POST', `/${carry.id}/close`, {
-    expected_revision: carry.revision, closed_at: new Date().toISOString(),
+    expected_revision: carry.revision, reason: 'Forgot to close',
     closing_counted_usd: 25, closing_counted_khr: 41000,
   })
   assert.equal(closed.status, 200, `closing the carry-over succeeds: ${JSON.stringify(closed.body)}`)
@@ -331,7 +332,7 @@ async function main() {
     'exactly one shift.close audit row')
   const amendments = sqlite.prepare('SELECT * FROM shift_session_amendments WHERE shift_session_id=?').all(carry.id)
   assert.equal(amendments.length, 1, 'the close writes exactly one before/after journal row')
-  assert.equal(amendments[0].reason, 'Historic manual close')
+  assert.equal(amendments[0].reason, 'Late close: Forgot to close', 'an earlier-day close carries the typed reason (owner A75)')
   assert.equal(JSON.parse(amendments[0].before_json).closed_at, null)
   assert.equal(JSON.parse(amendments[0].after_json).closed_at, storedAfterClose.closed_at)
 
@@ -388,25 +389,27 @@ async function main() {
     'the bound handed to the POS is today\'s opening -- the next segment after the carry-over')
   await new Promise((resolve) => setTimeout(resolve, 20))
   const overlap = await trap.json('POST', `/${trapCarry.id}/close`, {
-    expected_revision: trapCarry.revision, closed_at: new Date().toISOString(),
+    expected_revision: trapCarry.revision, reason: 'Forgot to close', closed_at: new Date().toISOString(),
   })
   assert.equal(overlap.status, 409, 'closing the carry-over NOW would swallow today\'s shift')
-  assert.equal(overlap.body.error, 'Closing time overlaps the next shift segment.')
+  assert.equal(overlap.body.code, 'shift_late_close_outside_day', 'a time on today is outside the earlier shift\'s own day (owner A74)')
   // Closed against the bound the SERVER said, not a value this test guessed.
   const beforeToday = new Date(Date.parse(trapCurrent.body.previous_open_close_before) - 1000).toISOString()
-  // Only an administrator chooses a time: the cashier's own closed_at is ignored (the close is stamped now, and so
-  // swallows today's shift again).
+  // The time is on the earlier shift's own day, whoever closes (owner A74): the bound the POS was told is today's opening, which is
+  // on the next day, so a time just before it is outside the day for the cashier and for an administrator alike.
   const ignored = await trap.json('POST', `/${trapCarry.id}/close`, {
-    expected_revision: trapCarry.revision, closed_at: beforeToday,
+    expected_revision: trapCarry.revision, reason: 'Forgot to close', closed_at: beforeToday,
   })
-  assert.equal(ignored.status, 409, 'the cashier cannot pick the bound: the sent time is ignored')
+  assert.equal(ignored.status, 409, 'the cashier cannot pick a time on today')
+  assert.equal(ignored.body.code, 'shift_late_close_outside_day')
   trap.as(ADMIN)
+  const dayEnd = `${days(trapDb).yesterday}T16:59:59.000Z`
   const tidy = await trap.json('POST', `/${trapCarry.id}/close`, {
-    expected_revision: trapCarry.revision, closed_at: beforeToday,
+    expected_revision: trapCarry.revision, reason: 'Forgot to close', closed_at: dayEnd,
   })
   trap.as(CASHIER)
-  assert.equal(tidy.status, 200, `closing it before today's opening is accepted: ${JSON.stringify(tidy.body)}`)
-  assert.equal(trapDb.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(trapCarry.id).closed_at, beforeToday)
+  assert.equal(tidy.status, 200, `closing it at the end of its own day, before today's opening, is accepted: ${JSON.stringify(tidy.body)}`)
+  assert.equal(trapDb.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(trapCarry.id).closed_at, dayEnd)
   assert.equal((await trap.json('GET', '/current?branch_id=1')).body.previous_open_shift, null)
 
   // ========================================================================
@@ -419,7 +422,7 @@ async function main() {
   const otherView = await scope.json('GET', '/current?branch_id=1')
   assert.equal(otherView.body.previous_open_shift, null, 'per_account scope hides another cashier\'s carry-over')
   const otherClose = await scope.json('POST', `/${scopeCarry.id}/close`, {
-    expected_revision: scopeCarry.revision, closed_at: new Date().toISOString(),
+    expected_revision: scopeCarry.revision, reason: 'Forgot to close',
   })
   assert.equal(otherClose.status, 404, 'another cashier cannot close it either: a shift they cannot see answers 404, like the detail route')
   // DISCRIMINATING POSITIVE CONTROL: the owner, on the same database, sees
@@ -427,7 +430,7 @@ async function main() {
   scope.as(CASHIER)
   assert.equal((await scope.json('GET', '/current?branch_id=1')).body.previous_open_shift.id, scopeCarry.id)
   assert.equal((await scope.json('POST', `/${scopeCarry.id}/close`, {
-    expected_revision: scopeCarry.revision, closed_at: new Date().toISOString(),
+    expected_revision: scopeCarry.revision, reason: 'Forgot to close',
   })).status, 200)
 
   // ========================================================================
@@ -550,7 +553,7 @@ async function main() {
   // still open is refused, so an offer that named the newer day first would
   // hand the cashier a close that can only fail.
   const closeNewerFirst = await order.json('POST', `/${newerDay.id}/close`, {
-    expected_revision: newerDay.revision, closed_at: new Date().toISOString(),
+    expected_revision: newerDay.revision, reason: 'Forgot to close',
   })
   assert.equal(closeNewerFirst.status, 409, 'closing the nearer day first is refused while an older day is still open')
   assert.equal(closeNewerFirst.body.error, 'An administrator must close the earlier shift first.',
@@ -558,7 +561,7 @@ async function main() {
   assert.equal(closeNewerFirst.body.code, 'shift_earlier_admin_must_close_first')
   order.as(ADMIN)
   const adminNewerFirst = await order.json('POST', `/${newerDay.id}/close`, {
-    expected_revision: newerDay.revision, closed_at: new Date().toISOString(),
+    expected_revision: newerDay.revision, reason: 'Forgot to close',
   })
   order.as(CASHIER)
   assert.equal(adminNewerFirst.status, 409, 'an administrator is refused the same close too')
@@ -579,21 +582,17 @@ async function main() {
   // row one minute before TODAY's opening -- the old guess -- is refused,
   // because the newer stale day opened first.
   const oldGuess = await order.json('POST', `/${olderDay.id}/close`, {
-    expected_revision: olderDay.revision, closed_at: new Date(Date.parse(todayOpenedAt) - 60_000).toISOString(),
+    expected_revision: olderDay.revision, reason: 'Forgot to close', closed_at: new Date(Date.parse(todayOpenedAt) - 60_000).toISOString(),
   })
   assert.equal(oldGuess.status, 409, 'a prefill seeded from today\'s opening is refused with two stale days open')
-  assert.equal(oldGuess.body.error, 'Closing time overlaps the next shift segment.')
+  assert.equal(oldGuess.body.code, 'shift_late_close_outside_day', 'it is on a later day than the shift\'s own (owner A74)')
 
   // Close the offered (older) day AT THE BOUND THE SERVER SAID minus a
   // minute; the offer then moves to the nearer day.
-  // Only an administrator picks a past close time; the shift's own cashier closes now.
-  const olderClose = { expected_revision: olderDay.revision, closed_at: new Date(Date.parse(firstOffer.body.previous_open_close_before) - 60_000).toISOString() }
-  const cashierGuess = await order.json('POST', `/${olderDay.id}/close`, olderClose)
-  assert.equal(cashierGuess.body.code, 'shift_overlaps_next_segment', 'the cashier cannot pick the stated bound: the sent time is ignored and the close is now')
+  // The shift's own cashier closes it with a reason, at the end of its own day (owner A74, A75).
+  const olderClose = { expected_revision: olderDay.revision, reason: 'Forgot to close' }
   const cashierNow = order.state.user
-  order.as(ADMIN)
   const closeOlder = await order.json('POST', `/${olderDay.id}/close`, olderClose)
-  order.as(cashierNow)
   assert.equal(closeOlder.status, 200, `closing the offered older day at its own bound succeeds: ${JSON.stringify(closeOlder.body)}`)
   const secondOffer = await order.json('GET', '/current?branch_id=1')
   assert.equal(secondOffer.body.previous_open_shift.id, newerDay.id,
@@ -605,12 +604,9 @@ async function main() {
 
   // Now the nearer day closes against its own bound, and nothing is left to
   // drain: the chain drains oldest to newest, every step accepted first try.
-  order.as(ADMIN)
   const closeNewerSecond = await order.json('POST', `/${newerDay.id}/close`, {
-    expected_revision: newerDay.revision,
-    closed_at: new Date(Date.parse(secondOffer.body.previous_open_close_before) - 60_000).toISOString(),
+    expected_revision: newerDay.revision, reason: 'Forgot to close',
   })
-  order.as(cashierNow)
   assert.equal(closeNewerSecond.status, 200, `closing the nearer day succeeds once the older day is closed: ${JSON.stringify(closeNewerSecond.body)}`)
   const drained = await order.json('GET', '/current?branch_id=1')
   assert.equal(drained.body.previous_open_shift, null,
@@ -669,7 +665,7 @@ async function main() {
   // The offer is ACTIONABLE, not decorative: the close the banner promises
   // goes through on the same identity that read it.
   const wideClose = await wide.json('POST', `/${wideCarry.id}/close`, {
-    expected_revision: wideCarry.revision, closed_at: new Date().toISOString(),
+    expected_revision: wideCarry.revision, reason: 'Forgot to close',
   })
   assert.equal(wideClose.status, 200, `the exempt admin ends the foreign shop-wide row: ${JSON.stringify(wideClose.body)}`)
   assert.equal((await wide.json('GET', '/current?branch_id=1')).body.previous_open_shift, null,
