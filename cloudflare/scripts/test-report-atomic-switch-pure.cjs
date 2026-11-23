@@ -13,13 +13,15 @@ function seam(text, before, after) {
   assert.equal(text.split(before).length, 2, 'MUTANT_SEAM_MISSING: ' + before)
   return text.replace(before, () => after)
 }
+const CLAMP = 'name === REPORT_ATOMIC_LONG_SWITCH ? await readSwitchState(env, REPORT_ATOMIC_LONG_SWITCH) : await readSwitchState(env, REPORT_ATOMIC_SWITCH)'
 const MUTANTS = {
   'shadow-clamp-removed': { file: 'readSwitches', edit: t => seam(t, 'Math.min(rate, READ_SWITCH_SHADOW_MAX_RATE)', 'rate') },
   'shadow-allowed-on-free': { file: 'reportAtomicSwitch', edit: t => seam(t, " || resolvePlanTier(env) === 'free'", '') },
   'no-write-between': { file: 'reportAtomicSwitch', edit: t => seam(t, 'if (reportCanonicalJson(again) === servedJson) {', 'if (true) {') },
   'sample-boundary-inclusive': { file: 'reportAtomicSwitch', edit: t => seam(t, 'sampler() < reading.rate', 'sampler() <= reading.rate') },
   'shared-promise-returns': { file: 'readSwitches', edit: t => seam(t, 'async function load(env: Env, needEpoch: boolean): Promise<Memo> {', 'let shared: Promise<Memo> | null = null\n  function load(env: Env, needEpoch: boolean): Promise<Memo> {\n    if (shared) return shared\n    shared = loadOnce(env, needEpoch).finally(() => { shared = null })\n    return shared\n  }\n  async function loadOnce(env: Env, needEpoch: boolean): Promise<Memo> {') },
-  'long-switch-reads-the-short-name': { file: 'reportAtomicSwitch', edit: t => seam(t, 'await readSwitchState(env, name)', 'await readSwitchState(env, REPORT_ATOMIC_SWITCH)') },
+  'long-switch-reads-the-short-name': { file: 'reportAtomicSwitch', edit: t => seam(t, CLAMP, 'await readSwitchState(env, REPORT_ATOMIC_SWITCH)') },
+  'clamp-removed': { file: 'reportAtomicSwitch', edit: t => seam(t, CLAMP, 'await readSwitchState(env, name)') },
   'long-switch-unknown': { file: 'readSwitches', edit: t => seam(t, "'report_atomic', 'report_atomic_long', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m', 'ic_wired', 'catalog_ranked_scope', 'products_parent_seek', 'ledger_keyset', 'ic_lot_counts', 'stock_bump_narrow', 'ledger_summary_lean', 'products_typed_order_js', 'sales_daily'] as const", "'report_atomic', 'call_counting', 'expense_reads', 'ic_simple', 'ic_fix_stock', 'dash_overview_5m', 'ic_wired', 'catalog_ranked_scope', 'products_parent_seek', 'ledger_keyset', 'ic_lot_counts', 'stock_bump_narrow', 'ledger_summary_lean', 'products_typed_order_js', 'sales_daily'] as const") },
   'router-ignores-switch-option': { file: 'reportAtomicSwitch', edit: t => seam(t, 'reportAtomicMode(env, options.switch)', 'reportAtomicMode(env)') },
 }
@@ -149,6 +151,21 @@ async function runAllChecks(mutant) {
     assert.equal(await mode(stored('shadow:0.1'), { sample: 0, tier: 'free' }), 'off', 'a shadow doubles the reads: never on Free')
     assert.equal(await mode(stored('shadow:5'), { sample: 0.09 }), 'shadow'); assert.equal(await mode(stored('shadow:5'), { sample: 0.2 }), 'off', 'shadow:5 is a tenth')
     router.setReportShadowSamplerForTests(null)
+  })
+
+  check('clamp: whatever value arrives, the kernel reads report_atomic or report_atomic_long and no other switch', async () => {
+    const real = switches.readSwitchState; const asked = []
+    switches.readSwitchState = async (env, name) => { asked.push(name); return real(env, name) }
+    try {
+      for (const arrived of ['ic_marks', 'sales_daily', 'probe', '', 'toString', '__proto__', null, 7, 'REPORT_ATOMIC_LONG', 'report_atomic_long ']) { freshMemo(); await router.reportAtomicMode(envWith({ row: stored('on') }).env, arrived) }
+      assert.deepEqual(asked, Array(10).fill('report_atomic'), 'an unlisted value reaches readSwitchState only as report_atomic')
+      asked.length = 0
+      freshMemo(); await router.reportAtomicMode(envWith({}).env, 'report_atomic_long'); await router.reportAtomicMode(envWith({}).env, 'report_atomic'); await router.reportAtomicMode(envWith({}).env)
+      assert.deepEqual(asked, ['report_atomic_long', 'report_atomic', 'report_atomic'], 'both valid names and the default are read as themselves')
+      asked.length = 0
+      freshMemo(); await router.routeReportRead(envWith({}).env, 'unit', async () => 1, async () => 2, { switch: 'ic_marks' })
+      assert.deepEqual(asked, ['report_atomic'], 'the router option is clamped too')
+    } finally { switches.readSwitchState = real }
   })
 
   const SECRET = '8675309.42'
