@@ -1414,6 +1414,7 @@ const REVIEW_LABELS: Partial<Record<string, TelegramLabelKey>> = {
   sale_limit_reached: 'reviewLimit',
   cash_method_unresolved: 'reviewCashMethod',
   closed_at_earlier_time: 'reviewEarlierClose',
+  closed_late: 'reviewClosedLate',
   opened_at_later_time: 'reviewLaterOpen',
   reopened_after_earlier_close: 'reviewReopenedAfterEarlierClose',
 }
@@ -1476,9 +1477,13 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   const closerIsCashier = options.closedById != null ? options.closedById === shift.user_id : closedBy.toLowerCase() === cashier
   const earlierClose = options.timeReview?.find((entry) => entry.code === SHIFT_REVIEW.earlierClose)
   const laterOpen = options.timeReview?.find((entry) => entry.code === SHIFT_REVIEW.laterOpen)
+  const closedLate = options.timeReview?.find((entry) => entry.code === SHIFT_REVIEW.closedLate)
   const earlierBy = cleanLine(earlierClose?.by, 60)
-  if (closedBy && !closerIsCashier && !(earlierBy && earlierBy.toLowerCase() === closedBy.toLowerCase())) lines.push(labeled('closedBy', closedBy))
+  const lateBy = cleanLine(closedLate?.by, 60)
+  if (closedBy && !closerIsCashier && !(earlierBy && earlierBy.toLowerCase() === closedBy.toLowerCase()) && !(lateBy && lateBy.toLowerCase() === closedBy.toLowerCase())) lines.push(labeled('closedBy', closedBy))
   if (earlierClose && earlierBy) lines.push(labeled('closedEarlierBy', earlierBy))
+  // One line for a shift closed on a later day than it opened: who, and the reason they typed (owner A69.5: "Closed late by {name}: {reason}").
+  if (closedLate && lateBy) lines.push(`${ROW_BULLET}${label('closedLateBy')} ${lateBy}: ${cleanLine(closedLate.reason, 500) || NOT_APPLICABLE}`)
   const laterOpenBy = cleanLine(laterOpen?.by, 60)
   if (laterOpen && laterOpenBy) lines.push(labeled('openedLaterBy', laterOpenBy))
   const reopenedBy = cleanLine(options.reopenedBy, 60)
