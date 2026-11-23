@@ -5,12 +5,14 @@ import {
   LATE_CLOSE_PERMISSION, LATE_REASON_MAX, holdsLateClosePermission, isLateClose, lateCloseBounds, lateCloseIsoForTime, lateCloseTimeOnDay,
   lateReason, offersLateClose,
 } from '../src/components/shifts/shiftLateClose.ts'
+import { PERMISSION_DEFS } from '../src/components/users/permissionDefinitions.ts'
 
 const fixturePath = path.join(import.meta.dirname, '..', '..', 'cloudflare', 'scripts', 'fixtures', 'shift-late-close-cases.json')
 const cases = JSON.parse(fs.readFileSync(fixturePath, 'utf8'))
 
 assert.equal(LATE_REASON_MAX, 500)
 assert.equal(LATE_CLOSE_PERMISSION, 'shift_close_forgotten')
+assert.equal(PERMISSION_DEFS.find((def) => def.key === LATE_CLOSE_PERMISSION)?.sensitivity, 'high', 'the grant shows other cashiers drawer cash, so the role editor marks it high')
 
 for (const row of cases.isLateClose) assert.equal(isLateClose(row.businessDate, row.today), row.late, JSON.stringify(row))
 

@@ -184,7 +184,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     description: 'Checkout. Also opens Shifts: close, reopen or amend your own shifts.',
     permissions: [
       { key: 'pos', tKey: 'perm_pos', label: 'POS', sensitivity: 'normal', lead: true },
-      { key: 'shift_close_forgotten', tKey: 'perm_shift_close_forgotten', label: 'Close forgotten shifts', sensitivity: 'normal' },
+      { key: 'shift_close_forgotten', tKey: 'perm_shift_close_forgotten', label: 'Close forgotten shifts', sensitivity: 'high' },
     ],
   },
   {
