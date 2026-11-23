@@ -6,8 +6,8 @@ import { CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } from '../lib/clientTimestamp'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, businessToday, localTodayExpr } from '../lib/businessDateWindow'
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
-import { getMergedPermissions, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
-import { holdsLateClosePermission, isLateClose, lateAmendmentReason, lateCloseBounds, lateReason } from '../lib/shiftLateClose'
+import { hasAnyPermission, hasPermission, isAdminControlUser } from '../lib/permissions'
+import { isLateClose, lateAmendmentReason, lateCloseBounds, lateReason } from '../lib/shiftLateClose'
 import { getPlanLimits } from '../lib/planTier'
 import { holdsCostViewGrant } from '../lib/acquisitionCostAccess'
 import { loadTelegramConfig, scheduleTelegramShiftOverview, scheduleTelegramShiftReport, sendTelegramShiftReport, sendTelegramStaleShiftAlert, type ShiftReportAction, type ShiftReportOptions, type ShiftReportSession } from '../lib/telegram'
@@ -608,9 +608,9 @@ function canSeeShiftToClose(user: SessionUser, policy: ShiftPolicy, shift: Shift
 function isOpenOnEarlierDay(shift: ShiftRow, nowMs: number): boolean {
   return !shift.closed_at && !shift.cancelled_at && isLateClose(shift.business_date, businessToday(nowMs))
 }
-/** The "Close forgotten shifts" grant, read strictly (lib/shiftLateClose); an administrator always holds it. */
+/** The "Close forgotten shifts" grant, read strictly (hasPermission is === true); an administrator always holds it. */
 function holdsLateClose(user: SessionUser): boolean {
-  return holdsLateClosePermission(getMergedPermissions(user), canManageShifts(user))
+  return canManageShifts(user) || hasPermission(user, 'shift_close_forgotten')
 }
 const SHIFT_LATE_NOT_PERMITTED = { code: 'shift_late_close_not_permitted', error: 'Only the cashier who opened it, an administrator, or someone allowed can close it.' } as const
 const SHIFT_LATE_REASON_REQUIRED = { code: 'shift_late_reason_required', error: 'A late close needs a reason.' } as const

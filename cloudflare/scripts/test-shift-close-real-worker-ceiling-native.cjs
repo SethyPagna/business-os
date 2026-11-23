@@ -119,7 +119,10 @@ async function world() {
   const persist = fs.mkdtempSync(path.join(os.tmpdir(), 'ceiling-d1-'))
   const mf = new Miniflare(miniflareOptions(script, persist))
   const now = Date.now()
-  const opened = now - 8 * 3600e3
+  // The measured shift is a SAME-DAY close: it opens 8 hours ago, but never before today's Cambodia midnight (UTC+7), because an earlier-day row is a late close (it needs a reason and answers 400 without one).
+  const khMidnight = Math.floor((now + 7 * 3600e3) / 86400e3) * 86400e3 - 7 * 3600e3
+  const opened = Math.max(now - 8 * 3600e3, khMidnight)
+  assert.ok(now - opened >= 50 * 60e3, 'run this native at least 50 minutes after Cambodia midnight: the fixture activity spans 45 minutes of the same day')
   const at = (min) => sqlTime(opened + min * 60e3)
   const tokens = {}
   try {
