@@ -122,8 +122,11 @@ async function world() {
   // The measured shift is a SAME-DAY close: it opens 8 hours ago, but never before today's Cambodia midnight (UTC+7), because an earlier-day row is a late close (it needs a reason and answers 400 without one).
   const khMidnight = Math.floor((now + 7 * 3600e3) / 86400e3) * 86400e3 - 7 * 3600e3
   const opened = Math.max(now - 8 * 3600e3, khMidnight)
-  assert.ok(now - opened >= 50 * 60e3, 'run this native at least 50 minutes after Cambodia midnight: the fixture activity spans 45 minutes of the same day')
-  const at = (min) => sqlTime(opened + min * 60e3)
+  assert.ok(now > opened, 'the measured shift opens before now')
+  // The fixture activity spans 45 minutes after the open. When the day is younger than 50 minutes (00:00 to 00:50 Cambodia time) the same activity is spread over the time the day has,
+  // in the same order, so every record stays inside the same-day shift and before the close, whatever the wall clock says.
+  const spread = Math.min(1, (now - opened) / (50 * 60e3))
+  const at = (min) => sqlTime(opened + Math.round(min * 60e3 * spread))
   const tokens = {}
   try {
     const raw = await mf.getD1Database('DB')
