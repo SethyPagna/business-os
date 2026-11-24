@@ -333,7 +333,7 @@ check('T-C7 the daily stamp: not written when last_seen_at (default format) is f
   assert.equal(never.account(neverId).last_seen_at, new Date(T0).toISOString(), 'a NULL stamp is written')
 })
 
-check('T-C7 the stamp is not written when no ticket was inserted (R-USED)', async () => {
+check('T-C7 a refused confirm writes 0 rows and stamps nobody: R-USED, also for a member who never got the ticket (errata N7)', async () => {
   const db = makeDb()
   const id = db.member(MEMBER_TG, 'active', '2026-11-20 07:00:00')
   const text = await freshToken()
@@ -342,7 +342,37 @@ check('T-C7 the stamp is not written when no ticket was inserted (R-USED)', asyn
   db.sqlite.prepare('UPDATE portal_accounts SET last_seen_at = ? WHERE id = ?').run('2026-11-20 07:00:00', id)
   db.resetCounters()
   assert.equal((await tap(db, text, right, MEMBER_TG, T0 + 2000)).id, 'R-USED')
-  assert.equal(db.changes, 1, 'only the stamp statement changed a row: the existing ticket row is still in place')
+  assert.equal(db.changes, 0, 'the refused tap changed no row, the stamp included')
+  assert.equal(db.account(id).last_seen_at, '2026-11-20 07:00:00')
+
+  // The reviewer's case: member 2 (stale stamp) taps the forwarded button of a token member 1 already used.
+  const other = db.member(OTHER_TG, 'active', '2026-11-20 08:00:00')
+  db.resetCounters()
+  assert.equal((await tap(db, text, right, OTHER_TG, T0 + 60_000)).id, 'R-USED')
+  assert.equal(db.changes, 0, 'member 2 was refused and nothing was written')
+  assert.equal(db.account(other).last_seen_at, '2026-11-20 08:00:00', 'member 2 is not marked as seen')
+})
+
+check('A2 the stamp goes in the batch that inserts the ticket of that same member, 2 rows with it', async () => {
+  const db = makeDb()
+  const id = db.member(MEMBER_TG, 'active', '2026-11-20 07:00:00')
+  const text = await freshToken()
+  db.resetCounters()
+  assert.equal((await tap(db, text, (await choiceFor(text)).right)).id, 'R-SIGNED-IN')
+  assert.equal(db.changes, 2, 'the ticket and the stamp')
+  assert.equal(db.account(id).last_seen_at, new Date(T0).toISOString())
+})
+
+check('A4 a 0-row ticket insert after a clean read answers R-LATER (the batch is one transaction)', async () => {
+  const db = makeDb()
+  const text = await freshToken()
+  const { right } = await choiceFor(text)
+  const stub = {
+    prepare: () => { throw new Error('no single reads on confirm') },
+    batch: async () => [{ results: [{ account_id: 1, status: 'active', ticket_exists: 0, recent_sessions: 0 }], meta: { changes: 0 } }, { results: [], meta: { changes: 0 } }, { results: [], meta: { changes: 0 } }],
+  }
+  assert.equal((await tap(stub, text, right)).id, 'R-LATER')
+  assert.equal(db.changes, 0)
 })
 
 // ---------------------------------------------------------------- T-C8
@@ -386,15 +416,44 @@ check('T-C10 the confirm batch is one D1 call and writes exactly 3 rows, or 5 wi
   console.log(`  rows per event: confirm calls=${plain.calls}, writes ${plain.rowsWritten} (${stamped.rowsWritten} with the stamp); start calls=1, writes 0`)
 })
 
-check('T-C10 refusals write nothing: used, cap, paused, stale are 0 rows', async () => {
-  const db = makeDb()
-  const id = db.member(MEMBER_TG)
-  for (let i = 0; i < CAP_MAX; i += 1) db.session(id, '2026-11-24 06:00:00')
+check('T-C10 refusals write nothing: used, cap, paused, stale are 0 rows, each with a stale daily stamp', async () => {
+  const STALE_SEEN = '2026-11-20 07:00:00'
+  const capped = makeDb()
+  const cappedId = capped.member(MEMBER_TG, 'active', STALE_SEEN)
+  for (let i = 0; i < CAP_MAX; i += 1) capped.session(cappedId, '2026-11-24 06:00:00')
   const text = await freshToken()
-  db.resetCounters()
-  assert.equal((await tap(db, text, (await choiceFor(text)).right)).id, 'R-CAP')
-  assert.equal(db.rowsWritten, 0)
-  assert.equal(db.calls, 1)
+  capped.resetCounters()
+  assert.equal((await tap(capped, text, (await choiceFor(text)).right)).id, 'R-CAP')
+  assert.equal(capped.rowsWritten, 0)
+  assert.equal(capped.calls, 1)
+  assert.equal(capped.account(cappedId).last_seen_at, STALE_SEEN)
+
+  const used = makeDb()
+  const usedId = used.member(MEMBER_TG, 'active', STALE_SEEN)
+  const usedText = await freshToken()
+  const usedRight = (await choiceFor(usedText)).right
+  assert.equal((await tap(used, usedText, usedRight)).id, 'R-SIGNED-IN')
+  used.sqlite.prepare('UPDATE portal_accounts SET last_seen_at = ? WHERE id = ?').run(STALE_SEEN, usedId)
+  used.resetCounters()
+  assert.equal((await tap(used, usedText, usedRight, MEMBER_TG, T0 + 3000)).id, 'R-USED')
+  assert.equal(used.rowsWritten, 0)
+  assert.equal(used.account(usedId).last_seen_at, STALE_SEEN)
+
+  const paused = makeDb()
+  const pausedId = paused.member(MEMBER_TG, 'suspended', STALE_SEEN)
+  const pausedText = await freshToken()
+  paused.resetCounters()
+  assert.equal((await tap(paused, pausedText, (await choiceFor(pausedText)).right)).id, 'R-PAUSED')
+  assert.equal(paused.rowsWritten, 0)
+  assert.equal(paused.account(pausedId).last_seen_at, STALE_SEEN)
+
+  const stale = makeDb()
+  const staleId = stale.member(MEMBER_TG, 'active', STALE_SEEN)
+  const staleText = await freshToken()
+  stale.resetCounters()
+  assert.equal((await tap(stale, staleText, (await choiceFor(staleText)).right, 424242)).id, 'R-STALE')
+  assert.equal(stale.rowsWritten, 0)
+  assert.equal(stale.account(staleId).last_seen_at, STALE_SEEN)
 })
 
 // ---------------------------------------------------------------- T-C11

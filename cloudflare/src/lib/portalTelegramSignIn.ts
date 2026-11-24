@@ -46,12 +46,13 @@ WHERE a.telegram_user_id = @tg
            AND datetime(s.created_at) > datetime(@now, @cap_window)
          LIMIT @cap_max)) < @cap_max`
 
-// S-C4: the member's last_seen_at, at most daily, only when the ticket row exists.
+// S-C4: the member's last_seen_at, at most daily, only when this batch's S-C3 inserted the ticket for this member
+// (errata N7: a refused confirm writes 0 rows).
 export const S_C4 = `UPDATE portal_accounts SET last_seen_at = @now
 WHERE telegram_user_id = @tg
   AND status = 'active'
   AND (last_seen_at IS NULL OR datetime(last_seen_at) < datetime(@now, @seen_window))
-  AND EXISTS (SELECT 1 FROM portal_sessions WHERE token_hash = @ticket)`
+  AND EXISTS (SELECT 1 FROM portal_sessions s WHERE s.token_hash = @ticket AND s.account_id = portal_accounts.id AND datetime(s.created_at) = datetime(@now))`
 
 export type ConfirmButton = { text: string; data: string }
 
@@ -142,7 +143,8 @@ export async function confirmKnownMember(
   if (row.status !== 'active') return reply('R-PAUSED', lang)
   if (Number(row.ticket_exists) === 1) return reply('R-USED', lang)
   if (Number(row.recent_sessions) >= capMax) return reply('R-CAP', lang)
-  // At least 1, not exactly 1 (errata E9). A 0 here means another tap won the race between the read and the insert.
-  if (Number(insert?.meta?.changes ?? 0) < 1) return reply('R-USED', lang)
+  // At least 1, not exactly 1 (errata E9). The batch is one transaction, so S-K2 and S-C3 see the same rows: a 0 here is
+  // not a race with another tap (S-K2 would have said R-USED or R-CAP) and cannot happen in practice.
+  if (Number(insert?.meta?.changes ?? 0) < 1) return reply('R-LATER', lang)
   return reply('R-SIGNED-IN', lang, phnomPenhHm(verified.startedAtSeconds))
 }
