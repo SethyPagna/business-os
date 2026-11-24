@@ -105,9 +105,9 @@ export function pageBody(served: MarksPage, top: number, have: string): PageBody
   const head = { format: MARKS_FORMAT, page: served.page, buckets: served.buckets, cursor: served.cursor, tag: served.tag, top, hash: served.hash }
   return have !== '' && have === served.hash ? { ...head, unchanged: true } : { ...head, rows: served.rows }
 }
-/** A page just read: the entry to store (it carries its hash) and the body to send. A page's rows are the database at its cursor, so the hash covers them. */
+/** A page just read: the entry to store (it carries its hash) and the body to send. A page's rows are a pure function of the database at its cursor (every count-state change writes an event) and the tag names that cursor event, so equal (format, page, cursor, tag) is equal rows: the hash names those four and never the rows (the cheaper hash of the amendment: no pass over the rows). */
 export function buildPageAnswer(page: number, built: PageBuild, have: string): { stored: MarksPage; body: PageBody } {
-  const stored: MarksPage = { page, buckets: built.buckets, cursor: built.cursor, tag: built.tag, hash: fnv1a32(`${MARKS_FORMAT}:${page}:${built.cursor}:${built.tag}:${JSON.stringify(built.rows)}`), rows: built.rows }
+  const stored: MarksPage = { page, buckets: built.buckets, cursor: built.cursor, tag: built.tag, hash: fnv1a32(`${MARKS_FORMAT}:${page}:${built.cursor}:${built.tag}`), rows: built.rows }
   return { stored, body: pageBody(stored, built.cursor, have) }
 }
 

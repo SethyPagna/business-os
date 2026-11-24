@@ -92,6 +92,13 @@ const pinnedPageIds = () => {
   return values[0]
 }
 
+// A page's rows are a pure function of the database at its cursor (every count-state change writes an event), so equal (format, page, cursor, tag) means equal rows: the hash covers those four and never the rows.
+const hashNamesNoRows = () => {
+  const lib = loadLib(), hashOf = (page, cursor, tag, rows) => lib.buildPageAnswer(page, { cursor, tag, rows, buckets: [] }, '').stored.hash
+  const base = hashOf(1, 10, 'aaaaaaaa', [[1, 2, 1]])
+  return base === hashOf(1, 10, 'aaaaaaaa', [[9, 9, 2], [8, 8, 1]]) && base !== hashOf(2, 10, 'aaaaaaaa', []) && base !== hashOf(1, 11, 'aaaaaaaa', []) && base !== hashOf(1, 10, 'bbbbbbbb', [])
+}
+
 const main = () => {
   const outArg = process.argv.find((a) => a.startsWith('--out='))
   assert.ok(fs.existsSync(FIXTURE), 'the recorded rows are missing: ' + FIXTURE)
@@ -111,6 +118,7 @@ const main = () => {
   let failed = 0
   const check = (label, ok) => { console.log((ok ? 'PASS ' : 'FAIL ') + label); if (!ok) failed++ }
   check('the probe fails on a page of 20,000 rows (it can fail)', hugeVerdict.ok === false)
+  check('D.4 step 1: the page hash names (format, page, cursor, tag) and not the rows', hashNamesNoRows())
   for (const v of verdicts) check('measure ' + v.spec + ': 3 x worst + 3 x baseline = ' + v.warm.toFixed(2) + ' ms <= ' + LINE.warmMs + ' and 3 x first = ' + v.first.toFixed(2) + ' ms <= ' + LINE.firstMs, v.ok)
   check('the pinned inventoryMarksPageIds ' + pinned + ' passes the line', passes(atPinned.a, baseline).ok)
   console.log((chosen > pinned ? 'NOTE a larger page passes in this run (D.3 takes the largest): ' : 'NOTE largest page that passes in this run: ') + chosen)
