@@ -380,6 +380,11 @@ const figuresWithoutLateFacts = (json) => {
   if (figures && figures.window) delete figures.window.closed_at
   return JSON.stringify(figures, (key, val) => key === 'needs_review' ? undefined : key === 'review_codes' && Array.isArray(val) ? val.filter((code) => code !== LATE_REVIEW_CODE) : val)
 }
+// 6.0.2993 (owner A70) renamed the cash-used row's label, words only. The base commit still prints the old pair, so the BASE side's text maps exactly that
+// one en/km pair to the new one before it is compared; the lane's own text is never mapped (it is pinned to the new pair by its own check below).
+const OLD_CASH_USED_LABEL = 'Additional change used/ប្រាក់អាប់បន្ថែមដែលបានប្រើ'
+const NEW_CASH_USED_LABEL = 'Cash used/សាច់ប្រាក់បានប្រើ'
+const baseLabelRenamed = (text) => String(text).split(OLD_CASH_USED_LABEL).join(NEW_CASH_USED_LABEL)
 const NL = String.fromCharCode(10)
 const CLOSED_LATE_ROW = new RegExp('Closed late|បិទយឺត')
 // Rows start with the bullet "· ". The close-time row is "· Close/បិទ: <date time>".
@@ -398,6 +403,7 @@ async function main() {
     const options = { shopWide: scenario.shopWide, hours: scenario.hours, telegramOn: scenario.telegramOn, hook: scenario.hook, afterClose: scenario.afterClose, now: scenario.now }
     const requestId = 'req-close-0000000001'
     const oldRun = await runClose(base, { ...options, requestId })
+    oldRun.telegram = oldRun.telegram.map(baseLabelRenamed)
     const newRun = await runClose(head, { ...options, requestId, refuse: 50 })
     runs.push({ scenario, oldRun, newRun })
   }
@@ -430,6 +436,17 @@ async function main() {
       assert.equal(newRun.telegram.length > 0, scenario.telegramOn !== false, `${scenario.name}: the report was sent exactly when Telegram is on`)
     }
   })
+  await check('THE RENAME (A70, 6.0.2993): the lane\'s queued report prints "Cash used" and never the old "Additional change used" pair; the base is the one that still prints the old pair', () => {
+    const lane = runs.filter(({ scenario }) => scenario.telegramOn !== false)
+    assert.ok(lane.length > 0, 'a scenario sent a report')
+    for (const { scenario, newRun } of lane) {
+      const all = newRun.telegram.join(NL)
+      assert.ok(!all.includes('Additional change used'), `${scenario.name}: the old en label is gone`)
+      assert.ok(!all.includes('ប្រាក់អាប់បន្ថែមដែលបានប្រើ'), `${scenario.name}: the old km label is gone`)
+    }
+    assert.ok(lane.some(({ newRun }) => newRun.telegram.some((text) => text.includes(NEW_CASH_USED_LABEL))), 'a lane report holds the new Cash used pair')
+  })
+
   await check('A LATE CLOSE (overnight 50 h): closed_at is 23:59:59 Cambodia of its business day and the review says closed_late', () => {
     const late = runs.filter(({ scenario }) => scenario.lateClose)
     assert.ok(late.length > 0, 'a late-close scenario exists')
@@ -499,7 +516,7 @@ async function main() {
       assert.equal(newLife[name].result.status, oldLife[name].result.status, `${name}: the answer`)
       assert.equal(oldLife[name].sent.length, 1, `${name}: the base sends one message`)
       assert.equal(newLife[name].sent.length, 1, `${name}: the queued report is sent once (it was delivered twice)`)
-      assert.equal(scrub(newLife[name].sent[0]), scrub(oldLife[name].sent[0]), `${name}: the report text`)
+      assert.equal(scrub(newLife[name].sent[0]), scrub(baseLabelRenamed(oldLife[name].sent[0])), `${name}: the report text`)
       assert.equal(newLife[name].keys.length, 1, `${name}: one recorded report`)
       assert.match(newLife[name].keys[0], new RegExp(`^shift-report:\\d+:r\\d+:${name}$`), `${name}: the key names the shift, the revision and the action`)
     }
