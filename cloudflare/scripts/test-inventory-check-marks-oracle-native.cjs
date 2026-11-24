@@ -17,6 +17,8 @@ const { bootWorld } = require('./read-budget/world.cjs')
 
 const ROOT = path.join(__dirname, '..')
 const IC = '/api/inventory-checks'
+// --collect (a red-first aid, never a gate): a step whose check fails is recorded in report.reds and the run goes on, so one run on a base shows every new step red. The verdicts of the runner (F.4) never use it.
+const COLLECT = process.argv.includes('--collect')
 // The plan limits of a tier, from lib/planTier.ts itself (getPlanLimits), never retyped here.
 function limitsOf(tier) {
   const ts = require(path.join(ROOT, 'node_modules', 'typescript'))
@@ -244,10 +246,14 @@ async function scenario(world, report, patches) {
     const before = label.startsWith('I7 ') ? null : await pairSnap(world)
     try { await writer() } catch (e) { report.skipped.push(`${label}: ${String(e.message).slice(0, 120)}`); return }
     if (before) await paired(world, before, label)
-    if (checker) await checker(); else { await snap(); await device.sync(); await same(world, device, label) }
-    if (before) await paired(world, before, label)
-    const built = new Device(world, 1); await built.build(); await same(world, built, label + ' (fresh build)'); report.steps.push(label)
+    try {
+      if (checker) await checker(); else { await snap(); await device.sync(); await same(world, device, label) }
+      if (before) await paired(world, before, label)
+      const built = new Device(world, 1); await built.build(); await same(world, built, label + ' (fresh build)'); report.steps.push(label)
+    } catch (e) { if (!COLLECT) throw e; report.reds.push({ label, message: String(e.message).split('\n')[0].slice(0, 200) }) }
   }
+  // A check outside step() (no device comparison): the same collect rule.
+  const guarded = async (label, fn) => { at(label); try { await fn(); report.steps.push(label) } catch (e) { if (!COLLECT) throw e; report.reds.push({ label, message: String(e.message).split('\n')[0].slice(0, 200) }) } }
   const insertSession = (id, branch, when, status = 'closed') => world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,?,1,'oracle fixture',?,0,'{}',?,?,?)").bind(id, world.orgId, branch, status, when, when, when).run()
   // A session made by a Worker that did not know line_set_json: a pending approval with NULL set, every member counted 2 against a baseline of 1 (so every member waits by the engine's own rule), events as the real writer records them.
   const legacySession = async (lid, products, when) => {
@@ -566,14 +572,58 @@ async function scenario(world, report, patches) {
   let i9from = null
   await step('I9 native half: a viewer without the stock field', async () => { await device.sync(); i9from = { cursor: device.cursor, tag: device.tag }; await submit([i9], 1) }, async () => {
     const url = `${IC}/marks/changes?branchId=1&since=${i9from.cursor}&tag=${i9from.tag}`
-    const permitted = await world.send('GET', url)
+    // Both reads bypass the shared answer (miss: true): this step proves the strip on a COMPUTED answer; the strip on a stored one is R5s below (mw15 removes it from the hit path only).
+    const permitted = await world.send('GET', url, undefined, { miss: true })
     assert.ok(permitted.status === 200 && 'waiting' in permitted.json, 'I9: the permitted viewer gets waiting (' + permitted.status + ')')
-    const plainView = await world.send('GET', url, undefined, { cookie: nostockCookie })
+    const plainView = await world.send('GET', url, undefined, { cookie: nostockCookie, miss: true })
     assert.equal(plainView.status, 200, 'I9: the counter without the stock field reads the marks: ' + plainView.text.slice(0, 160))
     assert.ok(!('waiting' in plainView.json) && Array.isArray(plainView.json.marks), 'I9: no waiting key for a viewer without the stock field')
     const pending = await world.send('GET', `${IC}/marks/pending?branchId=1`, undefined, { cookie: nostockCookie })
     assert.deepEqual([pending.status, pending.json.code], [403, 'inventory_check_fix_stock_required'], 'I9: /marks/pending is refused')
     await snap(); await device.sync(); await same(world, device, 'I9 native half')
+  })
+  // R2 shared answer, racing (A3, B.5). Part 1, the two-device step: A and B hold the same cursor, a write lands, A reads (computes and stores the answer), B reads the same (since, tag) and is served the stored answer: fewer D1 calls,
+  // and the second device reads about 7 rows (gross, auth included) against A's computation. Part 2, the race: B holds cursor c, A computes since c and stores an answer that ends at its own cursor, then a write W lands; B asks since c and
+  // hits that older answer. B's chain must end at a top at or after W: serving the stored `more` (mw5) ends B's chain before W.
+  const [r2a, r2b, r2c] = await freshHigh(3)
+  const dA = new Device(world, 1, { miss: false }), dB = new Device(world, 1, { miss: false })
+  at('R2 shared answer, racing'); await dA.build(); await dB.build()
+  const firstChanges = (d, from) => d.log.slice(from).find((x) => x.chg)
+  await step('R2 shared answer, racing', async () => { await submit([r2a], 1) }, async () => {
+    await snap()
+    const a0 = dA.log.length; await dA.sync()
+    const computed = firstChanges(dA, a0)
+    const b0 = dB.log.length; await dB.sync()
+    const hit = firstChanges(dB, b0)
+    assert.ok(hit.calls < computed.calls, `R2: the second device's first read is served from the shared answer (${hit.calls} calls against ${computed.calls} computing it)`)
+    report.twoDevice = { firstDevice: { rows: computed.rr, calls: computed.calls }, secondDevice: { rows: hit.rr, calls: hit.calls } }
+    await same(world, dA, 'R2 first device'); await same(world, dB, 'R2 second device (served from the shared answer)')
+    // the race
+    await submit([r2b], 1); await snap()
+    await dA.sync()
+    await submit([r2c], 1); await snap()
+    const b1 = dB.log.length; await dB.sync()
+    const chain = dB.log.slice(b1).filter((x) => x.chg)
+    const topNow = Number((await world.all('SELECT COALESCE(MAX(id), 0) AS top FROM inventory_check_events'))[0].top)
+    assert.ok(chain.length >= 2 && chain[0].chg.more === true, `R2: the stored answer is older than the write that landed after it, so B's first answer says more (${chain.length} reads, more ${chain[0] && chain[0].chg.more})`)
+    assert.ok(dB.cursor >= topNow, `R2: B's chain ends at the write (cursor ${dB.cursor}, top when B began ${topNow})`)
+    await same(world, dB, 'R2 second device after the race')
+  })
+  // R5s the strip at serve time (A3, B.5): a permitted viewer computes and stores the answer with Waiting; a viewer without the stock field reads the same (since, tag), is served the stored answer, and gets no `waiting` key.
+  // Serving the entry as stored (mw15) leaks it. The permitted viewer's own read of the same entry still carries it.
+  const [r5a] = await freshHigh(1)
+  let r5from = null
+  await step('R5s strip at serve time on a stored answer', async () => { await device.sync(); r5from = { cursor: device.cursor, tag: device.tag }; await submit([r5a], 1) }, async () => {
+    const url = `${IC}/marks/changes?branchId=1&since=${r5from.cursor}&tag=${r5from.tag}`
+    const permitted = await world.send('GET', url)
+    assert.ok(permitted.status === 200 && Array.isArray(permitted.json.waiting) && permitted.json.waiting.length > 0, 'R5s: the permitted viewer computes and stores the answer with Waiting (' + permitted.status + ')')
+    const plainView = await world.send('GET', url, undefined, { cookie: nostockCookie })
+    assert.equal(plainView.status, 200, 'R5s: ' + plainView.text.slice(0, 160))
+    assert.ok(plainView.calls < permitted.calls, `R5s: the viewer without the stock field is served the stored answer (${plainView.calls} calls against ${permitted.calls})`)
+    assert.ok(!('waiting' in plainView.json) && plainView.json.marks.length > 0, 'R5s: no waiting key in the answer served from the stored entry')
+    const again = await world.send('GET', url)
+    assert.ok(again.calls < permitted.calls && Array.isArray(again.json.waiting) && again.json.waiting.length > 0, 'R5s: the permitted viewer still gets Waiting from the stored entry')
+    await snap(); await device.sync(); await same(world, device, 'R5s strip at serve time')
   })
   // B1 branch parity (A2, lead's answer 2): the same word as branchId gets the same status and error code from every route that takes a branch. A change to the check on one side alone turns this red.
   await step('B1 branch parity', async () => {}, async () => {
@@ -601,6 +651,14 @@ async function scenario(world, report, patches) {
   assert.ok(device.rebuilds > report.i7.rebuiltBefore, 'I7: the device was told to rebuild')
   // I8: a device that sleeps. Events added past the catch-up threshold force one rebuild; within it the feed pages with no rebuild.
   const insertEvents = async (n) => world.db.prepare(`WITH RECURSIVE s(k) AS (SELECT 0 UNION ALL SELECT k+1 FROM s WHERE k < ${n - 1}) INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) SELECT 'bx-1', NULL, 1, 'observe', 'sl-'||hex(randomblob(6))||k, 'h', '{}','{}','{}','2026-11-04T00:00:00.000Z' FROM s`).run()
+  // A3: K is 10,000 on both plans (B.4), so 7,500 events are within and 25,000 are beyond; the window the devices wait in after a broadcast is sent with the capabilities.
+  await guarded('I8 K = 10,000 and the broadcast jitter window are served', async () => {
+    assert.equal(cap.catchUpMaxEvents, 10000, 'I8: K is 10,000 events')
+    assert.equal(cap.catchUpMaxEvents, limits.inventoryMarksCatchUpMaxEvents, 'I8: K comes from the plan')
+    assert.deepEqual([cap.jitterMinMs, cap.jitterMaxMs], [limits.inventoryMarksBroadcastJitterMinMs, limits.inventoryMarksBroadcastJitterMaxMs], 'I8: capabilities.marks carries the jitter window')
+    assert.ok(cap.jitterMaxMs > cap.jitterMinMs, 'I8: the window has a width')
+  })
+  const beyondEvents = Math.floor(cap.catchUpMaxEvents * 2.5)
   const within = Math.floor(cap.catchUpMaxEvents * 0.75)
   const r0 = device.rebuilds, a0 = device.answers
   at('I8 within the threshold')
@@ -609,8 +667,8 @@ async function scenario(world, report, patches) {
   assert.equal(device.rebuilds, r0, 'I8: no rebuild within the threshold')
   const r1 = device.rebuilds
   at('I8 beyond the threshold')
-  await insertEvents(cap.catchUpMaxEvents * 2 + 500); await snap(); await device.sync(); await same(world, device, 'I8 beyond the threshold')
-  report.i8.beyond = { events: cap.catchUpMaxEvents * 2 + 500, rebuilds: device.rebuilds - r1 }
+  await insertEvents(beyondEvents); await snap(); await device.sync(); await same(world, device, 'I8 beyond the threshold')
+  report.i8.beyond = { events: beyondEvents, rebuilds: device.rebuilds - r1 }
   assert.equal(device.rebuilds - r1, 1, 'I8: beyond the threshold the device rebuilds exactly once')
   assert.ok(device.top - device.cursor <= cap.catchUpMaxEvents / 2, 'I8: the lag after the rebuild is within half the threshold')
   // The cached snapshot page obeys the lag rule (m7): a warm page is never served further behind than half the threshold.
@@ -620,6 +678,43 @@ async function scenario(world, report, patches) {
   const page = (await world.send('GET', `${IC}/marks?branchId=1&page=0`)).json
   assert.ok(page.top - page.cursor <= cap.catchUpMaxEvents / 2, `the lag rule: a page served ${page.top - page.cursor} events behind`)
   report.steps.push('I8 lag rule on the cached page')
+  // R3 shared answer after a restore, ids reused (A3): the stored answer for (since, tag) is served while the log is intact (a hit). Then the log is replaced the way a restore replaces it: the event at `since` keeps its id and has another tag
+  // (its request id differs), the stored answer's own cursor event is untouched, and top is still at or past `since`. `since <= top` still holds, so only the tag tells: the right answer is `rebuild`. A hit that skips the since tag check (mw4) serves it.
+  const dropNoUpdate = () => world.db.prepare('DROP TRIGGER IF EXISTS inventory_check_events_no_update').run()
+  const changesUrl = (since, tag) => `${IC}/marks/changes?branchId=1&since=${since}&tag=${tag}`
+  const eventAt = async (id) => (await world.all('SELECT id, actor_id, request_id, created_at FROM inventory_check_events WHERE id = ?', id))[0]
+  const topId = async () => Number((await world.all('SELECT COALESCE(MAX(id), 0) AS top FROM inventory_check_events'))[0].top)
+  const [r3a, r3b] = await freshHigh(2)
+  await guarded('R3 shared answer after a restore, ids reused', async () => {
+    const since = await topId(), tag = lib.eventTag(await eventAt(since))
+    await submit([r3a], 1)
+    const computed = await world.send('GET', changesUrl(since, tag), undefined, { miss: true })
+    assert.ok(computed.status === 200 && computed.json.cursor > since && computed.json.exact === true, 'R3: an exact answer with events is computed and stored')
+    const hit = await world.send('GET', changesUrl(since, tag))
+    assert.ok(hit.status === 200 && hit.calls < computed.calls, `R3: before the restore the stored answer is served (${hit.calls} calls against ${computed.calls})`)
+    await dropNoUpdate()
+    await world.db.prepare("UPDATE inventory_check_events SET request_id = request_id || '-restored' WHERE id = ?").bind(since).run()
+    const after = await world.send('GET', changesUrl(since, tag))
+    assert.equal(after.status, 200, 'R3: ' + after.text.slice(0, 160))
+    assert.equal(after.json.rebuild, true, 'R3: the event at since has another tag, so the answer is rebuild, never the stored answer')
+  })
+  // R3b stored-cursor check (A3): the stored answer X was computed since c1 and ends at c2. A restore keeps event c1 (its tag is the request's) and replaces event c2 (another tag), top at or past c2. X holds states the restore removed: the hit
+  // must not be served and a fresh answer is computed and stored over it. A hit that skips the stored-cursor check (mw13) serves X.
+  await guarded('R3b stored-cursor check', async () => {
+    const since = await topId(), tag = lib.eventTag(await eventAt(since))
+    await submit([r3b], 1)
+    const computed = await world.send('GET', changesUrl(since, tag), undefined, { miss: true })
+    assert.ok(computed.status === 200 && computed.json.cursor > since && computed.json.exact === true, 'R3b: an exact answer with events is computed and stored')
+    const stale = computed.json
+    const hit = await world.send('GET', changesUrl(since, tag))
+    assert.ok(hit.status === 200 && hit.calls < computed.calls, `R3b: before the restore the stored answer is served (${hit.calls} calls against ${computed.calls})`)
+    await world.db.prepare("UPDATE inventory_check_events SET request_id = request_id || '-restored' WHERE id = ?").bind(stale.cursor).run()
+    const after = await world.send('GET', changesUrl(since, tag))
+    assert.equal(after.status, 200, 'R3b: ' + after.text.slice(0, 160))
+    assert.equal(after.json.rebuild, undefined, 'R3b: event c1 keeps its tag, so this is not a rebuild')
+    assert.notEqual(after.json.tag, stale.tag, 'R3b: the stored answer ends at an event the restore replaced and must not be served')
+    assert.equal(after.json.tag, lib.eventTag(await eventAt(stale.cursor)), 'R3b: the fresh answer names the event as it is now')
+  })
 }
 
 // R4 throughput: a 500-line submission (every line differing, superseding 10 older lines) is followed by the device in at most 3 reads, and every answer keeps its touched products within the walk's limit.
@@ -716,6 +811,11 @@ const MUTANTS = [
   { name: 'mx11 a Set never closes the Issue', file: 'src/lib/stockSetClosesIssue.ts', from: '@now,@now,@now WHERE ${CLOSABLE}`, params },', to: '@now,@now,@now WHERE 0`, params },', red: 'W11' },
   { name: 'mb1 /overlay accepts only nine digits of branch', file: 'src/routes/inventoryChecks.ts', from: '!/^\\d+$/.test(branchWord)', to: '!/^\\d{1,9}$/.test(branchWord)', red: 'B1' },
   { name: 'mw14 legacy without a.status = pending', file: LIB, from: "a.line_set_json IS NULL AND a.session_id IS NOT NULL AND a.status = 'pending' AS legacy", to: 'a.line_set_json IS NULL AND a.session_id IS NOT NULL AS legacy', red: 'L2' },
+  // A3, the shared changes answer (B.5). mw4/mw13/mw5 mutate the serve of a stored answer in the library; mw15 mutates the hit path of the route alone (the computed path keeps its strip, which I9 proves).
+  { name: 'mw4 a cache hit skips the tag check of since', file: LIB, from: '(since > 0 && (!sinceEvent || eventTag(sinceEvent) !== tag))', to: 'false', red: 'R3 shared' },
+  { name: 'mw5 a cache hit is served with its stored more', file: LIB, from: 'more: stored.more || stored.cursor < topId', to: 'more: stored.more', red: 'R2 shared' },
+  { name: 'mw13 a cache hit skips the stored-cursor tag check', file: LIB, from: 'stored.cursor > topId || !cursorEvent || eventTag(cursorEvent) !== stored.tag', to: 'false', red: 'R3b' },
+  { name: 'mw15 waiting is not stripped from a stored answer', file: 'src/routes/inventoryChecks.ts', from: 'start.permitted ? served : withoutWaiting(served)', to: 'served', red: 'R5s' },
 ]
 const SWITCHES = { ic_simple: 'on', ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' }
 const PLAIN_SWITCHES = { ic_simple: 'on', ic_marks: 'on', ic_fix_stock: 'on' }
@@ -741,7 +841,7 @@ function runnerSelfCheck(v = verdict) {
 
 async function run(patches, model = {}, worlds = ['main', 'r4a', 'r4b']) {
   Object.assign(MODEL, { union: false, publishEach: false, dropHeld: false }, model)
-  const report = { steps: [], skipped: [], red: null, at: 'boot' }
+  const report = { steps: [], skipped: [], red: null, at: 'boot', reds: [] }
   const inWorld = async (opts, fn) => { const world = await bootWorld({ seedVariant: 'base', patches, ...opts }); try { await fn(world) } finally { await world.dispose() } }
   try {
     if (worlds.includes('main')) await inWorld({ tier: 'free', switches: SWITCHES }, (world) => scenario(world, report, patches))
@@ -762,7 +862,9 @@ if (require.main === module) (async () => {
     for (const s of base.skipped) console.log('SKIPPED (writer did not run) ' + s)
     if (base.red) console.log(`RED at "${base.red.label}": ${base.red.message}`)
     console.log('caps ' + JSON.stringify(base.caps) + ' i7 ' + JSON.stringify(base.i7) + ' i8 ' + JSON.stringify(base.i8) + ' legacyAnswers ' + base.legacyAnswers)
-    bad = base.skipped.length || base.red ? 1 : 0
+    if (base.twoDevice) console.log('two devices (B.5): ' + JSON.stringify(base.twoDevice))
+    for (const r of base.reds) console.log(`RED (collected) "${r.label}": ${r.message}`)
+    bad = base.skipped.length || base.red || base.reds.length ? 1 : 0
   }
   if (process.argv.includes('--mutants')) {
     const only = (process.argv.find((x) => x.startsWith('--only=')) || '').slice(7).split(',').filter(Boolean)
