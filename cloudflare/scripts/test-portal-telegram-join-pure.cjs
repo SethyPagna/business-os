@@ -469,6 +469,19 @@ check('T-D13: the name rules (control characters, 80 characters, empty -> member
   assert.equal(join.joinMemberName(null, null, code), code)
   assert.equal(join.joinMemberName('   ', null, code), code)
   assert.equal(join.joinMemberName('\u{1F600}'.repeat(100), null, code), '\u{1F600}'.repeat(80), 'cut by characters, not UTF-16 halves')
+  // A5: bidi, zero-width and format characters go too; a name of only those falls back to the member code.
+  assert.equal(join.joinMemberName('ab\u202Ecd', null, code), 'abcd', 'a bidi override is removed')
+  for (const hidden of ['\u200B', '\u200C', '\u200D', '\u200E', '\u200F', '\u202A', '\u202B', '\u202C', '\u202D', '\u202E', '\u2060', '\u2066', '\u2069', '\uFEFF']) {
+    assert.equal(join.joinMemberName(`a${hidden}b`, null, code), 'ab', `U+${hidden.codePointAt(0).toString(16).toUpperCase()} is removed`)
+    assert.equal(join.joinMemberName(hidden, hidden, code), code, `a name of only U+${hidden.codePointAt(0).toString(16).toUpperCase()} is empty`)
+  }
+  assert.equal(join.joinMemberName('\u200B\u200B', null, code), code, 'two zero-width spaces are no name')
+  assert.equal(join.joinMemberName('x'.repeat(79) + '\u{1F600}\u{1F600}', null, code), 'x'.repeat(79) + '\u{1F600}', 'an emoji at the cut is kept whole or dropped whole')
+  assert.equal(join.joinMemberName('x'.repeat(80) + '\u{1F600}', null, code), 'x'.repeat(80), 'an emoji just past the cut is dropped whole')
+  assert.equal(join.joinMemberName('x'.repeat(78) + '\u202E' + '\u200B' + 'yz', null, code), 'x'.repeat(78) + 'yz', 'the hidden characters do not use up the 80')
+  const cleaner = loadLib('portalTelegramName')
+  assert.equal(cleaner.cleanTelegramName('A\nB', 60), 'AB', 'a line feed is a control character and is removed')
+  assert.equal(cleaner.cleanTelegramName(42, 60), '')
 
   const cases = [
     [{ firstName: 'Sok\n', lastName: 'Da\tra' }, 'Sok Dara'],

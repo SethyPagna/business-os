@@ -1,3 +1,4 @@
+import { cleanTelegramName, TELEGRAM_NAME_REPLY_MAX } from './portalTelegramName'
 import type { PortalTelegramReplyId } from './portalTelegramToken'
 
 // G38 S3c: every bot reply, in English and Khmer, in one table (AMEND-g38-lean-writes-1.2 sections 4.4 and 5.7).
@@ -108,10 +109,9 @@ export function replyLanguage(tokenLocale: string | null | undefined, languageCo
   return languageCode === 'km' ? 'km' : 'en'
 }
 
-// A name that came from settings or from a member row: no control characters, at most 60 characters.
+// A name that came from settings or from a member row: the shared cleaner (portalTelegramName), at most 60 code points.
 function cleanName(value: unknown): string {
-  if (typeof value !== 'string') return ''
-  return value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)
+  return cleanTelegramName(value, TELEGRAM_NAME_REPLY_MAX)
 }
 
 export function portalTelegramReplyText(id: PortalTelegramReplyId, lang: PortalTelegramLang, params: PortalTelegramTextParams = {}): string {

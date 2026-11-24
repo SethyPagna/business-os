@@ -3,10 +3,11 @@ import { contactVerdict, decodeStartFlags, portalNowIso, secondsAgoModifier } fr
 import { isMemberCodeCollision, mintMemberCode } from './memberCode'
 import { PORTAL_CONSENT_VERSION } from './portalAccounts'
 import { getPlanLimits } from './planTier'
+import { cleanTelegramName, TELEGRAM_NAME_STORED_MAX } from './portalTelegramName'
 
 // The new shopper's join (G38 S3d; AMEND-g38-lean-writes-1.2 sections 3.4, 3.5, 5.6, 7 "New shopper", 8.4).
 // Nothing here is mounted: S3e calls these from the webhook route. Every function returns a reply id; the texts live in S3c's
-// table and are looked up by the route, so this file shares no code with it. Every time written is portalNowIso (24 characters).
+// table and are looked up by the route, so this file shares only the name cleaner (portalTelegramName) with it. Every time written is portalNowIso (24 characters).
 
 type Bind = Record<string, unknown>
 export type JoinDb = {
@@ -84,7 +85,6 @@ WHERE id = @tg
 
 // Section 3.5 step 5: at most three batches (the first plus two retries), then R-LATER.
 const JOIN_BATCH_TRIES = 3
-const NAME_MAX = 80
 
 export const PORTAL_TELEGRAM_JOIN_SQL = {
   pendingUpsert: PENDING_UPSERT_SQL,
@@ -123,11 +123,11 @@ export async function recordPendingStart(
   return { reply: 'R-SHARE' }
 }
 
-// Telegram first name + last name, control characters removed, trimmed, at most 80 characters; empty -> the member code.
+// Telegram first name + last name through the shared cleaner (controls, bidi and zero-width characters removed, trimmed, at
+// most 80 code points); empty -> the member code.
 export function joinMemberName(firstName: unknown, lastName: unknown, memberCode: string): string {
   const parts = [firstName, lastName].filter((part): part is string => typeof part === 'string')
-  const joined = parts.join(' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim()
-  const name = Array.from(joined).slice(0, NAME_MAX).join('').trim()
+  const name = cleanTelegramName(parts.join(' '), TELEGRAM_NAME_STORED_MAX)
   return name === '' ? memberCode : name
 }
 
