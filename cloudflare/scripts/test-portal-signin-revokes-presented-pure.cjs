@@ -101,6 +101,20 @@ async function main(sources = {}) {
     assert.ok((await me(h, a.token)).body.account, 'the presented session still works')
   })
 
+  await check('R3-1 an expired, unrevoked presented session is never written to (changes 0 on the revoke)', async () => {
+    const a = await signUp(h, '203.0.113.44')
+    const b = await signUp(h, '203.0.113.45')
+    // A's session expired a day ago and was never revoked (a failed slide write, or clock skew).
+    h.raw.prepare('UPDATE portal_sessions SET expires_at = @past WHERE account_id = (SELECT id FROM portal_accounts WHERE phone = @phone)')
+      .run({ past: new Date(Date.now() - 86400000).toISOString(), phone: a.phone })
+    const before = sessions(h)
+    const res = await signIn(h, b.phone, '203.0.113.46', withCookie(a.token))
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    const after = sessions(h)
+    assert.equal(after.length, before.length + 1, 'one new row')
+    assert.deepEqual(after.slice(0, before.length), before, 'the expired row (and every other) is byte-identical: no revoked_at written')
+  })
+
   await check('B1 an ordinary authenticated response sets no cookie when no slide is due', async () => {
     const a = await signUp(h, '203.0.113.43')
     const res = await me(h, a.token)

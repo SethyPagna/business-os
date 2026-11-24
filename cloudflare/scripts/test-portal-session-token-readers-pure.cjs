@@ -362,7 +362,7 @@ async function main() {
   await check('T-F1 the stamp, the slide and the sign-out bound to the raw ticket change nothing', () => directWrites(readSrc('lib/portalSession.ts')))
   await check('T-F1 mutant: drop the predicate from the stamp -> a ticket row is stamped', () => mutant(
     'stamp without the predicate',
-    dropPredicate("\\n\\s+AND revoked_at IS NULL\\n\\s+AND datetime\\(expires_at\\) > datetime\\(@now\\)"),
+    dropPredicate("\\n\\s+AND revoked_at IS NULL\\n\\s+AND datetime\\(expires_at\\) > datetime\\(@now\\)\\n\\s+AND \\(last_seen_at IS NULL"),
     '',
     directWrites,
   ))

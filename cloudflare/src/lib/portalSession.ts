@@ -111,6 +111,7 @@ async function insertPortalSession(
     WHERE token_hash = @presented_hash
       AND substr(token_hash, 1, 4) <> 'tg1:'
       AND revoked_at IS NULL
+      AND datetime(expires_at) > datetime(@now)
   `,
         params: { now: nowIso, presented_hash: presentedTokenHash },
       },
