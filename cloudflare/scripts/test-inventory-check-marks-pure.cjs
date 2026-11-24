@@ -221,6 +221,15 @@ function suite(libText, routeText) {
     assert.ok(/^const announceMarks = async \(c: Context<[^\n]*\n  if \(!await readSwitch\(c\.env, 'ic_marks'\)\) return\n  try \{ c\.executionCtx\.waitUntil\(broadcast\(c\.env, 'inventory_checks'/.test(helper), 'the first statement is the ic_marks read and the broadcast follows it')
     assert.ok(!/getDb|\.prepare\(|\.batch\(/.test(helper + mw), 'no D1 statement of its own')
   })
+  t('N1: the marks routes check permission (403) before the branch word (400), in the order /overlay does', () => {
+    const start = fn(marksRoutes(routeText), 'async function marksStart', "app.get('/marks'")
+    const overlayHead = fn(routeText, "app.get('/overlay'", 'const ids = parseOverlayIds')
+    for (const [name, text, branch] of [['marksStart', start, "positiveWord(c.req.query('branchId')"], ['/overlay', overlayHead, "const branchWord = c.req.query('branchId')"]]) {
+      const order = [text.indexOf('singleValued(c)'), text.indexOf('!access.canView'), text.indexOf(branch)]
+      assert.ok(order.every((i) => i >= 0), name + ' lost one of the three checks: ' + order)
+      assert.ok(order[0] < order[1] && order[1] < order[2], name + ': singleValued, then canView (403), then the branch word (400); found ' + order)
+    }
+  })
   const stubCheck = (lib, events, topId) => {
     const batches = []
     const db = { async batch(statements) {
@@ -292,6 +301,7 @@ function suite(libText, routeText) {
   }
   await mutate('split the cursor read from the page read', 'lib', '    { sql: SNAPSHOT_PAGE_SQL, params: { ...scope, lo, hi: lo + pageIds } },\n  ])', '  ])\n  await db.batch([{ sql: SNAPSHOT_PAGE_SQL, params: { ...scope, lo, hi: lo + pageIds } }])', 'I5: the snapshot')
   await mutate('the broadcast is sent whatever the switch says (the old unconditional call)', 'route', "  if (!await readSwitch(c.env, 'ic_marks')) return\n  try { c.executionCtx.waitUntil(broadcast(", "  try { c.executionCtx.waitUntil(broadcast(", 'F1')
+  await mutate('the branch word is read before the permission check (N1, M17)', 'route', "  if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')\n  const branchId = positiveWord(c.req.query('branchId'), 'branchId')\n  return { scope", "  const branchId = positiveWord(c.req.query('branchId'), 'branchId')\n  if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')\n  return { scope", 'N1')
   await mutate('switch not checked', 'route', "if (!await readSwitch(c.env, 'ic_marks')) return null", 'if (false) return null', 'OFF')
   await mutate('waiting for every viewer', 'route', 'permitted: access.fields.stock && await fixStockOn(c)', 'permitted: true', 'I9')
   await mutate('waiting not stripped at serve time', 'route', 'start.permitted ? answer : withoutWaiting(answer)', 'answer', 'I9')
