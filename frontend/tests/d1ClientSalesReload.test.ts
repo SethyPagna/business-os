@@ -108,7 +108,7 @@ await test('own writes still reload the list and totals at once, ahead of any ev
 await test('the stats read is cancelled when superseded and searches share one minimum-length rule with the list', () => {
   const sales = read('../src/components/sales/Sales.tsx')
   assert.match(sales, /salesStatsAbortRef\.current\?\.abort\(\)\n\s+const controller = new AbortController\(\)/)
-  assert.match(sales, /fetchSalesStats\(salesStatsParams, \{ signal: controller\.signal \}\)/)
+  assert.match(sales, /fetchSalesStats\(salesStatsParams, \{ signal: controller\.signal, timeoutMs: SALES_LIST_REQUEST_TIMEOUT_MS \}\)/)
   assert.match(sales, /effectiveSalesSearch \? \{ search: effectiveSalesSearch \}/, 'list and totals both take their search from the same value')
   assert.doesNotMatch(sales, /debouncedSearch \? \{ search: debouncedSearch \}/)
   assert.doesNotMatch(sales, /includes\(syncChannel\.channel\)\) \{\n\s+if \(syncChannel\.channel === 'users'\)/, 'the per-event reload of all three reads is gone')
