@@ -1,11 +1,11 @@
-// G38 S3b: migration 0322 (Telegram sign-in columns, the pending table, the close trigger) on the real chain through 0321.
+// G38 S3b: migration 0324 (Telegram sign-in columns, the pending table, the close trigger) on the real chain through 0323.
 //
 // T-B1 applies on a fresh chain and on a database holding accounts (one closed with a phone); T-B2 one member per Telegram id;
 // T-B3 the id and time shape checks; T-B4 the close trigger; T-B5 the pending table; T-B6 a later rebuild of portal_accounts
 // must carry the new objects; T-B8 the pre and post assertions in the file header. Each rule has a mutant of the SQL (or of the
 // scanner) that the same assertion turns red.
 //
-// Run: node scripts/test-migration-0322-portal-telegram-pure.cjs
+// Run: node scripts/test-migration-0324-portal-telegram-pure.cjs
 'use strict'
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -14,7 +14,7 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const dir = path.join(__dirname, '..', 'migrations')
-const NAME = '0322_portal_telegram_lean.sql'
+const NAME = '0324_portal_telegram_lean.sql'
 const SQL = fs.existsSync(path.join(dir, NAME)) ? fs.readFileSync(path.join(dir, NAME), 'utf8') : ''
 
 let passed = 0
@@ -27,8 +27,8 @@ const TG_MAX = 4503599627370495
 const TICKET = `tg1:${'a'.repeat(64)}`
 const T = '2026-11-21T01:02:03.456Z'
 
-function at321() {
-  const raw = openDb(loadAll({ through: 321 })).db
+function at323() {
+  const raw = openDb(loadAll({ through: 323 })).db
   raw.exec(`
     INSERT INTO customers (id, name, phone, phone_normalized, membership_number, created_at) VALUES
       (10, 'Linked Buyer', '012 100 100', '012100100', 'LC-00010', '2026-09-01 08:00:00'),
@@ -40,7 +40,7 @@ function at321() {
   `)
   return raw
 }
-function applied(sql, build = at321) {
+function applied(sql, build = at323) {
   const raw = build()
   raw.exec(sql)
   return raw
@@ -84,7 +84,7 @@ check('the file exists, is LF only, numbered once, carries purpose, assertions a
   assert.ok(SQL.length > 0, `${NAME} exists`)
   assert.equal(Buffer.from(SQL, 'utf8').includes(0x0d), false, 'CR byte in the migration')
   for (const section of ['PURPOSE', 'PRE-ASSERTIONS', 'POST-ASSERTIONS', 'RECOVERY']) assert.ok(SQL.includes(section), `lacks ${section}`)
-  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.startsWith('0322')), [NAME])
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.startsWith('0324')), [NAME])
   assert.ok(!/WITHOUT ROWID/i.test(SQL))
   assert.match(SQL, /\b23\b[^\n]*columns|columns[^\n]*\b23\b/, 'the header carries the 23-column rule for later rebuilds')
 })
@@ -123,7 +123,7 @@ check('T-B1 applies on the fresh chain, on a database holding accounts, and stat
   const closed = raw.prepare("SELECT phone FROM portal_accounts WHERE id = 2").get()
   assert.equal(closed.phone, '012222222', 'the trigger acts only on future UPDATEs')
 
-  const each = at321()
+  const each = at323()
   for (const statement of statementsOf(SQL)) each.exec(statement)
   const signature = (db) => JSON.stringify(db.prepare("SELECT type, name, sql FROM sqlite_master WHERE name LIKE '%telegram%' OR name LIKE 'portal_accounts%' ORDER BY type, name").all().map((r) => ({ ...r })))
   assert.equal(signature(each), signature(raw))
@@ -289,12 +289,12 @@ function rebuildViolations(files, required = REQUIRED_AFTER_REBUILD) {
   }
   return problems
 }
-const laterFiles = () => fs.readdirSync(dir).filter((f) => f.endsWith('.sql') && Number(f.slice(0, 4)) > 322).sort().map((name) => ({ name, sql: fs.readFileSync(path.join(dir, name), 'utf8') }))
+const laterFiles = () => fs.readdirSync(dir).filter((f) => f.endsWith('.sql') && Number(f.slice(0, 4)) > 324).sort().map((name) => ({ name, sql: fs.readFileSync(path.join(dir, name), 'utf8') }))
 const COMPLETE_REBUILD = `CREATE TABLE portal_accounts_9999_new (id INTEGER PRIMARY KEY, telegram_user_id INTEGER, telegram_verified_at TEXT);
 ALTER TABLE portal_accounts_9999_new RENAME TO portal_accounts;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_accounts_telegram ON portal_accounts (telegram_user_id);
 CREATE TRIGGER IF NOT EXISTS portal_accounts_close_clears_identity AFTER UPDATE ON portal_accounts BEGIN SELECT 1; END;`
-check('T-B6 a migration after 0322 that rebuilds portal_accounts without the two columns, the index or the trigger is reported', () => {
+check('T-B6 a migration after 0324 that rebuilds portal_accounts without the two columns, the index or the trigger is reported', () => {
   assert.deepEqual(rebuildViolations(laterFiles()), [], 'no later migration rebuilds portal_accounts without them')
   assert.deepEqual(rebuildViolations([{ name: 'ok', sql: COMPLETE_REBUILD }]), [])
   assert.deepEqual(rebuildViolations([{ name: 'unrelated', sql: 'ALTER TABLE portal_accounts ADD COLUMN x TEXT;' }]), [], 'an ADD COLUMN is not a rebuild')
@@ -327,11 +327,11 @@ check('T-B8 the pre and post assertions in the header return the expected values
   for (const { sql } of [...pre, ...post]) for (const m of sql.matchAll(/LIKE\s+'([^']*)'/g)) assert.ok(Buffer.byteLength(m[1]) <= 50, `${m[1]}`)
   for (const { sql } of [...pre, ...post]) assert.ok(!/pragma/i.test(sql), 'no pragma function (the ops guard forbids it)')
 
-  const clean = openDb(loadAll({ through: 321 })).db
+  const clean = openDb(loadAll({ through: 323 })).db
   insertMember(clean, { name: 'Open', phone: '012900001' })
   assert.deepEqual(pre.map((p) => one(clean, p.sql)), [1, 0, 0, 1, 0])
 
-  const dirty = at321()
+  const dirty = at323()
   assert.deepEqual(pre.map((p) => one(dirty, p.sql)), [1, 0, 0, 3, 1], 'the T-B1 fixture: the closed-with-a-phone count is 1, which is a STOP')
   assert.match(pre[4].note, /STOP/i, 'the header says the last pre-assertion is a stop, not a record')
   assert.match(pre[4].note, /0/)
@@ -346,7 +346,7 @@ check('T-B8 the pre and post assertions in the header return the expected values
 check('the pre-assertion sees a closed member that kept its phone, and not one without', () => {
   const pre = headerAssertions('PRE-ASSERTIONS')
   const stop = pre[4].sql
-  const raw = openDb(loadAll({ through: 321 })).db
+  const raw = openDb(loadAll({ through: 323 })).db
   insertMember(raw, { name: 'Closed Clean', status: 'closed' })
   assert.equal(one(raw, stop), 0)
   insertMember(raw, { name: 'Closed Phone', status: 'closed', phone: '012900009' })

@@ -139,7 +139,7 @@ async function verifyWholeChainWithinPatternLimit() {
   const db = new Database(':memory:')
   const files = fs.readdirSync(migrations).filter(f => f.endsWith('.sql')).sort()
   assert.ok(files.includes('0321_portal_members_separation.sql'), '0321 is in the chain')
-  assert.ok(files.includes('0322_portal_telegram_lean.sql'), '0322 is in the chain and its checks stay inside the 50-byte pattern limit')
+  assert.ok(files.includes('0324_portal_telegram_lean.sql'), '0324 is in the chain and its checks stay inside the 50-byte pattern limit')
   for (const file of files) db.exec(fs.readFileSync(path.join(migrations, file), 'utf8'))
   const objects = db.prepare('SELECT name,tbl_name,type,sql FROM sqlite_master WHERE sql IS NOT NULL').all()
   db.close()

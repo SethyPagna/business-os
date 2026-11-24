@@ -1,4 +1,4 @@
--- 0322 (G38 S3): Telegram sign-in for website members, lean form.
+-- 0324 (G38 S3): Telegram sign-in for website members, lean form.
 --
 -- PURPOSE
 --   Adds what the shopper Telegram sign-in needs and nothing else:
@@ -17,7 +17,7 @@
 -- LATER REBUILDS OF portal_accounts
 --   Any later rebuild (the column-list pattern of 0321) must carry telegram_user_id and telegram_verified_at with their
 --   CHECKs, recreate idx_portal_accounts_telegram and portal_accounts_close_clears_identity, and its column-count guard
---   expects 23 columns (0321's 21 plus these 2). test-migration-0322-portal-telegram-pure.cjs fails a later migration
+--   expects 23 columns (0321's 21 plus these 2). test-migration-0324-portal-telegram-pure.cjs fails a later migration
 --   that recreates portal_accounts without them.
 --
 -- PRE-ASSERTIONS (read-only; no pragma function, the ops guard forbids it, as 0321 notes)
@@ -40,8 +40,8 @@
 --   A stop part-way (remote D1 may run statements one by one): applying the file again fails on the first ALTER that
 --   already ran ("duplicate column name") and changes nothing. Finish by hand with the remaining statements of this
 --   file, in order; each later statement is IF NOT EXISTS. After a hand finish, also record this file's name
---   (0322_portal_telegram_lean.sql) in d1_migrations through the ops tool; otherwise every later deploy with
---   run_migrations=true re-runs 0322 and stops at the first ALTER ("duplicate column name"). (On D1 a failed
+--   (0324_portal_telegram_lean.sql) in d1_migrations through the ops tool; otherwise every later deploy with
+--   run_migrations=true re-runs 0324 and stops at the first ALTER ("duplicate column name"). (On D1 a failed
 --   migration is normally rolled back whole, as 0321's note says, so a hand finish should rarely be needed.)
 --   Rollback after a full apply: (1) roll the Worker back first (the previous Worker never reads the new objects);
 --   (2) export the Telegram members first (id, member_code, name, created_at, telegram_verified_at, no Telegram id)

@@ -450,7 +450,7 @@ check('end-to-end --include-pii run: names kept, secrets still absent, manifest 
   assert.ok(containsAnywhere(bytes, 'Sok Dara'))
   for (const v of SECRET_VALUES) assert.ok(!containsAnywhere(bytes, v), `include-pii output leaked secret ${v}`)
 })
-check('rebuild: a Telegram member and a pending start come out masked and dropped despite the 0322 CHECKs', () => {
+check('rebuild: a Telegram member and a pending start come out masked and dropped despite the 0324 CHECKs', () => {
   const TG_ID = 123456789
   const TICKET = `tg1:${'b'.repeat(64)}`
   const { db, runner } = fakeProduction()

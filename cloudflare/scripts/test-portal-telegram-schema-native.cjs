@@ -1,6 +1,6 @@
-// G38 S3b, T-B7: migration 0322 and the Telegram sign-in statements on workerd's own D1 binding (Miniflare), not node:sqlite.
+// G38 S3b, T-B7: migration 0324 and the Telegram sign-in statements on workerd's own D1 binding (Miniflare), not node:sqlite.
 //
-// What it pins: the chain through 0321 applies through the binding; 0322 applies on an empty database and on a database
+// What it pins: the chain through 0323 applies through the binding; 0324 applies on an empty database and on a database
 // holding accounts (one closed with a phone) in one batch; D1 applies INTEGER affinity before the typeof CHECKs when a JS
 // number is bound; the close trigger clears phone and Telegram id.
 // What it records (no assertion on the numbers): meta.rows_written and meta.rows_read for the migration and for the member INSERT
@@ -16,7 +16,7 @@ const { Miniflare } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 
 const migrations = path.join(__dirname, '../migrations')
-const TARGET = '0322_portal_telegram_lean.sql'
+const TARGET = '0324_portal_telegram_lean.sql'
 const OUT = path.join(__dirname, 'harness', 'portal_telegram_rows_measured.json')
 const NOW = '2026-11-21T01:02:03.456Z'
 const LATER = '2026-11-21T02:03:04.567Z'
@@ -154,7 +154,7 @@ async function main() {
     for (const row of S) for (const key of ['rows_written', 'rows_read']) assert.equal(typeof row[key], 'number', `${row.label}: ${key} recorded`)
   } finally { await mf.dispose() }
   fs.writeFileSync(OUT, `${JSON.stringify(measured, null, 2)}\n`)
-  console.log('PASS 0322 applies on workerd D1 (empty and with accounts); bound integers pass the typeof CHECK; the trigger clears on close')
+  console.log('PASS 0324 applies on workerd D1 (empty and with accounts); bound integers pass the typeof CHECK; the trigger clears on close')
   console.log(JSON.stringify(measured, null, 2))
 }
 
