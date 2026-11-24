@@ -9,7 +9,7 @@
    "SELECT key, value FROM settings WHERE key IN ('shift_scope_mode', 'shift_admin_exempt')"
   ],
   [
-   "2f24ccd9cf6e",
+   "551bc0f2e1f6",
    "SELECT id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date, opened_at, CASE "
   ]
  ]
