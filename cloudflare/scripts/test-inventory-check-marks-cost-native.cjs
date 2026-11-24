@@ -152,28 +152,30 @@ const within = (value, limit) => value <= limit
       scope, snapshot: { page: 1, batches: snap.batches }, changes: { since: first.since, tag: atTag, batches: chg.batches }, pending: { batches: pend.batches } }
     if (WORLD === 'C' && process.env.RECORD_FIXTURE) fs.writeFileSync(process.env.RECORD_FIXTURE, JSON.stringify(recorded))
     out.measured.recorded = { snapshotRows: snap.batches[0][2].length, changesEvents: chg.batches[0][2].length, changesBatches: chg.batches.length, changesMarks: chgAnswer.marks ? chgAnswer.marks.length : 0, changesWaitingEntries: chgAnswer.waiting ? chgAnswer.waiting.length : 0, pendingRows: pend.batches[0][1].length, fixtureBytes: JSON.stringify(recorded).length }
-    // D.2.6: SCOPE_WAITING_SQL over 500 pending sessions of 20 lines each, applied_json and line_decisions_json filled. World C holds 100 such sessions (hw-, line set only); 400 more (hx-, all three columns filled) are written to this local database only, after every pin above was read.
-    const extra = 400
-    await world.db.prepare("WITH RECURSIVE s(k) AS (SELECT 0 UNION ALL SELECT k+1 FROM s WHERE k < " + (extra - 1) + ") INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) SELECT 'hx-'||k, ?, 1, 1, 'Scope '||k, 'closed', 0, '{\"membership\":\"submission\"}', strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-'||(k + 200)||' minutes'), strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-'||(k + 200)||' minutes'), strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-'||(k + 200)||' minutes') FROM s").bind(world.orgId, anchor, anchor, anchor).run()
-    const line = "json_object('decision', 'approve', 'by', 1, 'at', '2026-11-24T00:00:00.000Z', 'note', 'synthetic line decision of the scope read timing')"
-    const lineSet = "(SELECT json_group_object(CAST(100000 + ?1 * 20 + x AS TEXT), 1) FROM (WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x < 19) SELECT x FROM n))"
-    const decided = "(SELECT json_group_object(CAST(100000 + ?1 * 20 + x AS TEXT), " + line + ") FROM (WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x < 19) SELECT x FROM n))"
-    const applied = "(SELECT json_object('lines', json_group_object(CAST(100000 + ?1 * 20 + x AS TEXT), " + line + ")) FROM (WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x < 3) SELECT x FROM n))"
-    for (let k = 0; k < extra; k++) {
-      await world.db.prepare("INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json,applied_json,line_decisions_json) SELECT 'hx-'||?1, ?2, 1, 'pending', 20, 1, s.started_at, '{}', " + lineSet + ", " + applied + ", " + decided + " FROM inventory_check_sessions s WHERE s.id = 'hx-'||?1").bind(String(k), world.orgId).run()
+    // D.2.6: SCOPE_WAITING_SQL over 500 pending sessions of 20 lines each, applied_json and line_decisions_json filled. World C holds 100 such sessions (hw-, line set only); 400 more (hx-, all three columns filled) are written to this local database only, after every pin above was read. World A and B hold no such backlog: the timing is world C only.
+    if (WORLD === 'C') {
+      const extra = 400
+      await world.db.prepare("WITH RECURSIVE s(k) AS (SELECT 0 UNION ALL SELECT k+1 FROM s WHERE k < " + (extra - 1) + ") INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) SELECT 'hx-'||k, ?, 1, 1, 'Scope '||k, 'closed', 0, '{\"membership\":\"submission\"}', strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-'||(k + 200)||' minutes'), strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-'||(k + 200)||' minutes'), strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-'||(k + 200)||' minutes') FROM s").bind(world.orgId, anchor, anchor, anchor).run()
+      const line = "json_object('decision', 'approve', 'by', 1, 'at', '2026-11-24T00:00:00.000Z', 'note', 'synthetic line decision of the scope read timing')"
+      const lineSet = "(SELECT json_group_object(CAST(100000 + ?1 * 20 + x AS TEXT), 1) FROM (WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x < 19) SELECT x FROM n))"
+      const decided = "(SELECT json_group_object(CAST(100000 + ?1 * 20 + x AS TEXT), " + line + ") FROM (WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x < 19) SELECT x FROM n))"
+      const applied = "(SELECT json_object('lines', json_group_object(CAST(100000 + ?1 * 20 + x AS TEXT), " + line + ")) FROM (WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x < 3) SELECT x FROM n))"
+      for (let k = 0; k < extra; k++) {
+        await world.db.prepare("INSERT INTO inventory_check_approvals(session_id,organization_id,branch_id,status,lines,submitted_by,submitted_at,baselines_json,line_set_json,applied_json,line_decisions_json) SELECT 'hx-'||?1, ?2, 1, 'pending', 20, 1, s.started_at, '{}', " + lineSet + ", " + applied + ", " + decided + " FROM inventory_check_sessions s WHERE s.id = 'hx-'||?1").bind(String(k), world.orgId).run()
+      }
+      const sessionIds = (await world.all("SELECT s.id AS id FROM inventory_check_sessions s JOIN inventory_check_approvals a ON a.session_id = s.id WHERE a.status = 'pending' AND (s.id LIKE 'hw-%' OR s.id LIKE 'hx-%') ORDER BY s.id")).map((r) => r.id)
+      assert.equal(sessionIds.length, 500, 'pending sessions for the scope read: ' + sessionIds.length)
+      const bytes = (await world.all("SELECT AVG(length(applied_json)) AS applied, AVG(length(line_decisions_json)) AS decisions, AVG(length(line_set_json)) AS line_set FROM inventory_check_approvals WHERE session_id LIKE 'hx-%'"))[0]
+      const scopeProbe = recording(); const walls = [], durations = []
+      for (let rep = 0; rep < 9; rep++) {
+        await scopeProbe.batch([{ sql: lib.SCOPE_WAITING_SQL, params: { ...scope, sessions: JSON.stringify(sessionIds), walk: sessionIds.length } }])
+        const t = scopeProbe.times[scopeProbe.times.length - 1]; walls.push(t.wallMs); durations.push(t.statements[0].durationMs)
+      }
+      const median = (xs) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+      out.measured.scopeRead = { sessions: sessionIds.length, linesEach: 20, rowsRead: scopeProbe.times[0].statements[0].rowsRead, bytesAverage: { lineSet: Math.round(Number(bytes.line_set)), applied: Math.round(Number(bytes.applied)), decisions: Math.round(Number(bytes.decisions)) },
+        metaDurationMs: durations, wallMs: walls, medianMetaDurationMs: median(durations), medianWallMs: median(walls), passLineMs: 13.7,
+        note: 'local miniflare D1 on the laptop: the SQL engine time of the statement, as the spike measured it; not production D1' }
     }
-    const sessionIds = (await world.all("SELECT s.id AS id FROM inventory_check_sessions s JOIN inventory_check_approvals a ON a.session_id = s.id WHERE a.status = 'pending' AND (s.id LIKE 'hw-%' OR s.id LIKE 'hx-%') ORDER BY s.id")).map((r) => r.id)
-    assert.equal(sessionIds.length, 500, 'pending sessions for the scope read: ' + sessionIds.length)
-    const bytes = (await world.all("SELECT AVG(length(applied_json)) AS applied, AVG(length(line_decisions_json)) AS decisions, AVG(length(line_set_json)) AS line_set FROM inventory_check_approvals WHERE session_id LIKE 'hx-%'"))[0]
-    const scopeProbe = recording(); const walls = [], durations = []
-    for (let rep = 0; rep < 9; rep++) {
-      await scopeProbe.batch([{ sql: lib.SCOPE_WAITING_SQL, params: { ...scope, sessions: JSON.stringify(sessionIds), walk: sessionIds.length } }])
-      const t = scopeProbe.times[scopeProbe.times.length - 1]; walls.push(t.wallMs); durations.push(t.statements[0].durationMs)
-    }
-    const median = (xs) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]
-    out.measured.scopeRead = { sessions: sessionIds.length, linesEach: 20, rowsRead: scopeProbe.times[0].statements[0].rowsRead, bytesAverage: { lineSet: Math.round(Number(bytes.line_set)), applied: Math.round(Number(bytes.applied)), decisions: Math.round(Number(bytes.decisions)) },
-      metaDurationMs: durations, wallMs: walls, medianMetaDurationMs: median(durations), medianWallMs: median(walls), passLineMs: 13.7,
-      note: 'local miniflare D1 on the laptop: the SQL engine time of the statement, as the spike measured it; not production D1' }
     // The budgets (G.3 A1c; gross, auth included, formula + 10 percent). Written first, asserted last.
     const m = out.measured
     const pinOf = (name, value, limit, extra) => ({ name, value, limit, ok: within(value, limit), ...extra })
@@ -194,7 +196,7 @@ const within = (value, limit) => value <= limit
     const formulaChecks = [over(m.changesAfterSubmit20, 'changesAfterSubmit20'), over(m.changesAfterApprove200, 'changesAfterApprove200'), over(m.changesAfterSubmitsAndApprovals200, 'changesAfterSubmitsAndApprovals200'),
       over(m.changesAfterPlain500, 'changesAfterPlain500'), ...plainReads,
       { name: 'changesAfterPlain500 read 2 scope statement rows <= 1.1 x (3 x S)', ok: secondScope <= Math.floor(1.1 * 3 * secondS), value: secondScope, limit: Math.floor(1.1 * 3 * secondS) }]
-    const go = [{ name: 'snapshotCold rows <= 60000 (the spike\'s check, left as it is: A4 sets the page size)', ok: m.snapshotCold.rows <= 60000, value: m.snapshotCold.rows, limit: 60000 }, ...pins, ...formulaChecks, { name: 'SCOPE_WAITING_SQL over 500 pending sessions: median D1 time <= 13.7 ms (A4)', ok: m.scopeRead.medianMetaDurationMs <= 13.7, value: m.scopeRead.medianMetaDurationMs, limit: 13.7 }]
+    const go = [{ name: 'snapshotCold rows <= 60000 (the spike\'s check, left as it is: A4 sets the page size)', ok: m.snapshotCold.rows <= 60000, value: m.snapshotCold.rows, limit: 60000 }, ...pins, ...formulaChecks, ...(m.scopeRead ? [{ name: 'SCOPE_WAITING_SQL over 500 pending sessions: median D1 time <= 13.7 ms (A4)', ok: m.scopeRead.medianMetaDurationMs <= 13.7, value: m.scopeRead.medianMetaDurationMs, limit: 13.7 }] : [])]
     out.go = go
     if (OUT) fs.writeFileSync(OUT, JSON.stringify(out, null, 1))
     console.log(JSON.stringify(out, null, 1))
