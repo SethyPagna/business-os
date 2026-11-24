@@ -301,7 +301,8 @@ const ABOUT_STORY_TWO_COLUMN_FROM = 700
  */
 export function portalMapOpenHref(addressLink: unknown, address: unknown): string {
   const link = String(addressLink ?? '').trim()
-  if (link) return link
+  // The callers' own rule (normalizeExternalUrl): http or https only. Checked here too so a future caller cannot hand a script URL to an href.
+  if (/^https?:\/\//i.test(link)) return link
   const text = String(address ?? '').trim()
   return text ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(text)}` : ''
 }

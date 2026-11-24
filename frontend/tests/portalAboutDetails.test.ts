@@ -118,6 +118,16 @@ for (const language of ['en', 'km'] as const) {
   })
 }
 
+check('Open in Maps refuses a link that is not http or https, and falls back as for an empty link', () => {
+  for (const hostile of ['javascript:alert(1)', ' JavaScript:alert(1)', 'data:text/html,x', 'vbscript:x', 'ftp://example.com/a', '//example.com/a']) {
+    assert.equal(portalMapOpenHref(hostile, ''), '', hostile)
+    assert.equal(portalMapOpenHref(hostile, '12 Street 271'), 'https://www.google.com/maps/search/?api=1&query=12%20Street%20271', hostile)
+  }
+  assert.equal(portalMapOpenHref('http://maps.example.com/a', ''), 'http://maps.example.com/a', 'control: http is the callers rule too')
+  const html = aboutHtml('en', { addressFact: { key: 'address', label: 'Address', value: '12 Street 271', href: 'javascript:alert(1)' } })
+  assert.equal(html.toLowerCase().includes('javascript:'), false)
+})
+
 check('Open in Maps goes to the shop link, else a maps search for the address, else nowhere', () => {
   assert.equal(portalMapOpenHref('https://maps.app.goo.gl/abc', '12 Street'), 'https://maps.app.goo.gl/abc')
   assert.equal(portalMapOpenHref('', '12 Street 271'), 'https://www.google.com/maps/search/?api=1&query=12%20Street%20271')
