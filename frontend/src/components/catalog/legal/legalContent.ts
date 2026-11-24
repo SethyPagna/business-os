@@ -33,7 +33,7 @@ export type LegalPageKey = 'privacy' | 'terms' | 'cookies'
 // (lib/portalAccounts.ts) moves with it and accepts only this version: since
 // 20 Oct 2026 (age-16 wording) every earlier account agrees again through the
 // re-consent prompt (ConsentRenewalPrompt).
-export const PORTAL_LEGAL_LAST_UPDATED_ISO = '2026-11-21'
+export const PORTAL_LEGAL_LAST_UPDATED_ISO = '2026-11-25'
 export const PORTAL_LEGAL_CONSENT_VERSION = 'portal-legal-2026-10-20'
 
 export function formatLegalLastUpdated(iso: string = PORTAL_LEGAL_LAST_UPDATED_ISO): string {

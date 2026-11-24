@@ -203,8 +203,8 @@ assert.match(
 // 7. day-first date, and a consent version tied to it
 assert.match(PORTAL_LEGAL_LAST_UPDATED_ISO, /^\d{4}-\d{2}-\d{2}$/)
 assert.equal(formatLegalLastUpdated('2026-09-07'), '07/09/2026')
-assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-11-21', 'the 21 Nov 2026 wording (official-text notice, measured rewordings, live map) moved the shown date')
-assert.equal(formatLegalLastUpdated(), '21/11/2026')
+assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-11-25', 'the 25 Nov 2026 wording (official-text notice naming the languages, measured rewordings, live map, Khmer check) moved the shown date')
+assert.equal(formatLegalLastUpdated(), '25/11/2026')
 assert.equal(PORTAL_LEGAL_CONSENT_VERSION, 'portal-legal-2026-10-20', 'the 21 Nov 2026 wording discloses more and asks nothing new of an account, so the consent version stays and nobody agrees again')
 assert.ok(PORTAL_LEGAL_CONSENT_VERSION.slice('portal-legal-'.length) <= PORTAL_LEGAL_LAST_UPDATED_ISO, 'a consent version is never newer than the shown date')
 
