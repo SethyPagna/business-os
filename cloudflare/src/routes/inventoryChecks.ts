@@ -292,8 +292,9 @@ const marksCapability = async (c: IcContext): Promise<{ marks?: { pollSeconds: n
   const limits = getPlanLimits(c.env)
   return { marks: { pollSeconds: limits.inventoryMarksPollSeconds, catchUpMaxEvents: limits.inventoryMarksCatchUpMaxEvents, pageIds: limits.inventoryMarksPageIds, jitterMinMs: limits.inventoryMarksBroadcastJitterMinMs, jitterMaxMs: limits.inventoryMarksBroadcastJitterMaxMs } }
 }
-const nonNegative = (word: string | undefined, parameter: string): number => {
-  if (word === undefined || !/^[0-9]{1,15}$/.test(word) || !Number.isSafeInteger(Number(word))) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter)
+// digits: the longest word accepted. A cursor (since) may be any safe integer; a page number is bounded like /overlay's words (9 digits), so a viewer cannot mint a cache entry per huge page number.
+const nonNegative = (word: string | undefined, parameter: string, digits = 15): number => {
+  if (word === undefined || !new RegExp(`^[0-9]{1,${digits}}$`).test(word) || !Number.isSafeInteger(Number(word))) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter)
   return Number(word)
 }
 // The shared start of the three routes. A viewer may see Waiting only with the stock field and Fix stock (the /overlay rule).
@@ -309,7 +310,7 @@ app.get('/marks', async c => {
   const start = await marksStart(c)
   if (!start) return notWired(c)
   const { scope, limits } = start
-  const page = nonNegative(c.req.query('page'), 'page'), have = c.req.query('have') ?? ''
+  const page = nonNegative(c.req.query('page'), 'page', 9), have = c.req.query('have') ?? ''
   const db = getDb(c.env)
   const key = await cacheKeyRequest(`https://ic.invalid/__bos/ic-marks?org=${scope.organization ?? ''}&branch=${scope.branchId}&page=${page}&f=${MARKS_FORMAT}`, 'marks', cacheIdentity(c))
   let served: MarksPage | null = null, top = 0

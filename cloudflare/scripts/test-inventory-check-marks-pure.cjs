@@ -230,6 +230,18 @@ function suite(libText, routeText) {
       assert.ok(order[0] < order[1] && order[1] < order[2], name + ': singleValued, then canView (403), then the branch word (400); found ' + order)
     }
   })
+  t('N5: /marks?page= is bounded like /overlay (at most 9 digits); since keeps its own bound', () => {
+    const src = fn(marksRoutes(routeText), 'const nonNegative', '// The shared start')
+    const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+    class InventoryCheckQueryError extends Error { constructor(status, code, parameter) { super(code); this.parameter = parameter } }
+    const nonNegative = new Function('InventoryCheckQueryError', js + '\nreturn nonNegative')(InventoryCheckQueryError)
+    const refused = (word, digits) => { try { nonNegative(word, 'page', digits); return false } catch (e) { return e instanceof InventoryCheckQueryError } }
+    assert.equal(nonNegative('999999999', 'page', 9), 999999999, 'nine digits are accepted')
+    assert.equal(refused('1234567890', 9), true, 'a 10-digit page is refused')
+    assert.equal(refused('123456789012345', 9), true, 'a 15-digit page is refused')
+    assert.equal(nonNegative('123456789012345', 'since'), 123456789012345, 'since keeps 15 digits')
+    assert.ok(/nonNegative\(c\.req\.query\('page'\), 'page', 9\)/.test(marksRoutes(routeText)), 'the /marks route bounds its page to 9 digits')
+  })
   const stubCheck = (lib, events, topId) => {
     const batches = []
     const db = { async batch(statements) {
@@ -302,6 +314,8 @@ function suite(libText, routeText) {
   await mutate('split the cursor read from the page read', 'lib', '    { sql: SNAPSHOT_PAGE_SQL, params: { ...scope, lo, hi: lo + pageIds } },\n  ])', '  ])\n  await db.batch([{ sql: SNAPSHOT_PAGE_SQL, params: { ...scope, lo, hi: lo + pageIds } }])', 'I5: the snapshot')
   await mutate('the broadcast is sent whatever the switch says (the old unconditional call)', 'route', "  if (!await readSwitch(c.env, 'ic_marks')) return\n  try { c.executionCtx.waitUntil(broadcast(", "  try { c.executionCtx.waitUntil(broadcast(", 'F1')
   await mutate('the branch word is read before the permission check (N1, M17)', 'route', "  if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')\n  const branchId = positiveWord(c.req.query('branchId'), 'branchId')\n  return { scope", "  const branchId = positiveWord(c.req.query('branchId'), 'branchId')\n  if (!access.canView) throw new InventoryCheckQueryError(403, 'inventory_check_view_required', '')\n  return { scope", 'N1')
+  await mutate('the page keeps 15 digits (N5)', 'route', "nonNegative(c.req.query('page'), 'page', 9)", "nonNegative(c.req.query('page'), 'page')", 'N5')
+  await mutate('the digits bound is ignored (N5)', 'route', "!new RegExp(`^[0-9]{1,${digits}}$`).test(word)", "!/^[0-9]{1,15}$/.test(word)", 'N5')
   await mutate('switch not checked', 'route', "if (!await readSwitch(c.env, 'ic_marks')) return null", 'if (false) return null', 'OFF')
   await mutate('waiting for every viewer', 'route', 'permitted: access.fields.stock && await fixStockOn(c)', 'permitted: true', 'I9')
   await mutate('waiting not stripped at serve time', 'route', 'start.permitted ? answer : withoutWaiting(answer)', 'answer', 'I9')
