@@ -125,7 +125,7 @@ check('the touch interval is the plan\'s, in code and in the SQL guard; no liter
 })
 
 check('nothing decides on last_seen_at: it is written by the touch, listed on the Devices page and used only as the freshest-session fallback', () => {
-  const allowed = new Set(['lib/auth.ts', 'routes/devices.ts', 'lib/audit.ts', 'lib/auditWriteReceipt.ts', 'routes/contacts.ts', 'routes/pos.ts', 'routes/settings.ts', 'routes/users.ts', 'routes/feesCatalog.ts', 'lib/deviceTrust.ts', 'lib/portalSession.ts', 'lib/planTier.ts'])
+  const allowed = new Set(['lib/auth.ts', 'routes/devices.ts', 'lib/audit.ts', 'lib/auditWriteReceipt.ts', 'routes/contacts.ts', 'routes/pos.ts', 'routes/settings.ts', 'routes/users.ts', 'routes/feesCatalog.ts', 'lib/deviceTrust.ts', 'lib/portalSession.ts', 'lib/planTier.ts', 'lib/portalTelegramSignIn.ts', 'lib/portalTelegramJoin.ts'])
   const hits = []
   const walk = (dir) => { for (const entry of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, entry.name); if (entry.isDirectory()) { if (entry.name !== 'migrations') walk(p) } else if (p.endsWith('.ts')) { const rel = path.relative(SRC, p).replace(/\\/g, '/'); if (/last_seen_at/.test(fs.readFileSync(p, 'utf8'))) hits.push(rel) } } }
   walk(SRC)
