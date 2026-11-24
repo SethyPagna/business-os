@@ -25,7 +25,7 @@
 
 import { getDb } from './db'
 import { getPlanLimits } from './planTier'
-import { portalNowIso } from './portalTelegramToken'
+import { portalNowIso, secondsAgoModifier } from './portalTelegramToken'
 import { sqliteUtcTimestamp } from './rateLimit'
 import { deleteObjectsBulk } from './r2'
 import type { Env } from '../index'
@@ -351,7 +351,11 @@ export async function maybeRunScheduledEphemeralRetention(env: Env, group?: Ephe
     await step('user_sessions', (b) => batchDeleteById(env, db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}, b), shared)
     // S-R1. datetime() on both sides: a raw `expires_at < CURRENT_TIMESTAMP` keeps an ISO row (written by the Worker)
     // of the same UTC day, because 'T' sorts after ' '. Covers expired Telegram tickets too (they are rows here).
-    await step('portal_sessions', (b) => batchDeleteById(env, db, 'portal_sessions', 'revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND datetime(expires_at) < datetime(@now))', { now: portalNowIso() }, b), shared)
+    // The per-member sign-in cap counts these rows by created_at, so a row is kept until it has also left the cap window:
+    // sweeping an expired or revoked ticket earlier would let a member start over inside the window. Costs at most a
+    // day of extra retention and no writes.
+    const sessionCapWindow = secondsAgoModifier(getPlanLimits(env).portalTelegramSessionsPerMemberWindowSeconds)
+    await step('portal_sessions', (b) => batchDeleteById(env, db, 'portal_sessions', '(revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND datetime(expires_at) < datetime(@now))) AND (created_at IS NULL OR datetime(created_at) <= datetime(@now, @cap_window))', { now: portalNowIso(), cap_window: sessionCapWindow }, b), shared)
     // S-R2. Open or stale Telegram join starts; a rowid table holding only those, so the scan is small.
     await step('portal_telegram_pending', (b) => batchDeleteById(env, db, 'portal_telegram_pending', 'datetime(expires_at) < datetime(@now)', { now: portalNowIso() }, b), shared)
     const verificationNow = Date.now()

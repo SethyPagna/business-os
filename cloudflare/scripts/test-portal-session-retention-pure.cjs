@@ -166,10 +166,11 @@ const asUtc = (value) => {
 // ---- T-F7 helpers: the real sweep (lib/ephemeralRetention.ts) on its own database -------------------------
 // A recursive loader of the real files under src/, with the database module replaced, so the sweep runs unchanged.
 const SRC_ROOT = path.join(__dirname, '..', 'src')
-function loadSweep(sweepDb, sweepSourceText) {
+function loadSweep(sweepDb, sweepSourceText, target = 'lib/ephemeralRetention.ts') {
   const cache = new Map()
   const dbKey = path.normalize(path.join(SRC_ROOT, 'lib/db.ts'))
   const sweepKey = path.normalize(path.join(SRC_ROOT, 'lib/ephemeralRetention.ts'))
+  const targetKey = path.normalize(path.join(SRC_ROOT, target))
   const resolveTs = (base) => {
     for (const c of [base, `${base}.ts`, path.join(base, 'index.ts')]) if (fs.existsSync(c) && fs.statSync(c).isFile()) return c
     return base
@@ -190,10 +191,52 @@ function loadSweep(sweepDb, sweepSourceText) {
     cache.set(key, mod.exports)
     return mod.exports
   }
-  return load(sweepKey)
+  return load(targetKey)
 }
 const dflt = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
 const iso = (ms) => new Date(ms).toISOString()
+
+// B2: the per-member sign-in cap must survive the sweep. Real confirmKnownMember and the real sweep on one database:
+// ten confirms, the expired unclaimed tickets swept, then an eleventh and twelfth confirm inside the cap window.
+async function capSurvivesSweepScenario(sweepSourceText) {
+  const raw = openDb(allMigrationSql())
+  const sweepDb = wrap(raw)
+  const retention = loadSweep(sweepDb, sweepSourceText)
+  const signIn = loadSweep(sweepDb, undefined, 'lib/portalTelegramSignIn.ts')
+  const tokens = loadSweep(sweepDb, undefined, 'lib/portalTelegramToken.ts')
+  const plan = loadSweep(sweepDb, undefined, 'lib/planTier.ts')
+  const env = {
+    PORTAL_ABUSE_HMAC_SECRET: 'portal-test-secret-that-is-at-least-32-chars',
+    PORTAL_TELEGRAM_BOT_TOKEN: '123456:TEST',
+    PORTAL_TELEGRAM_WEBHOOK_SECRET: 'webhook-test-secret-with-at-least-32-chars-ok',
+  }
+  const limits = plan.getPlanLimits(env)
+  const capMax = limits.portalTelegramSessionsPerMemberMax
+  const tg = 900010
+  raw.prepare(
+    `INSERT INTO portal_accounts (membership_id, name, phone, password_hash, consent_version, consent_at, consent_locale, age_confirmed_at, telegram_user_id)
+     VALUES ('LC-95002', 'Cap Test', '070999502', 'x', 'portal-legal-2026-10-20', CURRENT_TIMESTAMP, 'en', CURRENT_TIMESTAMP, @tg)`,
+  ).run({ tg })
+  const MIN = 60_000
+  // The first confirm is 12 minutes ago; every ticket (ten minutes of life) has expired by now and was never claimed.
+  const t0 = Date.now() - 12 * MIN
+  let n = 0
+  const confirm = async (nowMs) => {
+    n += 1
+    const binding = new Uint8Array(16).map((_, i) => (i * 5 + n) & 255)
+    const text = await tokens.mintStartToken(env, { locale: 1, termsAccepted: true, ageConfirmed: true, code: 10 + ((n * 7) % 90), binding }, nowMs)
+    const verified = await tokens.verifyStartToken(env, text, nowMs)
+    const choice = tokens.matchOptions(verified.code, verified.firstMacByte).indexOf(verified.code)
+    return (await signIn.confirmKnownMember(env, sweepDb, { token: text, choice, fromId: tg, languageCode: null }, nowMs)).id
+  }
+  const first = []
+  for (let i = 0; i < capMax; i += 1) first.push(await confirm(t0 + i * 1000))
+  assert.deepEqual(first, Array(capMax).fill('R-SIGNED-IN'), `${capMax} confirms are signed in`)
+  assert.equal(await confirm(t0 + 20_000), 'R-CAP', 'the next one in the same minute is refused')
+  const result = await retention.maybeRunScheduledEphemeralRetention({}, 'auth')
+  assert.equal(result.skipped, false)
+  return { later: await confirm(Date.now()), rows: Number(raw.prepare('SELECT COUNT(*) AS n FROM portal_sessions').get().n), capMax }
+}
 
 async function sweepScenario(sweepSourceText) {
   const raw = openDb(allMigrationSql())
@@ -382,7 +425,7 @@ async function run() {
 
   await check('T-F7 mutant: the raw expires_at < CURRENT_TIMESTAMP predicate leaves the same-day ISO rows', async () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ephemeralRetention.ts'), 'utf8')
-    const mutated = source.replace(/datetime\(expires_at\) < datetime\(@now\)\)', \{ now: portalNowIso\(\) \}/, "expires_at < CURRENT_TIMESTAMP)', { now: portalNowIso() }")
+    const mutated = source.replace(/datetime\(expires_at\) < datetime\(@now\)\)\) AND \(created_at IS NULL OR datetime\(created_at\) <= datetime\(@now, @cap_window\)\)'/, "expires_at < CURRENT_TIMESTAMP))'")
     assert.notEqual(mutated, source, 'mutant applied')
     const out = await sweepScenario(mutated)
     assert.ok(out.sessions.includes('s-iso-expired') && out.sessions.includes(out.ticket(1)), 'the raw comparison keeps an ISO row of the same day, so the real test above would be red')
@@ -394,6 +437,20 @@ async function run() {
     assert.notEqual(mutated, source, 'mutant applied')
     const out = await sweepScenario(mutated)
     assert.deepEqual(out.pending, [11, 12, 13], 'without S-R2 nothing is swept')
+  })
+
+  await check('B2 the sign-in cap survives the sweep: a 12th confirm 12 minutes after the first, with the expired tickets swept between, is R-CAP', async () => {
+    const out = await capSurvivesSweepScenario()
+    assert.equal(out.later, 'R-CAP')
+    assert.equal(out.rows, out.capMax, 'the expired tickets are still there: they leave only when created more than one cap window ago')
+  })
+
+  await check('B2 mutant: the sweep ignores created_at -> the cap resets and the confirm signs in', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ephemeralRetention.ts'), 'utf8')
+    const mutated = source.replace(/ AND \(created_at IS NULL OR datetime\(created_at\) <= datetime\(@now, @cap_window\)\)'/, "'")
+    assert.notEqual(mutated, source, 'mutant applied')
+    const out = await capSurvivesSweepScenario(mutated)
+    assert.equal(out.later, 'R-SIGNED-IN', 'without the created_at rule the sweep empties the cap and the real test above would be red')
   })
 
   await check('the sweep predicate and the session TTL are read from the shipped sources', () => {
