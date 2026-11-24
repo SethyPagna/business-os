@@ -7,11 +7,9 @@ import { requireSalesStatsResult } from '../src/api/salesStatsContract.ts'
 import * as scopes from '../src/api/actorReadScope.ts'
 import * as http from '../src/api/http.ts'
 import { getSalesStats, SALES_LIST_REQUEST_TIMEOUT_MS } from '../src/api/salesTransport.ts'
-import { buildQueryString } from '../src/api/query.ts'
 import { clampPageNumber } from '../src/utils/pagerState.ts'
 import { isProductSearchTooShort } from '../src/api/productSearchIndex.ts'
 import { createSalesReloadCoalescer } from '../src/components/sales/salesReloadCoalescer.ts'
-import { saleSecurityFingerprint } from '../src/components/sales/saleSettlementConfig.ts'
 import { activeSalesFocusId } from '../src/components/sales/salesFocus.ts'
 
 const read = (rel: string) => readFileSync(new URL('../src/' + rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -146,7 +144,6 @@ function bounded<T>(promise: Promise<T>, label: string, ms = 5000): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 const valid = (amount = 120, count = 85) => ({ total_count: count, revenue_count: count, revenue_usd: amount, pending_revenue_usd: 3, revenue_without_not_paid_usd: amount - 3, truncated_in_list: false })
-const page = (n = 20) => Array.from({ length: n }, (_, i) => ({ id: i + 61, total_usd: 7, sale_status: 'completed' }))
 const unknown = (v: any) => { for (const k of ['totalSalesCount', 'revenue', 'revenueCount', 'creditUsd', 'paidOnlyUsd']) assert.equal(v[k], null, k) }
 let failures = 0
 async function test(name: string, fn: () => void | Promise<void>) { try { await fn(); console.log('PASS ' + name) } catch (e) { failures++; console.error('FAIL ' + name); console.error(e) } }
