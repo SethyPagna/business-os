@@ -224,7 +224,7 @@ test('mutant: Not counted shown on a same-day close with no count fails the not-
 })
 
 test('mutant: a picker row built without ShiftHeaderRow fails the picker test', async () => {
-  const mutant = mutate(mutate(REPORT, '<ShiftHeaderRow shift={row}>', '<span>'), '</ShiftHeaderRow>', '</span>')
+  const mutant = mutate(mutate(REPORT, '<ShiftHeaderRow shift={row} inline>', '<span>'), '</ShiftHeaderRow>', '</span>')
   await assert.rejects(() => pickerRows(mutant), /the picker row is the one shift header row/)
 })
 

@@ -169,7 +169,7 @@ export default function ShiftReport(p: ReportViewProps) {
             // The one header row (date · ID · cashier · branch). The list rows do not say who closed
             // late, so the tag shows on the shift whose history this report holds.
             node: (
-              <ShiftHeaderRow shift={row}>
+              <ShiftHeaderRow shift={row} inline>
                 {row.id === shift?.id && closedLate ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{tr('shift_closed_late', 'Closed late')}</span> : null}
               </ShiftHeaderRow>
             ),
