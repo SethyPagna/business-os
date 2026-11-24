@@ -24,7 +24,7 @@ import { readInventoryCheckLots } from '../lib/inventoryCheckLots'
 import { getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { cacheKeyRequest } from '../lib/cacheKey'
-import { MARKS_FORMAT, fnv1a32, readChanges, readPendingPage, readSnapshotPage, readTopAndAt, type ChangesAnswer, type Mark } from '../lib/inventoryCheckMarks'
+import { MARKS_FORMAT, buildPageAnswer, pageBody, readChanges, readPendingPage, readSnapshotPage, readTopAndAt, type ChangesAnswer, type MarksPage } from '../lib/inventoryCheckMarks'
 import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
   canSeeStaffIdentity, InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, pickupInventoryCheckTask, releaseInventoryCheckTask, REPLACED_NOTE,
@@ -300,7 +300,6 @@ async function marksStart(c: IcContext): Promise<{ scope: { organization: number
 }
 // Waiting is computed for every viewer and removed here, from the signed-in actor of THIS request, for one who may not see it.
 const withoutWaiting = (answer: ChangesAnswer): ChangesAnswer => 'waiting' in answer ? Object.fromEntries(Object.entries(answer).filter(([k]) => k !== 'waiting')) as ChangesAnswer : answer
-type MarksPage = { page: number; buckets: number[]; cursor: number; tag: string; hash: string; rows: Mark[] }
 app.get('/marks', async c => {
   const start = await marksStart(c)
   if (!start) return notWired(c)
@@ -318,12 +317,11 @@ app.get('/marks', async c => {
   }
   if (!served) {
     const built = await readSnapshotPage(db, scope, page, limits.inventoryMarksPageIds)
-    top = built.cursor
-    served = { page, buckets: built.buckets, cursor: built.cursor, tag: built.tag, hash: fnv1a32(`${MARKS_FORMAT}:${page}:${built.cursor}:${built.tag}:${JSON.stringify(built.rows)}`), rows: built.rows }
-    if (key) c.executionCtx.waitUntil(caches.default.put(key, new Response(JSON.stringify(served), { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${limits.inventoryMarksSnapshotCacheSeconds}` } })))
+    const { stored, body } = buildPageAnswer(page, built, have)
+    if (key) c.executionCtx.waitUntil(caches.default.put(key, new Response(JSON.stringify(stored), { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${limits.inventoryMarksSnapshotCacheSeconds}` } })))
+    return c.json(body)
   }
-  const head = { format: MARKS_FORMAT, page: served.page, buckets: served.buckets, cursor: served.cursor, tag: served.tag, top, hash: served.hash }
-  return c.json(have !== '' && have === served.hash ? { ...head, unchanged: true } : { ...head, rows: served.rows })
+  return c.json(pageBody(served, top, have))
 })
 app.get('/marks/changes', async c => {
   const start = await marksStart(c)

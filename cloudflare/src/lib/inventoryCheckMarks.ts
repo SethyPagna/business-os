@@ -97,6 +97,20 @@ export async function readTopAndAt(db: Db, since: number): Promise<{ top: number
   return { top: t?.id ?? 0, atTag: a ? eventTag(a) : null }
 }
 
+// The snapshot page as the route stores it (Cache API) and as the device receives it. The Worker's own JavaScript for a page (the hash, the body) lives here so the CPU probe (scripts/ic-marks-js-cpu-pure.cjs) times the code the route runs.
+export type MarksPage = { page: number; buckets: number[]; cursor: number; tag: string; hash: string; rows: Mark[] }
+export type PageBody = { format: number; page: number; buckets: number[]; cursor: number; tag: string; top: number; hash: string; unchanged?: true; rows?: Mark[] }
+/** The body sent for a page: the head, and the rows unless the device already holds this hash. `top` is the newest event the request saw. */
+export function pageBody(served: MarksPage, top: number, have: string): PageBody {
+  const head = { format: MARKS_FORMAT, page: served.page, buckets: served.buckets, cursor: served.cursor, tag: served.tag, top, hash: served.hash }
+  return have !== '' && have === served.hash ? { ...head, unchanged: true } : { ...head, rows: served.rows }
+}
+/** A page just read: the entry to store (it carries its hash) and the body to send. A page's rows are the database at its cursor, so the hash covers them. */
+export function buildPageAnswer(page: number, built: PageBuild, have: string): { stored: MarksPage; body: PageBody } {
+  const stored: MarksPage = { page, buckets: built.buckets, cursor: built.cursor, tag: built.tag, hash: fnv1a32(`${MARKS_FORMAT}:${page}:${built.cursor}:${built.tag}:${JSON.stringify(built.rows)}`), rows: built.rows }
+  return { stored, body: pageBody(stored, built.cursor, have) }
+}
+
 export type Limits = { pageEvents: number; touchedMax: number }
 // An event can change a pending session's waiting set only when it is the submission (`create`) or records an approval write (`decides`). A plain observe (a submission line, a count) cannot; close and resume change the session row, never its approval
 // (a submission is created closed and refused both, tasks and issues hold no approval), so they are not listed.
