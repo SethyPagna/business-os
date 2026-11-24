@@ -936,7 +936,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // mutation + return dispatches) can refetch it in lockstep with the row
   // list -- previously it went stale (a cancelled sale kept counting toward
   // the "N sales | $revenue" header until a filter change forced a refetch).
-  const loadSalesStats = useCallback(async (): Promise<void> => {
+  const loadSalesStats = useCallback(async (reread = false): Promise<void> => {
     const requestSecurity = statusSecurityScope
     const requestScope = salesStatsScope
     if (!isActive || !authReady || !canViewSales || requestSecurity !== statusSecurityRef.current || requestScope !== salesStatsScopeRef.current) return
@@ -951,11 +951,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     try {
       const result = await fetchSalesStats(salesStatsParams, { signal: controller.signal })
       if (!isCurrentRequest()) return
-      assertActorReadScope(readScope)
+      assertActorReadScope(readScope, false) // same actor is enough: a revision bump mid-read only means the cache was cleared, not that the answer is another account's
       const value = requireSalesStatsResult(result)
       setSalesStatsRead({ scope: requestScope, readScope, status: 'ready', value })
-    } catch {
+    } catch (error) {
       if (!isCurrentRequest() || !isActorReadScopeCurrent(readScope, false)) return
+      if (!reread && !controller.signal.aborted && (error as { name?: unknown } | null)?.name === 'AbortError') return loadSalesStats(true) // cancelled by a call that shared this read, not a failure: read once more
       setSalesStatsRead({ scope: requestScope, readScope: captureActorReadScope('sales:stats'), status: 'error', value: null })
     } finally {
       if (salesStatsAbortRef.current === controller) salesStatsAbortRef.current = null

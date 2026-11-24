@@ -225,13 +225,18 @@ try {
     other.stats[0].resolve(valid(999)); await old; await other.flush(); unknown(other.view)
     assert.notEqual(other.view.salesStatsRead?.status, 'ready', 'late callback itself must not publish, independently of masking')
   })
-  for (const transition of ['revision', 'actor']) await test(`actual final promise hop fences ${transition} before publication`, async () => {
+  await test('actual final promise hop keeps a same-actor answer when only the cache revision moved', async () => {
+    const h = harness(), p = h.view.loadSalesStats(); h.stats[0].resolve(valid())
+    scopes.invalidateActorReadChannel('sales')
+    await p; await h.flush()
+    assert.equal(h.view.salesStatsRead?.status, 'ready'); assert.equal(h.view.salesStatsRead.value.revenue_usd, 120)
+  })
+  for (const transition of ['actor']) await test(`actual final promise hop fences ${transition} before publication`, async () => {
     const h = harness(), p = h.view.loadSalesStats(); h.stats[0].resolve(valid())
     if (transition === 'revision') scopes.invalidateActorReadChannel('sales'); else actor(2)
     await p; await h.flush(); unknown(h.view)
     assert.notEqual(h.view.salesStatsRead?.status, 'ready', 'callback guard, not only a hidden rendered stale value')
-    if (transition === 'revision') { assert.equal(h.view.salesStatsRead?.status, 'error'); assert.ok(h.view.salesStatsError, 'revision failure remains visible and retryable') }
-    else assert.equal(h.view.salesStatsError, null, 'a departed actor cannot publish errors')
+    assert.equal(h.view.salesStatsError, null, 'a departed actor cannot publish errors')
   })
   await test('actual recovery sales sync event starts fresh callbacks while an old stats read is pending', async () => {
     http.__resetApiHealthForTests(); http.cacheClearAll(); http.setSyncServerUrl('https://sales-stats.fixture.invalid')
