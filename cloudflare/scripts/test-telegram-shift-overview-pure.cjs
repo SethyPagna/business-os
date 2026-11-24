@@ -32,7 +32,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //      and additional used", shown everywhere and always, $0 included): the
 //      closing shift's drawer -- Opening, Cash used and Closing,
 //      in that order and in the packs' words -- with nothing added
-//      (`$0.00 · 0៛`), with an amount, a NULL column, and read from the stored
+//      (`0៛ · $0.00`), with an amount, a NULL column, and read from the stored
 //      row at send time. The section is the SHIFT's, not the day's: it is the
 //      drawer of the shift the header names (the ID is printed once, there), and
 //      it is not summed across the day's tills. Two tills closing within the same
@@ -256,9 +256,9 @@ async function main() {
     // change used, Closing -- always all three, even with nothing added. The
     // shift is the one the ID row above names; it is not printed twice.
     '=====Cash count=====',
-    '· Opening cash: $10.00 · 10,000៛',
-    '· Cash used: $0.00 · 0៛',
-    '· Closing cash: $120.00 · 50,000៛',
+    '· Opening cash: 10,000៛ · $10.00',
+    '· Cash used: 0៛ · $0.00',
+    '· Closing cash: 50,000៛ · $120.00',
     '=====Expenses=====',
     '· Actual delivery cost: $4.50',
     '· Other expenses: $5.00 · 4,000៛',
@@ -291,9 +291,9 @@ async function main() {
     '· Cash: 12 · $300.0000',
     '· ABA Pay: 6 · $112.5000',
     '=====ការរាប់សាច់ប្រាក់=====',
-    '· សាច់ប្រាក់ដើមវេន: $10.00 · 10,000៛',
-    '· សាច់ប្រាក់បានប្រើ: $0.00 · 0៛',
-    '· សាច់ប្រាក់បិទវេន: $120.00 · 50,000៛',
+    '· សាច់ប្រាក់ដើមវេន: 10,000៛ · $10.00',
+    '· សាច់ប្រាក់បានប្រើ: 0៛ · $0.00',
+    '· សាច់ប្រាក់បិទវេន: 50,000៛ · $120.00',
     '=====ចំណាយ=====',
     '· ថ្លៃដឹកដើម: $4.50',
     '· ចំណាយផ្សេងទៀត: $5.00 · 4,000៛',
@@ -326,9 +326,9 @@ async function main() {
   {
     const word = (mode, key) => (mode === 'en' ? pack.en[key] : mode === 'km' ? pack.km[key] : `${pack.en[key]}${telegramLang.BILINGUAL_SEPARATOR}${pack.km[key]}`)
     const cashRows = (mode, additional) => [
-      `· ${word(mode, 'shift_opening_cash')}: $10.00 · 10,000៛`,
+      `· ${word(mode, 'shift_opening_cash')}: 10,000៛ · $10.00`,
       `· ${word(mode, 'shift_additional_cash')}: ${additional}`,
-      `· ${word(mode, 'shift_counted_cash')}: $120.00 · 50,000៛`,
+      `· ${word(mode, 'shift_counted_cash')}: 50,000៛ · $120.00`,
     ]
     const overviewFor = (shiftRow, mode, categories) => {
       const previous = telegramLang.getTelegramLanguage()
@@ -348,16 +348,16 @@ async function main() {
     for (const mode of ['en', 'km', 'both']) {
       // Nothing added: the row is still there, as zero in the existing money format.
       const zeroRows = overviewFor(shift, mode)
-      assert.deepStrictEqual(sectionAfterHeader(zeroRows, mode), cashRows(mode, '$0.00 · 0៛'), `[${mode}] additional = 0\n${zeroRows.join('\n')}`)
+      assert.deepStrictEqual(sectionAfterHeader(zeroRows, mode), cashRows(mode, '0៛ · $0.00'), `[${mode}] additional = 0\n${zeroRows.join('\n')}`)
       // Something added: its own amounts, per currency.
       const added = { ...shift, additional_cash_usd: 12.5, additional_cash_khr: 8000 }
-      assert.deepStrictEqual(sectionAfterHeader(overviewFor(added, mode), mode), cashRows(mode, '$12.50 · 8,000៛'), `[${mode}] additional > 0`)
+      assert.deepStrictEqual(sectionAfterHeader(overviewFor(added, mode), mode), cashRows(mode, '8,000៛ · $12.50'), `[${mode}] additional > 0`)
       const usdOnly = { ...shift, additional_cash_usd: 7.5, additional_cash_khr: 0 }
       const khrOnly = { ...shift, additional_cash_usd: 0, additional_cash_khr: 20000 }
-      assert.deepStrictEqual(sectionAfterHeader(overviewFor(usdOnly, mode), mode), cashRows(mode, '$7.50 · 0៛'))
-      assert.deepStrictEqual(sectionAfterHeader(overviewFor(khrOnly, mode), mode), cashRows(mode, '$0.00 · 20,000៛'))
+      assert.deepStrictEqual(sectionAfterHeader(overviewFor(usdOnly, mode), mode), cashRows(mode, '0៛ · $7.50'))
+      assert.deepStrictEqual(sectionAfterHeader(overviewFor(khrOnly, mode), mode), cashRows(mode, '20,000៛ · $0.00'))
       // A NULL column (a caller that never set it) is none added, not unknown.
-      assert.deepStrictEqual(sectionAfterHeader(overviewFor({ ...shift, additional_cash_usd: null, additional_cash_khr: null }, mode), mode), cashRows(mode, '$0.00 · 0៛'))
+      assert.deepStrictEqual(sectionAfterHeader(overviewFor({ ...shift, additional_cash_usd: null, additional_cash_khr: null }, mode), mode), cashRows(mode, '0៛ · $0.00'))
     }
     check('Cash count: Opening -> Cash used -> Closing, always all three, with the packs\' words (en, km, both; zero, USD, KHR, NULL)', true)
 
@@ -374,7 +374,7 @@ async function main() {
     // The drawer is a count, not takings: the Sales / Fees switches leave it.
     const switchedOff = overviewFor(shift, 'both', { sales: false, fees: false })
     check('the Sales and Fees category switches do not remove the drawer counts (they are counts, not revenue)',
-      JSON.stringify(sectionAfterHeader(switchedOff, 'both')) === JSON.stringify(cashRows('both', '$0.00 · 0៛')) && !switchedOff.some((line) => line.startsWith('· Revenue')), switchedOff.join('\n'))
+      JSON.stringify(sectionAfterHeader(switchedOff, 'both')) === JSON.stringify(cashRows('both', '0៛ · $0.00')) && !switchedOff.some((line) => line.startsWith('· Revenue')), switchedOff.join('\n'))
     // A day with two tills: the overview is the whole day's, the drawer is the closing shift's.
     // Each close sends its own overview and each carries ITS drawer -- neither the other's,
     // and not the two added together. (The delivery path is driven below.)
@@ -382,19 +382,19 @@ async function main() {
       additional_cash_usd: 5, additional_cash_khr: 0, closing_counted_usd: 90, closing_counted_khr: 1000 }
     const secondRows = overviewFor(second, 'en')
     assert.deepStrictEqual(sectionAfterHeader(secondRows, 'en'), [
-      '· Opening cash: $40.00 · 0៛', '· Cash used: $5.00 · 0៛', '· Closing cash: $90.00 · 1,000៛',
+      '· Opening cash: 0៛ · $40.00', '· Cash used: 0៛ · $5.00', '· Closing cash: 1,000៛ · $90.00',
     ], secondRows.join('\n'))
     assert.ok(secondRows.includes('· ID: S-20260923-1130-Sok') && secondRows.includes('· Cashier: Sok'), 'and its header names that shift')
     check('two tills on one day: each overview carries its own closing shift\'s drawer under its own header, never the other\'s and never the two summed', true)
     // An overview is only ever sent for a closed shift; handed an open one it must not invent a closing row.
     const openRows = overviewFor({ ...shift, closed_at: null, closing_counted_usd: null, closing_counted_khr: null }, 'both')
     check('an open shift (composed defensively) has the opening and additional rows and no closing row',
-      JSON.stringify(sectionAfterHeader(openRows, 'both', 2)) === JSON.stringify(cashRows('both', '$0.00 · 0៛').slice(0, 2))
+      JSON.stringify(sectionAfterHeader(openRows, 'both', 2)) === JSON.stringify(cashRows('both', '0៛ · $0.00').slice(0, 2))
       && !openRows.some((line) => line.startsWith(`· ${word('both', 'shift_counted_cash')}:`)), openRows.join('\n'))
     // An opening nobody registered stays unknown (N/A), while the additional row stays a measured zero.
     const unregistered = overviewFor({ ...shift, opening_float_usd: null, opening_float_khr: null }, 'en')
     check('an unregistered opening reads N/A and does not hide the additional row',
-      JSON.stringify(sectionAfterHeader(unregistered, 'en').slice(0, 2)) === JSON.stringify([`· ${pack.en.shift_opening_cash}: N/A · N/A`, `· ${pack.en.shift_additional_cash}: $0.00 · 0៛`]), unregistered.join('\n'))
+      JSON.stringify(sectionAfterHeader(unregistered, 'en').slice(0, 2)) === JSON.stringify([`· ${pack.en.shift_opening_cash}: N/A · N/A`, `· ${pack.en.shift_additional_cash}: 0៛ · $0.00`]), unregistered.join('\n'))
   }
 
   const longName = closedShift({ branch_name: 'Branch with a very long name that wraps', branch_id: 1 })
@@ -622,9 +622,9 @@ async function main() {
     const storedKey = telegram.shiftOverviewKey(stored.id, stored.revision)
     await telegram.scheduleTelegramShiftOverview(envFree, stored.id, T0)
     sqlite.prepare('UPDATE shift_sessions SET additional_cash_usd = 15, additional_cash_khr = 30000 WHERE id = ?').run(stored.id)
-    check('the overview delivery reads the additional from the stored row at send time (amended inside the minute: $15.00 · 30,000៛)',
+    check('the overview delivery reads the additional from the stored row at send time (amended inside the minute: 30,000៛ · $15.00)',
       (await telegram.deliverTelegramShiftOverview(envFree, storedKey, T0 + 60_000)) === 'sent'
-      && posts[posts.length - 1].text.split('\n').includes(`· ${additionalLabel}: $15.00 · 30,000៛`), posts[posts.length - 1].text)
+      && posts[posts.length - 1].text.split('\n').includes(`· ${additionalLabel}: 30,000៛ · $15.00`), posts[posts.length - 1].text)
     const storedLines = posts[posts.length - 1].text.split('\n')
     check('and the shift it came from is named once, in the header block, not again inside the Cash count',
       storedLines.filter((line) => line.includes(stored.shift_code)).length === 1 && storedLines.indexOf(`· ${idLabel}: ${stored.shift_code}`) > 0, posts[posts.length - 1].text)
@@ -633,7 +633,7 @@ async function main() {
     await telegram.scheduleTelegramShiftOverview(envFree, never.id, T0)
     check('a stored row with no additional (NULL column) is delivered with a zero Cash used row',
       (await telegram.deliverTelegramShiftOverview(envFree, neverKey, T0 + 60_000)) === 'sent'
-      && posts[posts.length - 1].text.split('\n').includes(`· ${additionalLabel}: $0.00 · 0៛`), posts[posts.length - 1].text)
+      && posts[posts.length - 1].text.split('\n').includes(`· ${additionalLabel}: 0៛ · $0.00`), posts[posts.length - 1].text)
 
     // ---- two tills on one branch-day, through the REAL delivery path ----
     // Till A (Za) and till B (Sok) are the same branch and business day, with DIFFERENT drawers,
@@ -653,8 +653,8 @@ async function main() {
       opening_float_usd: 10, opening_float_khr: 10000, additional_cash_usd: 0, additional_cash_khr: 0, closing_counted_usd: 120, closing_counted_khr: 50000 })
     const tillB = closedShift({ shift_code: 'S-20260923-0915-Sok', user_name: 'Sok', closed_at: '2026-09-23T11:30:30.000Z',
       opening_float_usd: 40, opening_float_khr: 0, additional_cash_usd: 5, additional_cash_khr: 0, closing_counted_usd: 90, closing_counted_khr: 1000 })
-    const drawerA = [`· ${word('shift_opening_cash')}: $10.00 · 10,000៛`, `· ${word('shift_additional_cash')}: $0.00 · 0៛`, `· ${word('shift_counted_cash')}: $120.00 · 50,000៛`]
-    const drawerB = [`· ${word('shift_opening_cash')}: $40.00 · 0៛`, `· ${word('shift_additional_cash')}: $5.00 · 0៛`, `· ${word('shift_counted_cash')}: $90.00 · 1,000៛`]
+    const drawerA = [`· ${word('shift_opening_cash')}: 10,000៛ · $10.00`, `· ${word('shift_additional_cash')}: 0៛ · $0.00`, `· ${word('shift_counted_cash')}: 50,000៛ · $120.00`]
+    const drawerB = [`· ${word('shift_opening_cash')}: 0៛ · $40.00`, `· ${word('shift_additional_cash')}: 0៛ · $5.00`, `· ${word('shift_counted_cash')}: 1,000៛ · $90.00`]
     assert.notDeepStrictEqual(drawerA, drawerB, 'the fixture needs two different drawers to discriminate')
     for (const till of [tillA, tillB]) await telegram.scheduleTelegramShiftOverview(envFree, till.id, T0)
     const deliver = async (till) => {
