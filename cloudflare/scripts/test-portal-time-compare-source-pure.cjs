@@ -122,9 +122,15 @@ function rawHits(sql) {
     return Boolean(kw) && kw[1].toUpperCase() === 'SET'
   }
   const OPS = '<=|>=|<>|!=|<|>|='
-  // a column reference not directly inside a function call: not preceded by "(" (datetime(col), MAX(col) are apart)
-  const left = new RegExp(`(?<![\\w.(])(?:(\\w+)\\.)?(${COL})\\b\\s*(${OPS})(?!=)`, 'g')
-  const right = new RegExp(`(${OPS})\\s*(?:(\\w+)\\.)?(${COL})\\b(?!\\s*\\()`, 'g')
+  // A column reference not directly inside a function call: not preceded by "name(" (datetime(col), MAX(col) are apart).
+  // A bracket group is not a call: "(col < @x OR ...)" and "AND (col < @x" open with a raw comparison and are reported, so an
+  // open parenthesis after a keyword (AND, OR, NOT, WHERE, ON, WHEN, THEN, ELSE, IN, ...) does not hide the column.
+  const KEYWORD = '(?:AND|OR|NOT|WHERE|ON|WHEN|THEN|ELSE|IN|BETWEEN|SELECT|HAVING|EXISTS|CASE|END)'
+  const left = new RegExp(`(?<![\\w.])(?<!\\b(?!${KEYWORD}\\b)\\w+\\(\\s*)(?:(\\w+)\\.)?(${COL})\\b\\s*(${OPS})(?!=)`, 'gi')
+  const right = new RegExp(`(${OPS})\\s*(?:(\\w+)\\.)?(${COL})\\b(?!\\s*\\()`, 'gi')
+  // The column cut by substr() still compares as text: substr(col, 1, 19) > @now is raw.
+  const substrLeft = new RegExp(`\\b(?:substr|substring)\\(\\s*(?:(\\w+)\\.)?(${COL})\\s*,[^()]*\\)\\s*(${OPS})(?!=)`, 'gi')
+  const substrRight = new RegExp(`(${OPS})\\s*(?:substr|substring)\\(\\s*(?:(\\w+)\\.)?(${COL})\\s*,[^()]*\\)`, 'gi')
   let m
   while ((m = left.exec(sql))) {
     if (!owns(m[1], m.index)) continue
@@ -135,6 +141,15 @@ function rawHits(sql) {
     if (!owns(m[2], m.index)) continue
     if (m[1] === '=' && assignment(m.index)) continue
     hits.push(`raw comparison against ${m[3]}`)
+  }
+  while ((m = substrLeft.exec(sql))) {
+    if (!owns(m[1], m.index)) continue
+    hits.push(`raw comparison of substr(${m[2]})`)
+  }
+  while ((m = substrRight.exec(sql))) {
+    if (!owns(m[2], m.index)) continue
+    if (m[1] === '=' && assignment(m.index)) continue
+    hits.push(`raw comparison against substr(${m[3]})`)
   }
   const orderBy = /\bORDER\s+BY\b([^;]*?)(?=\bLIMIT\b|\bOFFSET\b|\)|$)/gi
   while ((m = orderBy.exec(sql))) {
@@ -204,6 +219,15 @@ check('positive control: the scanner reports one of every forbidden pattern', ()
     "UPDATE portal_telegram_pending SET attempts = CASE WHEN window_started_at = @x THEN 1 END WHERE id = @id",
     "UPDATE portal_telegram_pending SET attempts = CASE WHEN 1 THEN 1 END, flags = CASE WHEN window_started_at = @x THEN 1 END WHERE id = @id",
     "UPDATE portal_telegram_pending SET attempts = CASE WHEN 1 THEN 1 END WHERE window_started_at = @x",
+    // B4: a raw comparison that opens a bracket group, or is wrapped in substr(), is still a raw text comparison
+    "SELECT 1 FROM portal_sessions WHERE revoked_at IS NULL AND (expires_at < @now OR revoked_at IS NOT NULL)",
+    "SELECT 1 FROM portal_sessions WHERE (expires_at < @now OR 1)",
+    "SELECT 1 FROM portal_sessions WHERE revoked_at IS NULL AND(expires_at < @now)",
+    "SELECT 1 FROM portal_sessions WHERE revoked_at IS NULL OR ((expires_at < @now) AND 1)",
+    "SELECT COUNT(*) FROM portal_sessions WHERE account_id = @a AND (last_seen_at > datetime(created_at, '+60 seconds') OR 1)",
+    "SELECT 1 FROM portal_sessions s WHERE s.token_hash = @h AND substr(s.expires_at, 1, 19) > @now",
+    "SELECT 1 FROM portal_sessions WHERE @now < substr(expires_at, 1, 19)",
+    "SELECT 1 FROM portal_sessions WHERE substring(expires_at, 1, 19) <= datetime(@now)",
   ]
   for (const sql of forbidden) assert.ok(hitsOf(sql).length >= 1, `not reported: ${sql}`)
 })
@@ -230,6 +254,13 @@ check('positive control: look-alikes report nothing', () => {
     "SELECT 1 FROM customer_share_submissions WHERE created_at >= @cutoff",
     // columns outside the list
     "SELECT 1 FROM portal_accounts WHERE updated_at < @x AND consent_at < @y AND age_confirmed_at < @z AND revoked_at < @w",
+    // B4 look-alikes: a bracket group whose comparison is wrapped in datetime(), a substr() of a column outside the list, a
+    // substr() that is not compared, and a nested select
+    "SELECT 1 FROM portal_sessions WHERE revoked_at IS NULL AND (datetime(expires_at) < datetime(@now) OR revoked_at IS NOT NULL)",
+    "SELECT 1 FROM portal_sessions WHERE (datetime(last_seen_at) > datetime(created_at, '+60 seconds') OR 1)",
+    "SELECT 1 FROM portal_sessions WHERE substr(token_hash, 1, 4) <> 'tg1:' AND (revoked_at IS NULL OR id > 0)",
+    "SELECT substr(expires_at, 1, 10) AS day FROM portal_sessions WHERE id = @id",
+    "SELECT 1 FROM portal_accounts WHERE id IN (SELECT account_id FROM portal_sessions WHERE datetime(expires_at) > datetime(@now))",
   ]
   for (const sql of clean) assert.deepEqual(hitsOf(sql), [], `wrongly reported: ${sql}`)
 })
@@ -239,6 +270,25 @@ check('positive control: the file-level scan reports a seeded raw string and a s
   assert.equal(scanFiles(seeded('SELECT 1 FROM portal_sessions WHERE expires_at < CURRENT_TIMESTAMP')).length, 1)
   assert.equal(scanFiles(seeded('SELECT id FROM portal_sessions ORDER BY last_seen_at')).length, 1)
   assert.equal(scanFiles(seeded('SELECT 1 FROM portal_sessions WHERE datetime(expires_at) < datetime(@now)')).length, 0)
+  // B4: the reviewer's seeded bracket-group comparison and its substr() form
+  assert.equal(scanFiles(seeded('SELECT 1 FROM portal_sessions WHERE revoked_at IS NULL AND (expires_at < @now OR revoked_at IS NOT NULL)')).length, 1)
+  assert.equal(scanFiles(seeded("SELECT 1 FROM portal_sessions s WHERE s.token_hash = @h AND substr(s.expires_at, 1, 19) > @now")).length, 1)
+})
+
+check('B4 mutant: S-D1 with a raw comparison at the start of its bracket group is reported', () => {
+  const session = fs.readFileSync(path.join(SRC, 'lib', 'portalSession.ts'), 'utf8').replace(/\r\n/g, '\n')
+  const mutated = session.replace("(datetime(last_seen_at) > datetime(created_at, '+60 seconds')", "(last_seen_at > datetime(created_at, '+60 seconds')")
+  assert.notEqual(mutated, session, 'mutant applied: S-D1 holds the datetime() form')
+  const files = realFiles().map((f) => (/lib[\\/]portalSession\.ts$/.test(f.file) ? { ...f, text: mutated } : f))
+  assert.ok(scanFiles(files).some((h) => /portalSession\.ts: raw comparison of last_seen_at/.test(h)), 'the raw bracket-group comparison goes red')
+})
+
+check('B4 mutant: S-S1 with expires_at cut by substr() is reported', () => {
+  const session = fs.readFileSync(path.join(SRC, 'lib', 'portalSession.ts'), 'utf8').replace(/\r\n/g, '\n')
+  const mutated = session.replace('AND datetime(s.expires_at) > datetime(@now)', 'AND substr(s.expires_at, 1, 19) > @now')
+  assert.notEqual(mutated, session, 'mutant applied: S-S1 holds the datetime() form')
+  const files = realFiles().map((f) => (/lib[\\/]portalSession\.ts$/.test(f.file) ? { ...f, text: mutated } : f))
+  assert.ok(scanFiles(files).some((h) => /portalSession\.ts: raw comparison of substr\(expires_at\)/.test(h)), 'the substr() comparison goes red')
 })
 
 check('mutant: the retention sweep with the raw predicate it had before S-R1 is reported', () => {
