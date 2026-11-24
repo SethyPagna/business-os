@@ -7,11 +7,11 @@
 //   T-F1  with a ticket row present, every value derivable from the link plus the keys fails at the session lookup;
 //         and each reader bound DIRECTLY to the raw ticket value (bypassing hashToken) finds or changes nothing.
 //         mutants: drop the substr predicate from the session read, from the stamp, from the slide, from the sign-out.
-//   T-F2  every SQL text in cloudflare/src that names portal_sessions and token_hash carries the predicate, or is one
-//         of the allowed statements by exported name (S-C1, S-C2, S-K2, S-C3, S-C4, S-J2, S-J3, S-D2), which the
-//         pieces that own them export under those names (S_C1 ... S_D2; PORTAL_ prefix and _SQL suffix tolerated).
-//         S3d names S-J2 and S-J3 MEMBER_INSERT_SQL and TICKET_INSERT_SQL; those two names count in its file only.
-//         mutants: a reader without the predicate; a statement outside the list that names token_hash.
+//   T-F2  every SQL text in cloudflare/src that names portal_sessions and token_hash carries the predicate (on the alias it
+//         compares), or is an allowed statement: the exported const of that name, holding the statement itself, in the file that
+//         owns it (OWNERS below: S_C1, S_C2, S_D2, S_K2, S_C3, S_C4, MEMBER_INSERT_SQL = S-J2, TICKET_INSERT_SQL = S-J3).
+//         Concatenated literals read as one text. A plain INSERT ... VALUES is exempt; ON CONFLICT and any SELECT are not.
+//         mutants: a reader without the predicate; a statement outside the list that names token_hash; the owner check off.
 //
 // Run (from cloudflare/): node scripts/test-portal-session-token-readers-pure.cjs
 
@@ -239,13 +239,27 @@ const dropPredicate = (followedBy) => new RegExp(`\\n\\s+AND substr\\((?:s\\.)?t
 
 // ---- T-F2 -------------------------------------------------------------------------------
 const PREDICATE = /substr\(\s*(?:\w+\.)?token_hash\s*,\s*1\s*,\s*4\s*\)\s*<>\s*'tg1:'/
-const ALLOWED_NAME = /^(?:PORTAL_)?S_(?:C1|C2|K2|C3|C4|J2|J3|D2)(?:_SQL)?$/
-// S3d (lib/portalTelegramJoin.ts) names S-J2 and S-J3 by what they do, the design id in the comment above each. Those two
-// exact names are accepted in that one file only, so a statement in any other file cannot borrow them.
-const ALLOWED_IN_FILE = [{ file: 'lib/portalTelegramJoin.ts', names: ['MEMBER_INSERT_SQL', 'TICKET_INSERT_SQL'] }]
+// B3: each allowed statement is accepted only under its own name, in the file that owns it, and only as an exported const
+// whose initializer is the statement itself (not a function, a property, a concatenation or an unexported const).
+const S3E_FILE = 'routes/portalTelegram.ts' // S3e's file, once it exists
+const OWNERS = {
+  S_C1: ['lib/portalSession.ts', S3E_FILE],
+  S_C2: ['lib/portalSession.ts', S3E_FILE],
+  S_D2: ['lib/portalSession.ts', S3E_FILE],
+  S_K2: ['lib/portalTelegramSignIn.ts'],
+  S_C3: ['lib/portalTelegramSignIn.ts'],
+  S_C4: ['lib/portalTelegramSignIn.ts'],
+  MEMBER_INSERT_SQL: ['lib/portalTelegramJoin.ts'], // S-J2
+  TICKET_INSERT_SQL: ['lib/portalTelegramJoin.ts'], // S-J3
+}
 const srcPath = (file) => path.relative(SRC, file).split(path.sep).join('/')
-const allowedName = (file, name) => ALLOWED_NAME.test(name) || ALLOWED_IN_FILE.some((a) => a.file === srcPath(file) && a.names.includes(name))
+const allowedStatement = (file, stmt) => stmt.exportedConst !== null
+  && Object.hasOwn(OWNERS, stmt.exportedConst) && OWNERS[stmt.exportedConst].includes(srcPath(file))
 const SQLISH = /\b(SELECT|UPDATE|INSERT|DELETE)\b/i
+// A comparison of token_hash (`x.token_hash = @v`, IN, LIKE) needs the ticket predicate on the SAME alias in the same text.
+const LOOKUP = /(\b\w+\.)?token_hash\s*(?:==?|\bIN\b|\bLIKE\b)/gi
+const predicateFor = (prefix) => new RegExp(`substr\\(\\s*${prefix.replace('.', '\\.')}token_hash\\s*,\\s*1\\s*,\\s*4\\s*\\)\\s*<>\\s*'tg1:'`)
+const lookupsCarryPredicate = (text) => [...new Set([...text.matchAll(LOOKUP)].map((m) => m[1] || ''))].every((prefix) => predicateFor(prefix).test(text))
 
 function listSourceFiles(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -257,32 +271,58 @@ function listSourceFiles(dir, out = []) {
 }
 // Every string literal or template that is SQL and names both portal_sessions and token_hash, with the names of the
 // declarations and properties around it.
+// A statement is a string literal, a template, or a `+` concatenation of them (the pieces read as one text).
+// exportedConst is the name when the statement is the direct initializer of a top-level `export const`, else null.
 function sqlTexts(fileName, text) {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2022, true)
   const found = []
-  const nameOf = (node) => (node.name && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) ? node.name.text : null)
-  function visit(node, names) {
-    const own = (ts.isVariableDeclaration(node) || ts.isPropertyAssignment(node) || ts.isFunctionDeclaration(node)) ? nameOf(node) : null
-    const next = own ? [...names, own] : names
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) {
-      const body = node.getText(sf)
-      if (/portal_sessions/.test(body) && /token_hash/.test(body) && SQLISH.test(body)) found.push({ file: fileName, names: next, text: body })
-      return // the outermost literal is the statement
+  const isLiteral = (node) => ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)
+  const isPlus = (node) => ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  // The pieces of a concatenation made only of literals, or null when any piece is something else.
+  function pieces(node) {
+    if (isLiteral(node)) return [node]
+    if (ts.isParenthesizedExpression(node)) return pieces(node.expression)
+    if (isPlus(node)) {
+      const left = pieces(node.left)
+      const right = left && pieces(node.right)
+      return left && right ? [...left, ...right] : null
     }
-    ts.forEachChild(node, (child) => visit(child, next))
+    return null
   }
-  visit(sf, [])
+  function exportedConstName(node) {
+    const declaration = node.parent
+    if (!declaration || !ts.isVariableDeclaration(declaration) || declaration.initializer !== node || !ts.isIdentifier(declaration.name)) return null
+    const list = declaration.parent
+    const statement = list && list.parent
+    if (!statement || !ts.isVariableStatement(statement) || !ts.isSourceFile(statement.parent)) return null
+    if (!(list.flags & ts.NodeFlags.Const)) return null
+    return (ts.getModifiers(statement) || []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ? declaration.name.text : null
+  }
+  function visit(node) {
+    const parts = isLiteral(node) || isPlus(node) ? pieces(node) : null
+    if (parts) {
+      const body = parts.map((p) => p.getText(sf)).join(' ')
+      if (/portal_sessions/.test(body) && /token_hash/.test(body) && SQLISH.test(body)) {
+        found.push({ file: fileName, exportedConst: parts.length === 1 ? exportedConstName(node) : null, text: body })
+      }
+      return // the outermost literal or concatenation is the statement
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
   return found
 }
 function violations(files) {
   const out = []
   for (const { file, text } of files) {
     for (const stmt of sqlTexts(file, text)) {
-      if (PREDICATE.test(stmt.text)) continue
+      if (allowedStatement(stmt.file, stmt)) continue
       // A plain INSERT ... VALUES (S-S6, createPortalSession) binds a new row's value; it neither reads nor compares
-      // a stored token_hash, so it cannot authenticate anything. An INSERT ... SELECT (the ticket inserts) does read.
-      if (/^\W*INSERT\b/i.test(stmt.text) && !/\bSELECT\b/i.test(stmt.text)) continue
-      if (stmt.names.some((n) => allowedName(stmt.file, n))) continue
+      // a stored token_hash, so it cannot authenticate anything. An INSERT ... SELECT (the ticket inserts) does read,
+      // and ON CONFLICT ... DO UPDATE ... WHERE can compare without a SELECT.
+      const plainInsert = /^\W*INSERT\b/i.test(stmt.text) && !/\bSELECT\b/i.test(stmt.text) && !/\bON\s+CONFLICT\b/i.test(stmt.text)
+      if (plainInsert) continue
+      if (PREDICATE.test(stmt.text) && lookupsCarryPredicate(stmt.text)) continue
       out.push(`${path.relative(SRC, stmt.file)}: ${stmt.text.replace(/\s+/g, ' ').slice(0, 110)}`)
     }
   }
@@ -333,8 +373,21 @@ async function main() {
     const stmts = sqlTexts('portalSession.ts', fs.readFileSync(path.join(SRC, 'lib', 'portalSession.ts'), 'utf8'))
     const d2 = stmts.filter((s) => !PREDICATE.test(s.text) && !/^\W*INSERT\b/i.test(s.text))
     assert.equal(d2.length, 1)
-    assert.ok(d2[0].names.includes('S_D2'))
+    assert.equal(d2[0].exportedConst, 'S_D2')
     assert.match(readSrc('lib/portalSession.ts'), /export const S_D2 = /)
+  })
+  await check('T-F2 each allowed statement that exists is found exactly once, in its owning file, as an exported const', async () => {
+    const found = {}
+    for (const { file, text } of realFiles()) {
+      for (const stmt of sqlTexts(file, text)) {
+        if (stmt.exportedConst !== null && Object.hasOwn(OWNERS, stmt.exportedConst)) (found[stmt.exportedConst] ||= []).push(srcPath(file))
+      }
+    }
+    for (const name of ['S_D2', 'S_K2', 'S_C3', 'S_C4', 'MEMBER_INSERT_SQL', 'TICKET_INSERT_SQL']) {
+      assert.equal((found[name] || []).length, 1, `${name} found ${(found[name] || []).length} times`)
+      assert.ok(OWNERS[name].includes(found[name][0]), `${name} lives in ${found[name][0]}`)
+    }
+    for (const name of Object.keys(found)) assert.equal(found[name].length, 1, `${name} appears once`)
   })
   await check('T-F2 positive control: the scanner reports what it must and nothing else', async () => {
     const fixture = (body, names = '') => ({ file: path.join(SRC, 'fixture.ts'), text: `${names}const x = \`${body}\`` })
@@ -345,16 +398,32 @@ async function main() {
     // allowed: the predicate (with or without an alias), and each allowed name
     assert.equal(violations([fixture("SELECT 1 FROM portal_sessions s WHERE s.token_hash = @h AND substr(s.token_hash, 1, 4) <> 'tg1:'")]).length, 0)
     assert.equal(violations([fixture("UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h AND substr(token_hash, 1, 4) <> 'tg1:'")]).length, 0)
-    for (const name of ['S_C1', 'S_C2', 'S_K2', 'S_C3', 'S_C4', 'S_J2', 'S_J3', 'S_D2']) {
-      assert.equal(violations([{ file: path.join(SRC, 'fixture.ts'), text: `export const ${name} = \`UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h\`` }]).length, 0, name)
+    // B3: each allowed name counts in its owning files only, and only as an exported const holding the statement itself
+    const reader = 'SELECT a.id FROM portal_sessions s JOIN portal_accounts a ON a.id = s.account_id WHERE s.token_hash = @token_hash AND s.revoked_at IS NULL'
+    const sql = 'UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h'
+    const at = (rel, body) => violations([{ file: path.join(SRC, ...rel.split('/')), text: body }]).length
+    for (const [name, owners] of Object.entries(OWNERS)) {
+      for (const rel of owners) assert.equal(at(rel, `export const ${name} = \`${sql}\``), 0, `${name} in ${rel}`)
+      const wrong = ['lib/portalTelegramSignIn.ts', 'lib/portalTelegramJoin.ts', 'lib/portalSession.ts', 'routes/portal.ts', 'lib/anyNewFile.ts', 'routes/portalTelegramJoin.ts'].find((rel) => !owners.includes(rel))
+      assert.equal(at(wrong, `export const ${name} = \`${sql}\``), 1, `${name} outside its owner (${wrong})`)
+      assert.equal(at(owners[0], `const ${name} = \`${sql}\``), 1, `${name} not exported`)
+      assert.equal(at(owners[0], `export function ${name}() { return db.prepare(\`${sql}\`) }`), 1, `${name} as a function name`)
+      assert.equal(at(owners[0], `export const q = { ${name}: \`${sql}\` }`), 1, `${name} as a property`)
+      assert.equal(at(owners[0], `export const ${name} = db.prepare(\`${sql}\`)`), 1, `${name} wrapping the statement in a call`)
     }
-    // S3d's two names count in lib/portalTelegramJoin.ts only; the same statement under them anywhere else is reported
-    for (const name of ['MEMBER_INSERT_SQL', 'TICKET_INSERT_SQL']) {
-      const text = `const ${name} = \`UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h\``
-      assert.equal(violations([{ file: path.join(SRC, 'lib', 'portalTelegramJoin.ts'), text }]).length, 0, name)
-      assert.equal(violations([{ file: path.join(SRC, 'lib', 'portalTelegramSignIn.ts'), text }]).length, 1, `${name} outside S3d's file`)
-      assert.equal(violations([{ file: path.join(SRC, 'routes', 'portalTelegramJoin.ts'), text }]).length, 1, `${name} in a routes file of the same name`)
-    }
+    // the reviewer's six disguises, each a session reader without the ticket predicate that borrows an allowed name or hides it
+    assert.equal(at('routes/portal.ts', `const S_C1 = \`${reader}\``), 1, 'disguise 1: S_C1 in routes/portal.ts')
+    assert.equal(at('lib/anyNewFile.ts', `const S_K2 = \`${reader}\``), 1, 'disguise 2: S_K2 in a new lib file, not exported')
+    assert.equal(at('routes/portal.ts', `function S_D2() { return db.prepare(\`${reader}\`) }`), 1, 'disguise 3: inside a function named S_D2')
+    assert.equal(at('routes/portal.ts', `const q = { S_C4: \`${reader}\` }`), 1, 'disguise 4: under a property S_C4')
+    assert.equal(at('routes/portal.ts', `const q = \`${reader} AND EXISTS (SELECT 1 FROM portal_sessions x WHERE substr(x.token_hash, 1, 4) <> 'tg1:')\``), 1, 'disguise 5: the predicate on an unrelated sub-select only')
+    assert.equal(at('routes/portal.ts', "const q = 'SELECT a.id FROM portal_sessions s ' + 'WHERE s.token_hash = @token_hash'"), 1, 'disguise 6: SQL split across two concatenated literals')
+    assert.equal(at('routes/portal.ts', `const q = \`${reader}\``), 1, 'control: the same reader under a neutral name')
+    assert.equal(at('routes/portal.ts', `const q = \`${reader} AND substr(s.token_hash, 1, 4) <> 'tg1:'\``), 0, 'the predicate on the alias that is compared passes')
+    assert.equal(at('routes/portal.ts', "const q = 'UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h ' + \"AND substr(token_hash, 1, 4) <> 'tg1:'\""), 0, 'a concatenation that carries the predicate passes')
+    // the INSERT ... VALUES exemption refuses ON CONFLICT and any SELECT
+    assert.equal(at('lib/anyNewFile.ts', 'const q = `INSERT INTO portal_sessions (account_id, token_hash) VALUES (@a, @h) ON CONFLICT(id) DO UPDATE SET revoked_at = NULL WHERE token_hash = @h`'), 1, 'ON CONFLICT is not a plain insert')
+    assert.equal(at('lib/anyNewFile.ts', 'const q = `INSERT INTO portal_sessions (account_id, token_hash) VALUES (@a, (SELECT token_hash FROM portal_sessions LIMIT 1))`'), 1, 'a SELECT inside the VALUES is not a plain insert')
     // a plain INSERT ... VALUES reads nothing; an INSERT ... SELECT does and must be listed by name
     assert.equal(violations([fixture('INSERT INTO portal_sessions (account_id, token_hash) VALUES (@a, @h)')]).length, 0)
     assert.equal(violations([fixture('INSERT INTO portal_sessions (account_id, token_hash) SELECT @a, @h WHERE NOT EXISTS (SELECT 1 FROM portal_sessions WHERE token_hash = @h)')]).length, 1)
