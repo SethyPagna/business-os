@@ -165,9 +165,9 @@ async function main() {
       assert.equal((await amendmentsOf(wide)).at(-1).actor_user_id, people.b.id)
       assert.equal((await call('b', 'PATCH', `/${wide}`, amend(await revisionOf(wide), { opening_float_usd: 7 }))).status, 200, 'and without a request identity')
     })
-    await check('shop_wide: visible is not owned, close stays 403', async () => {
-      const closeWide = await call('b', 'POST', `/${wide}/close`, { expected_revision: await revisionOf(wide), closing_counted_usd: 1 })
-      assert.equal(closeWide.status, 403, closeWide.text)
+    await check('shop_wide: today shift is the shop to close, so a stale close passes permission and meets the revision guard', async () => {
+      const closeWide = await call('b', 'POST', `/${wide}/close`, { expected_revision: (await revisionOf(wide)) + 5, closing_counted_usd: 1 })
+      assert.equal(closeWide.status, 409, closeWide.text)
     })
     // A per_account shift stays hidden after the shop switches to shop_wide: it was not opened for the branch.
     await check('shop_wide: a per_account shift stays hidden', () => unchanged('B PATCH, stale scope', aShift, async () => {

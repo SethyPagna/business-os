@@ -302,7 +302,8 @@ async function main() {
       assert.ok(!body.shift.figures, 'staff sees no admin figures')
     }
     const input = { shift_id: shift.id, expected_revision: 0, client_request_id: 'shift-visibility-replay-001', branch_id: 1, closing_counted_usd: 3 }
-    assert.equal((await call('POST', '/close', input)).status, 403, 'comparison changes never widen mutation authority')
+    const sharedNow = await (await call('GET', '/current?branch_id=1')).json()
+    assert.equal(sharedNow.shift.capabilities.can_close, true, 'the shop-wide shift of today is the shop\'s to close (A79/A80); the comparison grants add nothing to that')
     actAs({ ...user, role_code: 'admin' })
     assert.ok((await (await call('GET', '/current?branch_id=1')).json()).shift.reconciliation)
     const closed = await (await call('POST', '/close', input)).json()
