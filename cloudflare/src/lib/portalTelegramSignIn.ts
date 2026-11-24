@@ -20,10 +20,10 @@ import {
 type SignInDb = Pick<D1Compat, 'prepare' | 'batch'>
 
 // S-K1
-const S_K1 = 'SELECT id, status FROM portal_accounts WHERE telegram_user_id = @tg LIMIT 1'
+const S_K1 = 'SELECT id, name, status FROM portal_accounts WHERE telegram_user_id = @tg LIMIT 1'
 
 // S-K2: read first, so ticket_exists is the state before the insert.
-const S_K2 = `SELECT a.id AS account_id, a.status,
+export const S_K2 = `SELECT a.id AS account_id, a.status,
        EXISTS (SELECT 1 FROM portal_sessions WHERE token_hash = @ticket) AS ticket_exists,
        (SELECT COUNT(*) FROM (
           SELECT 1 FROM portal_sessions s
@@ -34,7 +34,7 @@ FROM portal_accounts a
 WHERE a.telegram_user_id = @tg`
 
 // S-C3: the ticket row.
-const S_C3 = `INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at)
+export const S_C3 = `INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at)
 SELECT a.id, @ticket, @ticket_expires_at, @now, @now
 FROM portal_accounts a
 WHERE a.telegram_user_id = @tg
@@ -47,7 +47,7 @@ WHERE a.telegram_user_id = @tg
          LIMIT @cap_max)) < @cap_max`
 
 // S-C4: the member's last_seen_at, at most daily, only when the ticket row exists.
-const S_C4 = `UPDATE portal_accounts SET last_seen_at = @now
+export const S_C4 = `UPDATE portal_accounts SET last_seen_at = @now
 WHERE telegram_user_id = @tg
   AND status = 'active'
   AND (last_seen_at IS NULL OR datetime(last_seen_at) < datetime(@now, @seen_window))
@@ -61,6 +61,8 @@ export type SignInReply = {
   lang: PortalTelegramLang
   // HH:MM in Cambodia time for the replies that show it; null otherwise.
   startedHm: string | null
+  // R-CONFIRM only: the member's stored name, for "as <name>" (portalTelegramReplyText cleans it).
+  memberName?: string | null
   // R-CONFIRM only: the three buttons in order; button i carries choice digit i.
   buttons?: ConfirmButton[]
 }
@@ -94,11 +96,11 @@ export async function startForKnownMember(
   const verified = await verifyStartToken(env, input.token, nowMs)
   if (!verified) return reply('R-STALE', replyLanguage(null, input.languageCode))
   const lang = replyLanguage(verified.locale, input.languageCode)
-  const member = await db.prepare(S_K1).get<{ id: number; status: string }>({ tg: input.fromId })
+  const member = await db.prepare(S_K1).get<{ id: number; name: string | null; status: string }>({ tg: input.fromId })
   if (!member) return { kind: 'not-member', verified, lang }
   if (member.status !== 'active') return reply('R-PAUSED', lang)
   const startedHm = phnomPenhHm(verified.startedAtSeconds)
-  return reply('R-CONFIRM', lang, startedHm, confirmButtons(input.token as string, verified))
+  return { ...reply('R-CONFIRM', lang, startedHm, confirmButtons(input.token as string, verified)), memberName: typeof member.name === 'string' ? member.name : null }
 }
 
 type BatchResult = { results?: Array<Record<string, unknown>>; meta?: { changes?: number } }

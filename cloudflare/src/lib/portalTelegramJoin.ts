@@ -51,7 +51,7 @@ const TELEGRAM_MEMBER_SQL = 'SELECT id, status FROM portal_accounts WHERE telegr
 
 // S-J2 with the breaker S-J4 inside it. The newest @joins_max rows by rowid, no index; created_at compared through datetime()
 // so a row written with the column default (space form) counts the same as an ISO row.
-const MEMBER_INSERT_SQL = `INSERT INTO portal_accounts (
+export const MEMBER_INSERT_SQL = `INSERT INTO portal_accounts (
   name, phone, member_code, status, link_version,
   telegram_user_id, telegram_verified_at,
   consent_version, consent_at, consent_locale, age_confirmed_at,
@@ -69,7 +69,7 @@ WHERE (SELECT COUNT(*) FROM (
   AND NOT EXISTS (SELECT 1 FROM portal_sessions WHERE token_hash = @ticket)`
 
 // S-J3: the ticket for exactly the row S-J2 just inserted, identified by its fresh random member_code.
-const TICKET_INSERT_SQL = `INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at)
+export const TICKET_INSERT_SQL = `INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at)
 SELECT a.id, @ticket, @ticket_expires_at, @now, @now
 FROM portal_accounts a
 WHERE a.telegram_user_id = @tg

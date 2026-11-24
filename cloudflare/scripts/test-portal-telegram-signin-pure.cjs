@@ -182,6 +182,45 @@ check('T-C3 start: a member gets R-CONFIRM with three buttons and the Cambodia s
   })
 })
 
+check('A1 start: R-CONFIRM carries the member name from the one S-K1 read, and the text says "as <name>"', async () => {
+  const db = makeDb()
+  db.member(MEMBER_TG)
+  db.sqlite.prepare('UPDATE portal_accounts SET name = ? WHERE telegram_user_id = ?').run('Sok Dara', MEMBER_TG)
+  const text = await freshToken({ locale: 0 })
+  db.resetCounters()
+  const out = await signIn.startForKnownMember(ENV, db, { token: text, fromId: MEMBER_TG, languageCode: 'en' }, T0)
+  assert.equal(out.id, 'R-CONFIRM')
+  assert.equal(out.memberName, 'Sok Dara')
+  assert.equal(db.calls, 1, 'the name comes with the same read: no extra D1 call')
+  assert.match(texts.portalTelegramReplyText(out.id, out.lang, { startedHm: out.startedHm, shopName: 'Example Shop', memberName: out.memberName }), /^Sign in to the Example Shop website as Sok Dara\? /)
+  db.sqlite.prepare('UPDATE portal_accounts SET name = NULL WHERE telegram_user_id = ?').run(MEMBER_TG)
+  const unnamed = await signIn.startForKnownMember(ENV, db, { token: text, fromId: MEMBER_TG, languageCode: 'en' }, T0)
+  assert.equal(unnamed.id, 'R-CONFIRM')
+  assert.doesNotMatch(texts.portalTelegramReplyText(unnamed.id, unnamed.lang, { startedHm: unnamed.startedHm, memberName: unnamed.memberName }), / as /)
+})
+
+check('A1/N2 the R-CONFIRM template is filled in one pass: a name holding {hm}, {site} or {who} is printed as text', async () => {
+  for (const lang of ['en', 'km']) {
+    for (const hostile of ['{hm}', '{site}', '{who}', '{hm}{site}{who}']) {
+      const out = texts.portalTelegramReplyText('R-CONFIRM', lang, { startedHm: '14:05', shopName: 'Shop', memberName: hostile })
+      assert.ok(out.includes(hostile), `${lang} ${hostile}: the name is printed as it is`)
+      const rest = out.split(hostile).join('')
+      assert.ok(rest.includes('14:05'), `${lang} ${hostile}: the real time is filled`)
+      assert.doesNotMatch(rest, /\{(hm|site|who)\}/, `${lang} ${hostile}: no placeholder left outside the name`)
+    }
+    const hostileShop = texts.portalTelegramReplyText('R-CONFIRM', lang, { startedHm: '14:05', shopName: '{who}', memberName: 'Sok' })
+    assert.ok(hostileShop.includes('{who}') && hostileShop.includes('Sok'), `${lang}: a shop name holding {who} stays text`)
+  }
+})
+
+check('A1 the statements S3c owns are exported by name (T-F2 reads them by owner)', async () => {
+  for (const name of ['S_K2', 'S_C3', 'S_C4']) assert.equal(typeof signIn[name], 'string', name)
+  const join = loadLib('portalTelegramJoin')
+  for (const name of ['MEMBER_INSERT_SQL', 'TICKET_INSERT_SQL']) assert.equal(typeof join[name], 'string', name)
+  assert.equal(join.MEMBER_INSERT_SQL, join.PORTAL_TELEGRAM_JOIN_SQL.memberInsert)
+  assert.equal(join.TICKET_INSERT_SQL, join.PORTAL_TELEGRAM_JOIN_SQL.ticketInsert)
+})
+
 check('T-C3 start: a suspended or closed member gets R-PAUSED, an unknown Telegram user is handed on, 0 writes', async () => {
   const db = makeDb()
   db.member(MEMBER_TG, 'suspended')

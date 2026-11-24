@@ -122,7 +122,8 @@ export function portalTelegramReplyText(id: PortalTelegramReplyId, lang: PortalT
     const name = cleanName(params.memberName)
     const site = lang === 'km' ? (shop ? `គេហទំព័រ ${shop}` : 'គេហទំព័រ') : shop ? `the ${shop} website` : 'the website'
     const who = name ? (lang === 'km' ? ` ជា ${name}` : ` as ${name}`) : ''
-    text = text.replace('{site}', () => site).replace('{who}', () => who)
+    // One pass over the template: a name that holds {hm}, {site} or {who} is printed as text, never expanded.
+    return text.replace(/\{(site|who|hm)\}/g, (_match, key: string) => (key === 'site' ? site : key === 'who' ? who : (params.startedHm ?? '')))
   }
   return text.replace('{hm}', () => params.startedHm ?? '')
 }
