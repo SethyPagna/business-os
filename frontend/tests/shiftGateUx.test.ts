@@ -40,6 +40,7 @@ import ts from 'typescript'
 import * as actorReadScope from '../src/api/actorReadScope.ts'
 import { openShift, shiftCountPairBlocker, shiftOpeningCounts } from '../src/api/shiftTransport.ts'
 import { shiftCountIssue, shiftRielCountInvalid } from '../src/components/shifts/shiftCountRules.ts'
+import * as shiftLateClose from '../src/components/shifts/shiftLateClose.ts'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -220,6 +221,7 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
   if (name.includes('formatters')) return { fmtDateTime24: String, parseServerTimestampMs: Date.parse }
   if (name.includes('shiftCountRules')) return { shiftCountIssue, shiftRielCountInvalid }
+  if (name.includes('shiftLateClose')) return shiftLateClose
   if (name.includes('shiftTransport')) return { fetchCurrentShift: async () => currentShift, pendingShiftMutation: () => null,
     shiftClosingCounts: (usd: string, khr: string) => ({ usd: usd === '' ? null : Number(usd), khr: khr === '' ? null : Number(khr) }),
     closeShift: (input: any) => { submitted = input; return new Promise((resolve) => { resolveClose = resolve }) } }
@@ -270,7 +272,7 @@ try {
   slots.length = 0
   effectQueue.length = 0
   const actualTransport = await import('../src/api/shiftTransport.ts')
-  const historyShift: any = { ...currentShift.shift, id: 81, revision: 2, business_date: '2026-09-05', shift_code: 'SHIFT-81',
+  const historyShift: any = { ...currentShift.shift, id: 81, revision: 2, business_date: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10), shift_code: 'SHIFT-81',
     opened_at: '2026-09-05T01:00:00.000Z', closed_at: null, capabilities: { can_edit: true, can_close: true, can_cancel: true } }
   let historyResult = historyShift
   let resolveHistoryClose: (value: any) => void = () => {}
@@ -287,6 +289,7 @@ try {
     // The popup's search pause; nothing here searches (shiftHistorySearch.test.ts does).
     if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
     if (name.includes('shiftCountRules')) return { shiftCountIssue, shiftRielCountInvalid }
+    if (name.includes('shiftLateClose')) return shiftLateClose
     if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
       listShifts: async () => ({ shifts: [historyShift], scope: 'own' }), fetchShiftHistory: async () => ({ shift: historyResult, amendments: [] }),
       closeShiftById: () => new Promise((resolve) => { resolveHistoryClose = resolve }) }
@@ -353,6 +356,7 @@ try {
       if (name.includes('formatters')) return { fmtDateOnly: String }
       if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
       if (name.includes('shiftCountRules')) return { shiftCountIssue, shiftRielCountInvalid }
+      if (name.includes('shiftLateClose')) return shiftLateClose
       if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
         listShifts: async () => ({ shifts: [], total: 0, page: 1, scope: 'own' }),
         fetchShiftHistory: async () => { detailReads++; return { shift: fixture, amendments: [] } },

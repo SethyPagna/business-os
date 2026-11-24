@@ -26,6 +26,7 @@ globalThis.window = Object.assign(new EventTarget(), { localStorage: readableSto
 // Shift requests are saved only for a signed-in account (api/retryRecordScope.ts).
 window.localStorage.setItem('businessos_user', JSON.stringify({ id: 4, organization_id: 3 }))
 
+let answer: 'shift' | 'replay' | 'empty' = 'shift'
 const bodies: Array<{ url: string; body: Record<string, unknown> }> = []
 const shift = {
   id: 31, shift_code: 'S-1', scope_mode: 'per_account', user_id: 7, user_name: 'sokha', branch_id: 1, branch_name: 'Shop', business_date: '2026-09-14',
@@ -37,6 +38,8 @@ const shift = {
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   bodies.push({ url: String(input), body: JSON.parse(String(init?.body || '{}')) as Record<string, unknown> })
   const id = Number(/shifts\/(\d+)/.exec(String(input))?.[1])
+  if (answer === 'replay') return new Response(JSON.stringify({ id, status: 'closed', closed_at: shift.closed_at, replayed: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  if (answer === 'empty') return new Response(JSON.stringify({ id, status: 'open' }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   return new Response(JSON.stringify({ shift: { ...shift, id, revision: 2 }, already_closed: false, is_open: false }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }) as typeof fetch
 
@@ -62,6 +65,13 @@ try {
   await amendShift(34, { actorId: 7, expectedRevision: 1, reason: 'Moved', openedAt: '2026-09-14T01:05:00.000Z', openingFloatUsd: 10, openingFloatKhr: 0, closedAt: '2026-09-14T04:30:00.000Z', closingCountedUsd: 11, closingCountedKhr: 0 })
   assert.equal(bodies[3].body.opened_at, '2026-09-14T01:05:00.000Z')
   assert.equal(bodies[3].body.closed_at, '2026-09-14T04:30:00.000Z')
+  answer = 'replay'
+  const replayed = await closeShiftById(35, { actorId: 7, expectedRevision: 0, closingCountedUsd: 10, closingCountedKhr: 0 })
+  assert.equal(replayed.shift, null, 'a holder\'s replayed close answer has no shift and is a success')
+  assert.equal(replayed.replayed, true)
+  assert.equal(replayed.already_closed, true)
+  answer = 'empty'
+  await assert.rejects(closeShiftById(36, { actorId: 7, expectedRevision: 0, closingCountedUsd: 10, closingCountedKhr: 0 }), /Could not verify the committed shift/, 'a body that is neither a shift nor a replay stays a failure')
 } finally {
   globalThis.fetch = originalFetch
   globalThis.window = originalWindow

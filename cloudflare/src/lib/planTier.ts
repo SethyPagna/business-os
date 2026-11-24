@@ -243,6 +243,8 @@ export type PlanLimits = {
   // returning a partial integrity report, because a catalog-integrity
   // answer that silently skipped rows is worse than no answer.
   catalogIntegrityMaxProducts: number
+  // Most open earlier-day shifts the "forgotten shifts" list returns (GET /api/shifts?forgotten=1).
+  forgottenShiftListMax: number
 
   stockInLinesPerRequest: number
 
@@ -583,6 +585,7 @@ const PAID_LIMITS: PlanLimits = deepFreeze({
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50_000,
+  forgottenShiftListMax: 200,
   stockInLinesPerRequest: 24,
   stockInLinesPerRequestByCalls: 24,
   callCountingSwitchApplies: false,
@@ -680,6 +683,7 @@ const FREE_LIMITS: PlanLimits = deepFreeze({
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,
   catalogIntegrityMaxProducts: 2000,
+  forgottenShiftListMax: 50,
   stockInLinesPerRequest: 1,
   stockInLinesPerRequestByCalls: 2,
   callCountingSwitchApplies: true,

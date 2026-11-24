@@ -116,12 +116,13 @@ function harness(sqlite, routeSource = source) {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+    '../lib/shiftLateClose': loadReal('lib/shiftLateClose.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/shiftReconciliation': {
-      shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time' },
+      shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null, SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time', closedLate: 'closed_late' },
       loadShiftReconciliation: async () => ({ marker: 'reconciliation' }),
       loadShiftFigures: async () => ({ marker: 'figures' }),
     },
@@ -164,7 +165,8 @@ function insertShift(sqlite, row) {
  *  this file runs: the today row has to be opened BEFORE "now" for the 409
  *  reproduction to be about the interval rule and not about a future stamp. */
 function earlierTodayIso() {
-  return new Date(Date.now() - 90 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19)
+  const startOfToday = Date.parse(`${new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10)}T00:00:00Z`) - 7 * 3600e3
+  return new Date(Math.max(Date.now() - 90 * 60 * 1000, startOfToday + 1000)).toISOString().replace('T', ' ').slice(0, 19)
 }
 const rowById = (body, id) => (body.shifts || []).find((shift) => shift.id === id)
 
@@ -273,24 +275,27 @@ async function main() {
   const bound = rowById(list.body, stale.id).close_before
   eq(bound, today.opened_at, 'the list states the bound the form will seed from')
 
-  // What the old form sent: the current minute. A later segment exists, so this
-  // is exactly the 409 the operator met on the default press.
-  const clockClose = await app.json('POST', `/${stale.id}/close`, { expected_revision: 0 })
+  // What the old form sent: the current minute. A later segment exists, and the time is on a later day than the stale row's own, so it is
+  // refused (owner A74: an earlier shift is closed at a time on its own day).
+  const clockClose = await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, reason: 'Forgot to close', closed_at: new Date().toISOString() })
   eq(clockClose.status, 409, 'closing the stale row AT THE CLOCK is refused -- the D12 defect, reproduced')
-  eq(clockClose.body.error, 'Closing time overlaps the next shift segment.', 'with the interval sentence')
+  eq(clockClose.body.code, 'shift_late_close_outside_day', 'with the outside-the-day code')
 
-  // What the seeded form sends: a minute before the stated bound.
-  const seeded = new Date(Date.parse(`${bound.replace(' ', 'T')}Z`) - 60_000).toISOString()
-  // Only an administrator picks a past close time; the shift's own cashier closes now.
+  // The stated bound is today's opening, on the next day, so it is outside the stale row's own day whoever sends it.
+  const seeded = new Date(Date.parse(`${bound.replace(' ', 'T')}Z`)).toISOString()
+  eq((await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, reason: 'Forgot to close', closed_at: seeded })).body.code, 'shift_late_close_outside_day', 'the cashier cannot pick a time on the next day')
   const owner = app.state.user
-  eq((await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, closed_at: seeded })).body.code, 'shift_overlaps_next_segment', 'the cashier cannot pick the stated bound: the sent time is ignored and the close is now')
   app.as(ADMIN)
-  const seededClose = await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, closed_at: seeded })
+  eq((await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, reason: 'Forgot to close', closed_at: seeded })).body.code, 'shift_late_close_outside_day', 'nor can an administrator')
+  // The end of the stale row's own day is accepted, and it is before the stated bound.
+  const dayEnd = `${stale.business_date}T16:59:59.000Z`
+  eq(Date.parse(dayEnd) < Date.parse(`${bound.replace(' ', 'T')}Z`), true, 'the end of the day is before the next segment opens')
+  const seededClose = await app.json('POST', `/${stale.id}/close`, { expected_revision: 0, reason: 'Forgot to close', closed_at: dayEnd })
   app.as(owner)
-  eq(seededClose.status, 200, 'and closing it a minute before the STATED bound is accepted')
-  eq(seededClose.body.shift.closed_at, seeded, 'at exactly the moment the form offered')
+  eq(seededClose.status, 200, 'and closing it at the end of its own day is accepted')
+  eq(seededClose.body.shift.closed_at, dayEnd, 'at exactly the moment chosen')
   eq(seededClose.body.shift.close_before, null, 'after which the row is closed and states no bound at all')
-  console.log('  ok - executed: the stated bound is accepted where the clock reading is refused')
+  console.log('  ok - executed: the end of the stale row\'s own day is accepted where the clock reading is refused')
 }
 
 // ==========================================================================

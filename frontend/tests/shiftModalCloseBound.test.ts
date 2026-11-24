@@ -52,6 +52,7 @@ globalThis.window = Object.assign(new EventTarget(), {
 const transportModule = await import('../src/api/shiftTransport.ts')
 const shiftCountRules = await import('../src/components/shifts/shiftCountRules.ts') // the riel rule ShiftGate / ShiftHistoryModal ask
 const formatters = await import('../src/utils/formatters.ts')
+const shiftLateClose = await import('../src/components/shifts/shiftLateClose.ts')
 
 // One account, one branch: a drawer left open on an earlier day, with today's
 // shift already opened after it. That later opening IS the bound.
@@ -59,7 +60,7 @@ const OWN_OPENED_AT = '2026-09-20T01:00:00.000Z'
 const BOUND = '2026-09-21T02:30:00.000Z'
 const openRow = {
   id: 44, shift_code: 'S-20260920-0800-aa11bb', scope_mode: 'per_account', user_id: 7, user_name: 'sopheak',
-  branch_id: 1, branch_name: 'Shop', business_date: '2026-09-20', opened_at: OWN_OPENED_AT,
+  branch_id: 1, branch_name: 'Shop', business_date: new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10), opened_at: OWN_OPENED_AT,
   opening_float_usd: 20, opening_float_khr: 40_000, additional_cash_usd: 0, additional_cash_khr: 0,
   opening_note: null, closed_at: null, closing_counted_usd: null, closing_counted_khr: null, closing_note: null,
   closed_by_user_id: null, closed_by_user_name: null, revision: 0,
@@ -124,6 +125,7 @@ function openCloseForm(source: string, row: Record<string, unknown> = openRow, l
     if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }
     if (name.includes('pos/ShiftGate')) return { SHIFT_BRANCH_CHANGED_EVENT: 'shift-branch', SHIFT_STATE_CHANGED_EVENT: 'shift-state' }
     if (name.includes('shiftCountRules')) return shiftCountRules
+    if (name.includes('shiftLateClose')) return shiftLateClose
     if (name.includes('shiftTransport')) return {
       ...transportModule,
       listShifts: async () => ({ shifts: [listRow], scope: 'all', page: 1, page_size: 20, total: 1 }),
@@ -233,7 +235,7 @@ try {
   eq(unbounded.boundText, null, 'and shows no bound row rather than an empty one')
 
   // ...which is only worth asserting if a row that ALWAYS rendered would show.
-  const alwaysShown = modalSource.replace('{canChooseShiftTime() && selected.close_before ? <p', '{true ? <p')
+  const alwaysShown = modalSource.replace('{!closeIsLate && canChooseShiftTime() && selected.close_before ? <p', '{true ? <p')
   assert.notEqual(alwaysShown, modalSource, 'the bound-row negative control could not find its target')
   const leaking = await openCloseForm(alwaysShown, { ...openRow, close_before: null })
   assert.notEqual(leaking.boundText, null,

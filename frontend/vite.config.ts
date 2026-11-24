@@ -760,6 +760,9 @@ function manualChunks(id: string): string | undefined {
     // The device-approval admin transport (pending/approved lists, approve, replace, shop devices) is imported only by the Users > Devices panel; in the /src/api/ catch-all
     // it rode in app-api-methods, which the storefront loads, and cost the catalog-products closure about 580 bytes of admin-only code.
     if (normalized.endsWith('/src/api/deviceAdminTransport.ts')) return 'device-admin-api'
+    // The shift transport (open, close, late close with its reason, the forgotten-shifts list, history, amend) is imported only by the POS shift gate and the shift screens; in the
+    // /src/api/ catch-all it rode in app-api-methods, which the storefront loads, and the late-close lane's 562 bytes pushed the catalog-products closure past its ceiling.
+    if (normalized.endsWith('/src/api/shiftTransport.ts')) return 'shift-api'
     if (normalized.endsWith('/src/api/userReadTransport.ts')) return 'user-read-api'
     if (normalized.endsWith('/src/api/driveSync.ts')) return 'drive-sync-api'
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'

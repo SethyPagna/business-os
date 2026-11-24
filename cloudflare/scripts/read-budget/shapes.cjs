@@ -134,7 +134,7 @@ function getEntries(ctx) {
     ['fees export first page by cursor (source=all)', '/api/fees?source=all&limit=500&cursor=start'],
     ['fees export middle page by cursor (source=all)', '/api/fees?source=all&limit=500&cursor={{feeCursor}}'],
     ['fees export middle page by cursor with a branch (source=all)', '/api/fees?source=all&limit=500&branch_id=1&cursor={{feeCursor}}'],
-    ['shifts/policy', '/api/shifts/policy'], ['shifts/current', '/api/shifts/current'], ['shifts list', '/api/shifts?page=1&pageSize=20'], ['shifts/:id/history', '/api/shifts/1/history'],
+    ['shifts/policy', '/api/shifts/policy'], ['shifts/current', '/api/shifts/current'], ['shifts list', '/api/shifts?page=1&pageSize=20'], ['shifts forgotten', '/api/shifts?forgotten=1'], ['shifts/:id/history', '/api/shifts/1/history'],
     // branches / promotions / users
     ['branches', '/api/branches'], ['branches/summary', '/api/branches/summary'], ['branches/stock-integrity', '/api/branches/stock-integrity'], ['branches/:id/stock', '/api/branches/1/stock?page=1&pageSize=50'],
     ['promotions/rules/active', '/api/promotions/rules/active'], ['promotions/rules', '/api/promotions/rules'], ['promotions', '/api/promotions'],

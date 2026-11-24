@@ -419,10 +419,10 @@ await test('the gold dot follows what is stored: Settings View to Full moves onl
 
 await test('every module with extras says on its Full dot that the extras are separate', async () => {
   const { surface } = await mountEditor({})
-  for (const id of ['products', 'contacts', 'dashboard', 'backup', 'library']) {
+  for (const id of ['products', 'contacts', 'dashboard', 'backup', 'library', 'pos']) {
     assert.ok((cell(surface, id, 'full').getAttribute('title') ?? '').includes(en.perm_full_main_only), `${id}: Full tooltip`)
   }
-  for (const id of ['pos', 'returns']) assert.ok(!(cell(surface, id, 'full').getAttribute('title') ?? '').includes(en.perm_full_main_only), `${id} has no extras to mention`)
+  for (const id of ['returns']) assert.ok(!(cell(surface, id, 'full').getAttribute('title') ?? '').includes(en.perm_full_main_only), `${id} has no extras to mention`)
   await surface.unmount()
 })
 

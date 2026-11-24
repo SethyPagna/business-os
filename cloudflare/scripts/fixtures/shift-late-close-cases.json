@@ -1,0 +1,52 @@
+{
+  "offsetMinutes": 420,
+  "isLateClose": [
+    { "businessDate": "2026-11-22", "today": "2026-11-23", "late": true },
+    { "businessDate": "2026-11-23", "today": "2026-11-23", "late": false },
+    { "businessDate": "2026-11-01", "today": "2026-11-23", "late": true },
+    { "businessDate": "2026-11-24", "today": "2026-11-23", "late": false },
+    { "businessDate": "2025-12-31", "today": "2026-01-01", "late": true },
+    { "businessDate": "not-a-date", "today": "2026-11-23", "late": false }
+  ],
+  "bounds": [
+    { "businessDate": "2026-11-22", "start": "2026-11-21T17:00:00.000Z", "lastSecond": "2026-11-22T16:59:59.000Z", "endExclusive": "2026-11-22T17:00:00.000Z" },
+    { "businessDate": "2026-12-31", "start": "2026-12-30T17:00:00.000Z", "lastSecond": "2026-12-31T16:59:59.000Z", "endExclusive": "2026-12-31T17:00:00.000Z" },
+    { "businessDate": "2026-03-01", "start": "2026-02-28T17:00:00.000Z", "lastSecond": "2026-03-01T16:59:59.000Z", "endExclusive": "2026-03-01T17:00:00.000Z" },
+    { "businessDate": "22/11/2026", "start": null }
+  ],
+  "reason": [
+    { "input": "Forgot to close", "reason": "Forgot to close" },
+    { "input": "  padded  ", "reason": "padded" },
+    { "input": "", "reason": null },
+    { "input": "   ", "reason": null },
+    { "input": null, "reason": null },
+    { "input": 5, "reason": null },
+    { "repeat": "a", "times": 500, "valid": true },
+    { "repeat": "a", "times": 501, "valid": false }
+  ],
+  "amendment": [
+    { "reason": "Forgot to close", "text": "Late close: Forgot to close" }
+  ],
+  "permission": [
+    { "merged": { "shift_close_forgotten": true }, "admin": false, "allowed": true },
+    { "merged": { "shift_close_forgotten": false }, "admin": false, "allowed": false },
+    { "merged": {}, "admin": false, "allowed": false },
+    { "merged": { "shift_close_forgotten": "true" }, "admin": false, "allowed": false },
+    { "merged": { "shift_close_forgotten": 1 }, "admin": false, "allowed": false },
+    { "merged": { "shift_close_forgotten": "yes" }, "admin": false, "allowed": false },
+    { "merged": {}, "admin": true, "allowed": true },
+    { "merged": { "shift_close_forgotten": false }, "admin": true, "allowed": true }
+  ],
+  "grantUsers": [
+    { "name": "administrator", "role_code": "admin", "permissions": "{\"pos\": true}", "role_permissions": null, "allowed": true },
+    { "name": "all grant", "role_code": "cashier", "permissions": "{\"pos\": true,\"all\": true}", "role_permissions": null, "allowed": true },
+    { "name": "role-level grant (Manager)", "role_code": "manager", "permissions": "{\"pos\": true}", "role_permissions": "{\"shift_close_forgotten\": true}", "allowed": true },
+    { "name": "user-level true", "role_code": "cashier", "permissions": "{\"pos\": true,\"shift_close_forgotten\": true}", "role_permissions": null, "allowed": true },
+    { "name": "user-level true string", "role_code": "cashier", "permissions": "{\"pos\": true,\"shift_close_forgotten\": \"true\"}", "role_permissions": null, "allowed": false },
+    { "name": "user-level numeric 1", "role_code": "cashier", "permissions": "{\"pos\": true,\"shift_close_forgotten\": 1}", "role_permissions": null, "allowed": false },
+    { "name": "user-level false over a role grant", "role_code": "manager", "permissions": "{\"pos\": true,\"shift_close_forgotten\": false}", "role_permissions": "{\"shift_close_forgotten\": true}", "allowed": false },
+    { "name": "review", "role_code": "cashier", "permissions": "{\"pos\": true,\"shift_close_forgotten\": \"review\"}", "role_permissions": null, "allowed": false },
+    { "name": "double-encoded JSON string", "role_code": "cashier", "permissions": "\"{\\\"pos\\\": true,\\\"shift_close_forgotten\\\": true}\"", "role_permissions": "{\"pos\": true}", "allowed": false },
+    { "name": "no grant", "role_code": "cashier", "permissions": "{\"pos\": true}", "role_permissions": null, "allowed": false }
+  ]
+}

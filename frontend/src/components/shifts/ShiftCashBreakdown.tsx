@@ -25,6 +25,7 @@ const REVIEW_KEYS: Record<string, string> = {
   sale_limit_reached: 'shift_review_limit',
   cash_method_unresolved: 'shift_review_cash_method',
   closed_at_earlier_time: 'shift_review_earlier_close',
+  closed_late: 'shift_closed_late',
   opened_at_later_time: 'shift_review_later_open',
   reopened_after_earlier_close: 'shift_review_reopened_after_earlier_close',
 }

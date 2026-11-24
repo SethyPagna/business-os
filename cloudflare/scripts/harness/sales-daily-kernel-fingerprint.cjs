@@ -10,6 +10,9 @@
 // The plan-limit tables of src/lib/planTier.ts are deep-frozen where they are declared (deepFreeze({ ... }), the only declaration form accepted), so nothing can write to a limit at run time, and they are the one place hashed per KEY, not whole: only the limit keys that kernel code reads (getPlanLimits(env).key) are hashed, so a limit the kernel does not read
 // can change without a version bump. The keys are DERIVED by a scan of every closure file, which refuses (red, and never pinnable) every use of a limit table other than that one read form.
 //
+// The switch list of src/lib/readSwitches.ts (KNOWN_READ_SWITCHES) is hashed the same way: its shape (the array's string elements left out) plus one entry per switch name the kernel reads, derived by a scan of every other closure file that refuses every other way of naming a switch.
+// A switch name must be a string literal or a same-file top-level const bound to one; a parameter, a local (destructured ones included), a property, a template or any other expression is refused, and a closure file may import from readSwitches.ts only the switch readers the scan checks (type-only imports aside).
+// The harness does not read types or type assertions (as any and as never pass through it): reportAtomicMode clamps whatever value arrives to report_atomic or report_atomic_long, so the derived names are all the kernel can read.
 // A pin file (scripts/sales-daily-kernel-pin.json) holds the per-statement hashes for the kernel version in force and an append-only history of
 // { version, aggregate }. node scripts/harness/sales-daily-kernel-fingerprint.cjs --write-pin refuses to write a changed aggregate under a version that
 // already has one, so a kernel change cannot be re-pinned without bumping SALES_DAILY_KERNEL_VERSION (which re-covers and re-computes every stored day).
@@ -26,7 +29,9 @@ const VERSION_FILE = 'src/lib/salesDailyTotals.ts'
 
 const PLAN_TIER_FILE = 'src/lib/planTier.ts'
 const LIMIT_TABLES = ['PAID_LIMITS', 'FREE_LIMITS']
-const GUARDED = new Set(['getPlanLimits', 'PLAN_LIMITS_BY_TIER', 'PAID_LIMITS', 'FREE_LIMITS', 'PlanLimits'])
+const SWITCH_FILE = 'src/lib/readSwitches.ts'
+const SWITCH_LIST = 'KNOWN_READ_SWITCHES'
+const GUARDED =new Set(['getPlanLimits', 'PLAN_LIMITS_BY_TIER', 'PAID_LIMITS', 'FREE_LIMITS', 'PlanLimits'])
 
 const sha = (text) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 20)
 const norm = (text) => text.replace(/\r\n/g, '\n')
@@ -51,12 +56,12 @@ const isConstant = (e) => ts.isNumericLiteral(e) || ts.isStringLiteral(e) || ts.
   || (ts.isPrefixUnaryExpression(e) && e.operator === ts.SyntaxKind.MinusToken && isConstant(e.operand)) || (ts.isParenthesizedExpression(e) && isConstant(e.expression))
   || (ts.isBinaryExpression(e) && [ts.SyntaxKind.AsteriskToken, ts.SyntaxKind.PlusToken, ts.SyntaxKind.MinusToken, ts.SyntaxKind.SlashToken].includes(e.operatorToken.kind) && isConstant(e.left) && isConstant(e.right))
 
-function shapeTokens(node, sf, obj, out) {
-  if (node === obj) { out.push('{', '}'); return }
+function shapeTokens(node, sf, obj, out, open = '{', close = '}') {
+  if (node === obj) { out.push(open, close); return }
   if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return
   const kids = node.getChildren(sf)
   if (!kids.length) { out.push(node.getText(sf)); return }
-  for (const kid of kids) shapeTokens(kid, sf, obj, out)
+  for (const kid of kids) shapeTokens(kid, sf, obj, out, open, close)
 }
 
 /** The object literal of `deepFreeze({ ... })` (the one form a limit table is declared in: the tables are frozen at run time, see planTier.ts), or null for any other expression. */
@@ -90,7 +95,7 @@ function limitTable(stmt, sf, keys, rel, refusals) {
 }
 
 /** The hashes of one file with its refusals: { imports, decls, refusals }. Duplicate names get a numbered suffix (overloads). `limitKeys` (only with rel = planTier.ts) narrows the two limit tables. */
-function hashFile(text, rel, limitKeys) {
+function hashFile(text, rel, limitKeys, switchNames) {
   const sf = ts.createSourceFile('kernel.ts', norm(text), ts.ScriptTarget.ES2022, true)
   const decls = {}
   const imports = []
@@ -101,6 +106,8 @@ function hashFile(text, rel, limitKeys) {
     let name = statementName(stmt, sf, index)
     for (let n = 2; decls[name]; n += 1) name = `${statementName(stmt, sf, index)} (${n})`
     const narrowed = rel === PLAN_TIER_FILE && limitKeys ? limitTable(stmt, sf, limitKeys, rel, refusals) : null
+    const narrowedList = !narrowed && rel === SWITCH_FILE && switchNames ? switchTable(stmt, sf, switchNames, rel, refusals) : null
+    if (narrowedList) { decls[name] = narrowedList.shape; for (const n of Object.keys(narrowedList.entries)) decls[`${name}.${n}`] = narrowedList.entries[n]; return }
     if (!narrowed) { decls[name] = tokenHash(stmt, sf); return }
     decls[name] = narrowed.shape
     for (const key of Object.keys(narrowed.entries)) decls[`${name}.${key}`] = narrowed.entries[key]
@@ -109,8 +116,8 @@ function hashFile(text, rel, limitKeys) {
 }
 
 /** The hashes of one file: { imports, decls: { name: hash } }, every statement whole unless rel and limitKeys narrow the plan-limit tables. */
-function fileHashes(text, rel, limitKeys) {
-  const { imports, decls } = hashFile(text, rel, limitKeys)
+function fileHashes(text, rel, limitKeys, switchNames) {
+  const { imports, decls } = hashFile(text, rel, limitKeys, switchNames)
   return { imports, decls }
 }
 
@@ -179,6 +186,142 @@ function limitReads(text, rel) {
   return { keys, refusals }
 }
 
+/** The `const X = '<literal>'` statements of a file's top level: Map identifier -> literal. */
+function topLiteralConsts(sf) {
+  const out = new Map()
+  for (const st of sf.statements) if (ts.isVariableStatement(st) && (st.declarationList.flags & ts.NodeFlags.Const)) for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name) && d.initializer && ts.isStringLiteral(d.initializer)) out.set(d.name.text, d.initializer.text)
+  return out
+}
+/**
+ * What `name` means at `node`: { kind: 'param' } | { kind: 'local' } | null (not bound by a function, block, loop or catch around it). A name inside a binding pattern (a destructured parameter or local) is bound;
+ * a destructured parameter counts as a local. A top-level const is bound by none of these, so a binding of the same name anywhere around the use means it is not that const.
+ */
+function bindingOf(node, name) {
+  const binds = (b) => (ts.isIdentifier(b) ? b.text === name : (ts.isObjectBindingPattern(b) || ts.isArrayBindingPattern(b)) ? b.elements.some((e) => !ts.isOmittedExpression(e) && binds(e.name)) : false)
+  const scope = (n) => ts.isFunctionLike(n) || ts.isBlock(n) || ts.isCaseBlock(n) || ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) || ts.isCatchClause(n)
+  const declares = (x) => (ts.isVariableDeclaration(x) && binds(x.name)) || ((ts.isFunctionDeclaration(x) || ts.isClassDeclaration(x)) && !!x.name && x.name.text === name)
+  for (let n = node.parent; n; n = n.parent) {
+    if (!scope(n)) continue
+    const param = ts.isFunctionLike(n) ? n.parameters.find((p) => binds(p.name)) : null
+    if (param) return { kind: ts.isIdentifier(param.name) ? 'param' : 'local' }
+    let local = false
+    const scan = (x) => { if (declares(x)) local = true; if (!local) ts.forEachChild(x, scan) }
+    const root = ts.isFunctionLike(n) ? n.body : n
+    if (root) scan(root)
+    if (local) return { kind: 'local' }
+  }
+  return null
+}
+
+/**
+ * The switch names one argument stands for: { names: [...] } or { why } (a refusal). Accepted forms: a string literal; an identifier bound to a top-level const literal in the same file. Nothing else:
+ * the kernel's read must name its switches itself (reportAtomicMode clamps whatever value arrives to report_atomic or report_atomic_long).
+ */
+function switchArg(arg, sf) {
+  if (ts.isStringLiteral(arg)) return { names: [arg.text] }
+  if (ts.isIdentifier(arg)) {
+    const bound = bindingOf(arg, arg.text)
+    if (bound) return { why: bound.kind === 'param' ? `switch name ${arg.text} is a parameter` : `switch name ${arg.text} is a local, not a top-level const bound to a string literal` }
+    const consts = topLiteralConsts(sf)
+    return consts.has(arg.text) ? { names: [consts.get(arg.text)] } : { why: `switch name ${arg.text} is not a top-level const bound to a string literal` }
+  }
+  if (ts.isTemplateLiteral(arg)) return { why: 'switch name is a template literal' }
+  return { why: `switch name is ${ts.SyntaxKind[arg.kind]}, not a string literal or a top-level const bound to one` }
+}
+
+/** The functions exported by readSwitches.ts that take a switch name: Map name -> argument index (a parameter called ...name..., or typed ReadSwitchName). */
+function switchTakers(text) {
+  const sf = ts.createSourceFile(SWITCH_FILE, norm(text), ts.ScriptTarget.ES2022, true)
+  const out = new Map()
+  const isTaker = (p) => ts.isIdentifier(p.name) && (/name/i.test(p.name.text) || (p.type && p.type.getText(sf).includes('ReadSwitchName')))
+  const exported = (st) => ts.canHaveModifiers(st) && (ts.getModifiers(st) || []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+  for (const st of sf.statements) {
+    if (!exported(st)) continue
+    const fns = ts.isFunctionDeclaration(st) && st.name ? [[st.name.text, st]] : ts.isVariableStatement(st) ? st.declarationList.declarations.filter((d) => ts.isIdentifier(d.name) && d.initializer && (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))).map((d) => [d.name.text, d.initializer]) : []
+    for (const [name, fn] of fns) { const at = fn.parameters.findIndex(isTaker); if (at >= 0) out.set(name, at) }
+  }
+  return out
+}
+
+/**
+ * The kernel-read switch names of one closure file other than readSwitches.ts: { names: [{ name, at, line }], refusals }.
+ * Every call to a function of readSwitches.ts that takes a switch name must pass it in an accepted form (switchArg); every other route to the list or the functions is a refusal.
+ */
+function switchReads(text, rel, takers) {
+  const sf = ts.createSourceFile(rel, norm(text), ts.ScriptTarget.ES2022, true)
+  const lines = sf.text.split('\n')
+  const names = []
+  const refusals = []
+  const refuse = (node, why) => refusals.push(`${rel}:${lineOf(node, sf)}: refused: ${why}`)
+  const locals = new Set()
+  const isSwitchSpec = (spec) => spec.startsWith('.') && path.posix.join(path.posix.dirname(rel), spec).replace(/\.ts$/, '') === SWITCH_FILE.replace(/\.ts$/, '')
+  const imports = (node) => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) && isSwitchSpec(node.moduleSpecifier.text)) {
+      if (ts.isExportDeclaration(node)) refuse(node, 're-exports readSwitches')
+      else {
+        const clause = node.importClause
+        if (clause && (clause.name || (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)))) refuse(node, 'default or namespace import of readSwitches')
+        if (clause && clause.namedBindings && ts.isNamedImports(clause.namedBindings)) for (const el of clause.namedBindings.elements) {
+          const imported = (el.propertyName || el.name).text
+          if (el.isTypeOnly || clause.isTypeOnly) continue
+          if (el.propertyName && (takers.has(imported) || imported === SWITCH_LIST)) refuse(el, `aliased import ${imported}`)
+          else if (!takers.has(imported)) refuse(el, `imports ${imported} from readSwitches, which is not a switch reader the scan checks`)
+          else locals.add(el.name.text)
+        }
+      }
+    }
+    ts.forEachChild(node, imports)
+  }
+  imports(sf)
+  const visit = (node) => {
+    if (isDynamicImport(node) && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0]) && isSwitchSpec(node.arguments[0].text)) refuse(node, 'dynamic import of readSwitches')
+    if (ts.isIdentifier(node) && node.text === SWITCH_LIST) refuse(node, `uses ${SWITCH_LIST}`)
+    if (ts.isIdentifier(node) && locals.has(node.text) && !ts.isImportSpecifier(node.parent)) {
+      const p = node.parent
+      if (!(ts.isCallExpression(p) && p.expression === node)) refuse(node, `${node.text} used other than called directly`)
+      else {
+        const arg = p.arguments[takers.get(node.text)]
+        if (!arg) refuse(node, `${node.text} called without its switch name argument`)
+        else {
+          const r = switchArg(arg, sf)
+          if (r.why) refuse(arg, r.why)
+          else {
+            for (const name of r.names) names.push({ name, at: `${rel}:${lineOf(arg, sf)}`, line: lines[lineOf(arg, sf) - 1].trim() })
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return { names, refusals }
+}
+
+/** The list statement as its shape (the array's string elements left out) plus one entry per kernel-read name that is in it, or null (not the list statement, or refused). */
+function switchTable(stmt, sf, names, rel, refusals) {
+  if (!ts.isVariableStatement(stmt)) return null
+  const first = stmt.declarationList.declarations[0]
+  if (!first || !ts.isIdentifier(first.name) || first.name.text !== SWITCH_LIST) return null
+  const refuse = (node, why) => refusals.push(`${rel}:${lineOf(node, sf)}: refused: ${why}`)
+  let e = first.initializer
+  while (e && (ts.isAsExpression(e) || ts.isParenthesizedExpression(e) || ts.isSatisfiesExpression(e))) e = e.expression
+  if (stmt.declarationList.declarations.length !== 1 || !e || !ts.isArrayLiteralExpression(e)) { refuse(stmt, `${SWITCH_LIST} is not a single declaration initialised by an array literal`); return null }
+  const present = new Map()
+  let ok = true
+  for (const el of e.elements) {
+    if (!ts.isStringLiteral(el)) { refuse(el, `${SWITCH_LIST} holds an element that is not a string literal`); ok = false; continue }
+    if (present.has(el.text)) { refuse(el, `${SWITCH_LIST} holds ${el.text} twice`); ok = false }
+    present.set(el.text, el)
+  }
+  for (const name of names) if (!present.has(name)) { refuse(stmt, `the kernel reads switch ${name}, which is not in ${SWITCH_LIST}`); ok = false }
+  if (!ok) return null
+  const out = []
+  shapeTokens(stmt, sf, e, out, '[', ']')
+  const entries = {}
+  for (const name of names) entries[name] = tokenHash(present.get(name), sf)
+  return { shape: sha(out.join('\u0001')), entries }
+}
+
 /**
  * Every relative module this file pulls in at run time, as posix paths without extension: static imports, re-exports (`export { x } from './m'`,
  * `export * from './m'`) and dynamic `import('./m')` with a string literal, found anywhere in the file (function bodies included). Type-only imports and
@@ -234,15 +377,24 @@ function fingerprint(overrides, walkOpts) {
     refusals.push(...scan.refusals)
   }
   const limitKeys = [...new Set(limitReadList.map((r) => r.key))].sort()
+  const takers = SWITCH_FILE in texts ? switchTakers(texts[SWITCH_FILE]) : new Map()
+  const switchReadList = []
   for (const rel of Object.keys(texts)) {
-    const hashed = hashFile(texts[rel], rel, limitKeys)
+    if (rel === SWITCH_FILE) continue
+    const scan = switchReads(texts[rel], rel, takers)
+    switchReadList.push(...scan.names.map((n) => ({ ...n, file: rel })))
+    refusals.push(...scan.refusals)
+  }
+  const switchNames = [...new Set(switchReadList.map((r) => r.name))].sort()
+  for (const rel of Object.keys(texts)) {
+    const hashed = hashFile(texts[rel], rel, limitKeys, switchNames)
     files[rel] = { imports: hashed.imports, decls: hashed.decls }
     refusals.push(...hashed.refusals)
   }
   const sorted = Object.keys(files).sort()
   refusals.splice(0, refusals.length, ...new Set(refusals))
   const aggregate = sha(sorted.map((f) => `${f}\u0002${files[f].imports}\u0002${Object.keys(files[f].decls).sort().map((k) => `${k}=${files[f].decls[k]}`).join('\u0003')}`).join('\u0004'))
-  return { files: Object.fromEntries(sorted.map((f) => [f, files[f]])), aggregate, texts, limitKeys, limitReads: limitReadList, refusals }
+  return { files: Object.fromEntries(sorted.map((f) => [f, files[f]])), aggregate, texts, limitKeys, limitReads: limitReadList, switchNames, switchReads: switchReadList, switchTakers: Object.fromEntries(takers), refusals }
 }
 
 /** Every difference between two fingerprints, as readable lines (what was changed, added, removed). */
@@ -297,4 +449,4 @@ if (require.main === module) {
   console.log(`pinned version ${version}, aggregate ${now.aggregate}, ${Object.keys(now.files).length} files`)
 }
 
-module.exports = { historyGap, fingerprint, diff, fileHashes, limitReads, pinWrite, relativeImports, readPin, currentVersion, kernelVersionOf, ENTRY, VERSION_FILE, ROOT, PIN_FILE }
+module.exports = { historyGap, fingerprint, diff, fileHashes, limitReads, switchReads, switchTakers, pinWrite, relativeImports, readPin, currentVersion, kernelVersionOf, ENTRY, VERSION_FILE, ROOT, PIN_FILE }

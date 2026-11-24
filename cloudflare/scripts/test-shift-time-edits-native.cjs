@@ -116,8 +116,8 @@ async function main() {
       assert.deepEqual(await rowOf(id), row, `${label}: the shift row is untouched`)
       assert.equal(await amendmentCount(id), journal, `${label}: nothing was journaled`)
     }
-    const refused = (label, response, code) => {
-      assert.equal(response.status, 409, `${label}: ${response.text}`)
+    const refused = (label, response, code, status = 409) => {
+      assert.equal(response.status, status, `${label}: ${response.text}`)
       assert.equal(response.json.code, code, `${label}: ${response.text}`)
       assert.ok(response.json.error, `${label}: carries an English fallback`)
     }
@@ -373,7 +373,7 @@ async function main() {
     })
 
     // ---- S2: an earlier day's drawer left open behind today's shift ---------------------------------------
-    await check('S2: the cashier cannot close the stale drawer (translated code, nothing written); the administrator is told once, with no amount, and can close it', async () => {
+    await check('S2: the cashier closes the stale drawer only with a reason and a time on its own day (translated code, nothing written otherwise); the administrator is told once, with no amount', async () => {
       await setting('telegram_language', 'both')
       const staleOpened = new Date(Date.now() - 26 * 60 * MIN).toISOString()
       await db.prepare(`INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr,
@@ -388,32 +388,34 @@ async function main() {
       const registered = await call('s2a', 'POST', '/open', { branch_id: 1, opening_float_usd: 20, opening_float_khr: 0 })
       assert.equal(registered.status, 201, registered.text)
       await waitFor('the administrator alert', () => telegramSent.slice(mark).some((message) => message.text.includes('S-STALE-S2')))
-      const alert = telegramSent.slice(mark).map((message) => message.text).find((text) => text.includes('S-STALE-S2') && /administrator must close it/.test(text))
-      assert.ok(alert, 'the alert says an administrator must close the earlier shift')
-      assert.ok(alert.includes('អ្នកគ្រប់គ្រងត្រូវមកបិទ'), 'in Khmer too')
+      const alert = telegramSent.slice(mark).map((message) => message.text).find((text) => text.includes('S-STALE-S2') && /Close it in the POS with a reason/.test(text))
+      assert.ok(alert, 'the alert says the earlier shift is closed in the POS with a reason')
+      assert.ok(alert.includes('សូមបិទវានៅក្នុង POS ជាមួយមូលហេតុ'), 'in Khmer too')
       assert.equal(/[$៛]/.test(alert), false, 'and carries no amount')
       assert.equal((await call('s2a', 'POST', '/open', { branch_id: 1, opening_float_usd: 20, opening_float_khr: 0 })).status, 200, 'a second open call is only the existing registration')
       await new Promise((done) => setTimeout(done, 400))
-      assert.equal(telegramSent.slice(mark).filter((message) => message.text.includes('S-STALE-S2') && /administrator must close it/.test(message.text)).length, 1, 'said once')
+      assert.equal(telegramSent.slice(mark).filter((message) => message.text.includes('S-STALE-S2') && /Close it in the POS with a reason/.test(message.text)).length, 1, 'said once')
 
       await db.prepare("UPDATE shift_sessions SET opened_at=? WHERE user_id=? AND shift_code != 'S-STALE-S2'").bind(new Date(Date.now() - 30 * MIN).toISOString(), people.s2a.id).run()
       const after = await call('s2a', 'GET', '/current?branch_id=1')
       const closeBefore = after.json.previous_open_close_before
       assert.ok(closeBefore, 'now today\'s shift follows the stale drawer and the server states the bound')
-      await untouched('stale close by the cashier', stale, async () => {
-        refused('close now', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_overlaps_next_segment')
-        refused('close at the seed', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_overlaps_next_segment')
+      await untouched('stale close by the cashier without a reason, on another day, or with a count', stale, async () => {
+        refused('close without a reason', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0 }), 'shift_late_reason_required', 400)
+        refused('close at the seed', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, reason: 'Forgot to close', closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString() }), 'shift_late_close_outside_day')
+        refused('close with a count while today is open', await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, reason: 'Forgot to close', closing_counted_usd: 50, closing_counted_khr: 0 }), 'shift_late_close_not_counted', 400)
       })
       const todays = (await first("SELECT id, revision FROM shift_sessions WHERE user_id=? AND shift_code != 'S-STALE-S2'", people.s2a.id))
       await untouched('end of today while the earlier drawer is open', todays.id, async () => {
         const ended = await call('s2a', 'POST', `/${todays.id}/close`, { expected_revision: todays.revision, closing_counted_usd: 20, closing_counted_khr: 0 })
-        refused('employee ends today', ended, 'shift_earlier_admin_must_close_first')
-        assert.equal(ended.json.error, 'An administrator must close the earlier shift first.')
+        refused('employee ends today', ended, 'shift_earlier_close_first')
+        assert.equal(ended.json.error, 'Close the earlier shift first.')
         const adminEnds = await call('admin', 'POST', `/${todays.id}/close`, { expected_revision: todays.revision, closing_counted_usd: 20, closing_counted_khr: 0 })
         refused('administrator ends today', adminEnds, 'shift_overlaps_previous_segment')
       })
-      const closed = await call('admin', 'POST', `/${stale}/close`, { expected_revision: 0, closed_at: new Date(Date.parse(closeBefore) - MIN).toISOString(), closing_counted_usd: 50, closing_counted_khr: 0 })
+      const closed = await call('s2a', 'POST', `/${stale}/close`, { expected_revision: 0, reason: 'Forgot to close' })
       assert.equal(closed.status, 200, closed.text)
+      assert.ok((await rowOf(stale)).closed_at.endsWith('T16:59:59.000Z'), 'closed at 23:59:59 on its own day')
     })
 
     // ---- F3: said once per stale drawer, not once per registration ------------------------------------------
@@ -424,7 +426,7 @@ async function main() {
           opening_float_usd_registered,opening_float_khr_registered)
         VALUES('S-STALE-F3','per_account',?,?,1,'Shop',date(?, '+7 hours'),?,50,0,1,1)`)
         .bind(people.s2b.id, 'cashier_s2b', staleOpened, staleOpened).run()
-      const announced = () => telegramSent.filter((message) => message.text.includes('S-STALE-F3') && /administrator must close it/.test(message.text)).length
+      const announced = () => telegramSent.filter((message) => message.text.includes('S-STALE-F3') && /Close it in the POS with a reason/.test(message.text)).length
       const firstRegistration = await call('s2b', 'POST', '/open', { branch_id: 1, opening_float_usd: 20, opening_float_khr: 0 })
       assert.equal(firstRegistration.status, 201, firstRegistration.text)
       await waitFor('the first announcement', () => announced() === 1)

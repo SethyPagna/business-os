@@ -20,7 +20,7 @@ export function setReportShadowSamplerForTests(next: (() => number) | null): voi
 }
 
 export async function reportAtomicMode(env: Env, name: ReportAtomicSwitchName = REPORT_ATOMIC_SWITCH): Promise<ReportAtomicMode> {
-  const reading = await readSwitchState(env, name)
+  const reading = name === REPORT_ATOMIC_LONG_SWITCH ? await readSwitchState(env, REPORT_ATOMIC_LONG_SWITCH) : await readSwitchState(env, REPORT_ATOMIC_SWITCH)
   if (reading.state === 'on') return 'on'
   if (reading.state !== 'shadow' || resolvePlanTier(env) === 'free') return 'off'
   return sampler() < reading.rate ? 'shadow' : 'off'

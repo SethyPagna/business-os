@@ -112,7 +112,7 @@ export default function ShiftReport(p: ReportViewProps) {
     if (!shift) return
     openPrintExport({
       title: `${tr('shift_report', 'Shift Report')} · ${shift.shift_code}`,
-      subtitle: `${shift.user_name || tr('shift_staff', 'Staff')} · ${shift.branch_name || tr('all_branches', 'All branches')}`,
+      subtitle: [fmtDateOnly(shift.business_date), shift.shift_code, shift.user_name || tr('shift_staff', 'Staff'), shift.branch_name || tr('all_branches', 'All branches')].join(' · '),
       headers: ['Section', 'Line', 'USD', 'KHR'],
       rows,
     })

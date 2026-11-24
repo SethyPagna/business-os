@@ -44,7 +44,7 @@ const actual = new Set([
   'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate', 'saleRecordEvents', 'saleTransitions',
   'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'failureText', 'branchWrites',
   'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions',
-  'shiftReconciliation', 'salesAnalytics', 'nativeSaleChange', 'businessDateWindow', 'continuousReadWindow', 'clientTimestamp',
+  'shiftReconciliation', 'shiftLateClose', 'salesAnalytics', 'nativeSaleChange', 'businessDateWindow', 'continuousReadWindow', 'clientTimestamp',
   'telegramLang', 'schemaProbe', 'removalLosses', 'moneyPrecision', 'reportMoneyPrecision', 'saleMoneyPrecision',
   'refundMoneyPrecision', 'customerReturnEntitlement', 'saleItemPricing', 'promotionRules', 'saleTotals', 'financialPrecision',
   // the Telegram report itself, real: its message text is part of the parity
@@ -128,7 +128,8 @@ function fixture() {
 }
 
 // ---- a fixed clock, so two worlds that run the same day print the same text ----------------------------------------------------------------------------------
-const FIXED_NOW = Date.UTC(2026, 9, 20, 10, 0, 0) // 2026-10-20 10:00:00 UTC = 17:00 Phnom Penh
+const DEFAULT_NOW = Date.UTC(2026, 9, 20, 10, 0, 0) // 2026-10-20 10:00:00 UTC = 17:00 Phnom Penh
+let FIXED_NOW = DEFAULT_NOW // a scenario may move it (seededDay sets it), so a long day still opens and closes on one business date
 const RealDate = Date
 class FixedDate extends RealDate {
   constructor(...args) { if (args.length === 0) super(FIXED_NOW); else super(...args) }
@@ -153,7 +154,8 @@ let OPENED = new RealDate(FIXED_NOW - 8 * 3600 * 1000) // 09:00 Phnom Penh
 const sqlTime = (minutesAfterOpen) => new RealDate(OPENED.getTime() + minutesAfterOpen * 60000).toISOString().replace('T', ' ').slice(0, 19)
 
 /** Open a cashier shift backdated eight hours and fill the window with every kind of money the drawer and the report carry. */
-async function seededDay(shifts, { shopWide = false, hours = 8, telegramOn = true } = {}) {
+async function seededDay(shifts, { shopWide = false, hours = 8, telegramOn = true, now = DEFAULT_NOW } = {}) {
+  FIXED_NOW = now
   OPENED = new RealDate(FIXED_NOW - hours * 3600 * 1000)
   const f = fixture()
   if (!telegramOn) f.sql.prepare("UPDATE settings SET value = 'false' WHERE key = 'telegram_automation_enabled'").run()
@@ -188,9 +190,9 @@ async function seededDay(shifts, { shopWide = false, hours = 8, telegramOn = tru
   return { f, id, revision: opened.body.shift.revision }
 }
 
-async function runClose(load, { shopWide = false, requestId = 'req-close-0000000001', hook, hours = 8, telegramOn = true, refuse = 0, afterClose } = {}) {
+async function runClose(load, { shopWide = false, requestId = 'req-close-0000000001', hook, hours = 8, telegramOn = true, refuse = 0, afterClose, now } = {}) {
   const shifts = load('routes/shifts.ts').default
-  const { f, id, revision } = await seededDay(shifts, { shopWide, hours, telegramOn })
+  const { f, id, revision } = await seededDay(shifts, { shopWide, hours, telegramOn, now })
   load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
   if (hook) hook(f)
   user = ADMIN
@@ -199,7 +201,7 @@ async function runClose(load, { shopWide = false, requestId = 'req-close-0000000
   try {
     f.log.length = 0; f.calls = 0; f.refuseAfter = refuse
     close = await withFixedClock(async () => {
-      const response = await f.call(shifts, `/${id}/close`, { client_request_id: requestId, expected_revision: revision, closing_counted_usd: 100, closing_counted_khr: 41000 })
+      const response = await f.call(shifts, `/${id}/close`, { client_request_id: requestId, expected_revision: revision, closing_counted_usd: 100, closing_counted_khr: 41000, reason: 'Forgot to close' })
       await Promise.all(f.background)
       return response
     })
@@ -227,8 +229,10 @@ const insertMovement = (f, createdAt) => f.sql.prepare(`INSERT INTO inventory_mo
 const SCENARIOS = [
   { name: 'per-account, rich day' },
   { name: 'shop-wide, rich day', shopWide: true },
-  { name: 'overnight 20 h', hours: 20 },
-  { name: 'overnight 50 h', hours: 50 },
+  // 23:50 Phnom Penh with the opening 20 h earlier: one business day, so the close is a same-day close the base commit also produces.
+  { name: 'overnight 20 h', hours: 20, now: Date.UTC(2026, 9, 20, 16, 50, 0) },
+  // 50 h cannot be one business day: it is a late close (closed_at = the day's last second, review closed_late), which the base cannot produce.
+  { name: 'overnight 50 h', hours: 50, lateClose: true },
   { name: 'Telegram off', telegramOn: false },
   { name: 'a cancelled sale', hook: (f) => f.sql.prepare("UPDATE sales SET sale_status = 'cancelled' WHERE id = 3").run() },
   { name: 'Not Paid sale with riel, paid later inside the shift', hook: (f) => {
@@ -357,12 +361,41 @@ async function closePair(load, mode) {
 const scrub = (text) => text.replace(/S-\d{8}-\d{4}-/g, 'S-DATE-')
 const normalizeBody = (body) => scrub(JSON.stringify(body, (key, value) => (key === 'updated_at' ? undefined : value)))
 const texts = (run) => scrub(JSON.stringify(run.telegram))
+// A late close (a close on a later Cambodia day than the shift's) is stamped at the business day's last second and reviewed closed_late: the base cannot produce either.
+// Only those facts are set aside before the comparison with the base; every other field and character still has to match.
+const LATE_REVIEW_CODE = 'closed_late'
+const withoutLateFacts = (value) => {
+  const copy = JSON.parse(JSON.stringify(value))
+  const shift = copy && copy.shift
+  if (shift) {
+    delete shift.closed_at
+    if (shift.reconciliation) { delete shift.reconciliation.needs_review; if (Array.isArray(shift.reconciliation.review_codes)) shift.reconciliation.review_codes = shift.reconciliation.review_codes.filter((code) => code !== LATE_REVIEW_CODE) }
+  }
+  return copy
+}
+const figuresWithoutLateFacts = (json) => {
+  if (!json) return json
+  const figures = JSON.parse(json)
+  // The stored window ends where the shift closed: the same closed_at fact, checked on its own below.
+  if (figures && figures.window) delete figures.window.closed_at
+  return JSON.stringify(figures, (key, val) => key === 'needs_review' ? undefined : key === 'review_codes' && Array.isArray(val) ? val.filter((code) => code !== LATE_REVIEW_CODE) : val)
+}
+const NL = String.fromCharCode(10)
+const CLOSED_LATE_ROW = new RegExp('Closed late|បិទយឺត')
+// Rows start with the bullet "· ". The close-time row is "· Close/បិទ: <date time>".
+const CLOSE_ROW = new RegExp('^\\W*Close/បិទ:')
+// telegram.ts leaves out "Closed by" when the "Closed late by" row already names the same account, so the base's row is set aside too.
+const CLOSED_BY_ROW = new RegExp('^\\W*Closed by/បិទដោយ:')
+const HAS_ZONE = /(Z|[+-]\d\d:\d\d)$/i
+const textsWithoutLateFacts = (run) => scrub(JSON.stringify(run.telegram.map((message) => message.split(NL).filter((row) => !CLOSED_LATE_ROW.test(row) && !CLOSE_ROW.test(row) && !CLOSED_BY_ROW.test(row)).join(NL))))
+const businessDayLastSecondMs = (businessDate) => Date.parse(businessDate + 'T00:00:00Z') - 7 * 3600e3 + 24 * 3600e3 - 1000
+const toMs = (stamp) => Date.parse(HAS_ZONE.test(String(stamp)) ? String(stamp) : String(stamp).replace(' ', 'T') + 'Z')
 async function main() {
   const base = createLoader({}, BASE_REF)
   const head = createLoader()
   const runs = []
   for (const scenario of SCENARIOS) {
-    const options = { shopWide: scenario.shopWide, hours: scenario.hours, telegramOn: scenario.telegramOn, hook: scenario.hook, afterClose: scenario.afterClose }
+    const options = { shopWide: scenario.shopWide, hours: scenario.hours, telegramOn: scenario.telegramOn, hook: scenario.hook, afterClose: scenario.afterClose, now: scenario.now }
     const requestId = 'req-close-0000000001'
     const oldRun = await runClose(base, { ...options, requestId })
     const newRun = await runClose(head, { ...options, requestId, refuse: 50 })
@@ -381,6 +414,13 @@ async function main() {
     for (const { scenario, oldRun, newRun } of runs) {
       assert.equal(oldRun.close.status, 200, `${scenario.name}: base ${JSON.stringify(oldRun.close.body)}`)
       assert.equal(newRun.close.status, 200, `${scenario.name}: ${JSON.stringify(newRun.close.body)}`)
+      if (scenario.lateClose) {
+        assert.equal(normalizeBody(withoutLateFacts(newRun.close.body)), normalizeBody(withoutLateFacts(oldRun.close.body)), `${scenario.name}: the close response, apart from closed_at and the closed_late review`)
+        assert.equal(figuresWithoutLateFacts(newRun.figures), figuresWithoutLateFacts(oldRun.figures), `${scenario.name}: shift_close_figures.figures_json, apart from the closed_late review`)
+        assert.equal(textsWithoutLateFacts(newRun), textsWithoutLateFacts(oldRun), `${scenario.name}: the Telegram report text, apart from the Close row and the Closed late reason`)
+        assert.equal(newRun.telegram.length > 0, scenario.telegramOn !== false, `${scenario.name}: the report was sent exactly when Telegram is on`)
+        continue
+      }
       assert.equal(normalizeBody(newRun.close.body), normalizeBody(oldRun.close.body), `${scenario.name}: the close response`)
       assert.equal(newRun.figures, oldRun.figures, `${scenario.name}: shift_close_figures.figures_json`)
       if (scenario.drawerOnly) continue // the sales-side lines of a write that lands after the close are checked below
@@ -390,6 +430,26 @@ async function main() {
       assert.equal(newRun.telegram.length > 0, scenario.telegramOn !== false, `${scenario.name}: the report was sent exactly when Telegram is on`)
     }
   })
+  await check('A LATE CLOSE (overnight 50 h): closed_at is 23:59:59 Cambodia of its business day and the review says closed_late', () => {
+    const late = runs.filter(({ scenario }) => scenario.lateClose)
+    assert.ok(late.length > 0, 'a late-close scenario exists')
+    for (const { scenario, newRun } of late) {
+      const shift = newRun.close.body.shift
+      assert.equal(toMs(shift.closed_at), businessDayLastSecondMs(shift.business_date), `${scenario.name}: closed_at ${shift.closed_at} for business day ${shift.business_date}`)
+      assert.ok(shift.business_date < '2026-10-20', `${scenario.name}: the shift is from an earlier business day`)
+      assert.ok(shift.reconciliation.review_codes.includes(LATE_REVIEW_CODE), `${scenario.name}: review code ${JSON.stringify(shift.reconciliation.review_codes)}`)
+      assert.equal(shift.reconciliation.needs_review, true, `${scenario.name}: needs_review`)
+      const stored = JSON.parse(newRun.figures)
+      assert.equal(toMs(stored.window.closed_at), businessDayLastSecondMs(shift.business_date), `${scenario.name}: the stored figures window ends at ${stored.window.closed_at}`)
+      if (scenario.telegramOn !== false) {
+        const rows = newRun.telegram[0].split(NL)
+        const [y, m, d] = shift.business_date.split('-')
+        assert.ok(rows.some((row) => CLOSE_ROW.test(row) && row.includes(`${d}/${m}/${y} 23:59`)), `${scenario.name}: the Close row shows the day end: ${rows.find((row) => CLOSE_ROW.test(row))}`)
+        assert.ok(rows.some((row) => CLOSED_LATE_ROW.test(row) && row.includes(':')), `${scenario.name}: a Closed late by row with its reason is printed`)
+      }
+    }
+  })
+
   await check('AS OF THE CLOSE (REVIEW-w3-shift F3): a recount amended before the queue delivers does not change what the close message says it closed on ($100, as the base printed)', () => {
     const r5 = runs.find(({ scenario }) => scenario.name.startsWith('R5'))
     assert.match(r5.oldRun.telegram[0], /Closing cash[^\n]*\$100\.00/, 'the base printed the counted $100')

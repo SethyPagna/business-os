@@ -7,11 +7,13 @@ import { useApp } from '../../AppContext'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { useSavingGate } from '../../utils/useSavingGate.ts'
 import { CheckConnectionButton } from '../shared/SavingBlockedNote.tsx'
-import { fmtDate, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { carryOverCloseSeedMs, closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftLocalDateTimeFromMs, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { fmtDate, fmtDateOnly, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
+import { closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftLocalDateTimeFromMs, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { LATE_CLOSE_DEFAULT_TIME, LATE_REASON_MAX, lateCloseDefaultTime, lateCloseIsoForTime, lateReason } from '../shifts/shiftLateClose.ts'
 import { shiftCountIssue, shiftRielCountInvalid } from '../shifts/shiftCountRules.ts'
-import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
+import { TimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
+import ShiftHeaderRow from '../shifts/ShiftHeaderRow.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional } from '../shifts/shiftReportModel.ts'
 import { retiredBranchNotice } from '../shifts/retiredBranchNotice.ts'
@@ -217,7 +219,9 @@ type ShiftFact = { label: string; value: React.ReactNode }
 
 /** The carry-over close form's own draft -- see useCarryOverClose below. */
 type CarryOverCloseDraft = {
-  closedAt: string
+  reason: string
+  /** 'HH:mm' on the shift's own day; the default 23:59 sends no time and the Worker stamps 23:59:59. */
+  time: string
   countedUsd: string
   countedKhr: string
   additionalUsd: string
@@ -296,16 +300,55 @@ function NoteFold({ note, onChange, disabled }: { note: string; onChange: (value
 /** What both entry points hold: one draft, one submit, one set of reasons. */
 type CarryOverCloseForm = {
   draft: CarryOverCloseDraft
+  /** The shift's business day: the closing time is a time on it. */
+  day: string
   set: (patch: Partial<CarryOverCloseDraft>) => void
   dirty: boolean
   busy: boolean
   pending: boolean
   reason: string | null
   submit: () => Promise<void>
-  /** Only an administrator picks the closing time; an employee closes now and the Worker stamps it. */
-  canPickTime: boolean
-  /** An employee cannot end a drawer another segment follows: closing now would overlap it. */
-  adminRequired: boolean
+  /** The cash count is not asked while a later segment (today's shift) is open: the Worker refuses it. */
+  countHidden: boolean
+}
+
+/** The late close's reason and day-bounded time, shared by the POS prompt, the POS header panel and the Shifts popup. */
+export function LateCloseFields({ reason, time, day, onReason, onTime, disabled }: {
+  reason: string; time: string; day: string; onReason: (value: string) => void; onTime: (value: string) => void; disabled: boolean
+}) {
+  const { t } = useApp() as ShiftGateContext
+  const timeLabel = t('shift_late_time').replace('{date}', fmtDateOnly(day))
+  return (
+    <>
+      <label className="block">
+        <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{t('shift_late_reason')}</span>
+        <input
+          type="text" className={`mt-1 ${DENSE_TEXT_INPUT}`} autoFocus maxLength={LATE_REASON_MAX} aria-label={t('shift_late_reason')}
+          value={reason} onChange={(event) => onReason(event.target.value)} disabled={disabled}
+        />
+      </label>
+      <div>
+        <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{timeLabel}</span>
+        <TimeEntryInput className="mt-1" value={time} disabled={disabled} onChange={onTime} t={t} ariaLabel={timeLabel} />
+        <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_late_time_hint')}</p>
+      </div>
+    </>
+  )
+}
+
+/** The late close's count: asked as "Cash in drawer now" while no later segment is open, otherwise "Not counted (closed late)". */
+export function LateCountField({ hidden, usd, khr, onUsd, onKhr, disabled }: {
+  hidden: boolean; usd: string; khr: string; onUsd: (value: string) => void; onKhr: (value: string) => void; disabled: boolean
+}) {
+  const { t } = useApp() as ShiftGateContext
+  if (hidden) return <p role="status" className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{t('shift_late_not_counted')}</p>
+  return (
+    <ShiftCountPair
+      dense disabled={disabled}
+      label={t('shift_late_count_now')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
+      hint={t('shift_late_count_hint')} usd={usd} khr={khr} onUsd={onUsd} onKhr={onKhr}
+    />
+  )
 }
 
 /**
@@ -323,13 +366,13 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
   const { t, notify, fmtUSD, fmtKHR, user } = useApp() as ShiftGateContext
   const actorId = user?.id ?? undefined
   const savingGate = useSavingGate()
-  const canPickTime = isAdminControlUser(user)
-  const adminRequired = !canPickTime && !!closeBefore
+  const countHidden = !!closeBefore
   const [draft, setDraft] = useState<CarryOverCloseDraft>(
-    { closedAt: '', countedUsd: '', countedKhr: '', additionalUsd: '', additionalKhr: '', note: '' })
+    { reason: '', time: LATE_CLOSE_DEFAULT_TIME, countedUsd: '', countedKhr: '', additionalUsd: '', additionalKhr: '', note: '' })
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState(false)
   const shiftId = shift?.id
+  const businessDate = shift?.business_date ?? ''
   const ownOpenedAt = shift?.opened_at
 
   useEffect(() => {
@@ -343,38 +386,36 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
     const text = (key: string) => (body?.[key] == null ? '' : String(body[key]))
     const savedMs = Date.parse(String(body?.closed_at ?? ''))
     setPending(body != null)
-    // Seeded ONCE per row rather than from the live wall clock: a value that
-    // kept re-seeding would overwrite the moment while it is being typed.
+    // Seeded ONCE per row: the end of the shift's own day, unless the frozen request chose another time.
     setDraft({
-      closedAt: !canPickTime ? '' : shiftLocalDateTimeFromMs(Number.isFinite(savedMs) ? savedMs : carryOverCloseSeedMs(closeBefore, ownOpenedAt, Date.now())),
+      reason: text('reason'),
+      time: Number.isFinite(savedMs) ? shiftLocalDateTimeFromMs(savedMs).slice(11, 16)
+        : body != null ? LATE_CLOSE_DEFAULT_TIME : lateCloseDefaultTime(businessDate, closeBefore, ownOpenedAt),
       countedUsd: text('closing_counted_usd'), countedKhr: text('closing_counted_khr'),
       additionalUsd: text('additional_cash_usd'), additionalKhr: text('additional_cash_khr'),
       note: text('closing_note'),
     })
-  }, [shiftId, closeBefore, ownOpenedAt, actorId, canPickTime])
+  }, [shiftId, actorId, businessDate, closeBefore, ownOpenedAt])
 
-  // The closing time is REQUIRED here (unlike the live close, which lets the
-  // server stamp its own clock), so a missing one is its own reason.
-  const blocker = adminRequired ? 'admin' as const
-    : canPickTime && draft.closedAt.trim() === ''
-    ? 'time' as const
+  // A late close always needs a reason, and a time that lies on the shift's own day.
+  const blocker = lateReason(draft.reason) == null ? 'reason' as const
+    : lateCloseIsoForTime(businessDate, draft.time) == null ? 'time' as const
     : closingCountInvalid(draft.countedUsd) || closingCountInvalid(draft.countedKhr)
       || closingCountInvalid(draft.additionalUsd) || closingCountInvalid(draft.additionalKhr) ? 'invalid' as const
     : shiftRielCountInvalid(draft.countedKhr) || shiftRielCountInvalid(draft.additionalKhr) ? 'riel_cash' as const : null
 
   const submit = async () => {
-    if (busy || !shift || blocker || adminRequired) return
+    if (busy || !shift || blocker) return
     if (savingGate.blocked) return notify(savingGate.reason, 'error')
-    const counts = shiftClosingCounts(draft.countedUsd, draft.countedKhr)
+    const counts = shiftClosingCounts(countHidden ? '' : draft.countedUsd, countHidden ? '' : draft.countedKhr)
     setBusy(true)
     try {
-      // An administrator sends the explicit closed_at: the Worker refuses a close stamped after the next segment's
-      // opening, so the moment the drawer actually stopped is the only one it takes. An employee sends none and the
-      // Worker stamps now (owner, 14 Oct 2026: an employee closes now, never a chosen time).
+      // Owner A74: any time on the shift's own day. The default (23:59) sends none and the Worker stamps 23:59:59.
       const result = await closeShiftById(shift.id, {
         actorId,
         expectedRevision: shift.revision,
-        closedAt: canPickTime ? shiftLocalDateTimeToIso(draft.closedAt) : undefined,
+        closedAt: draft.time === LATE_CLOSE_DEFAULT_TIME ? undefined : lateCloseIsoForTime(businessDate, draft.time) ?? undefined,
+        reason: lateReason(draft.reason),
         closingCountedUsd: counts.usd,
         closingCountedKhr: counts.khr,
         additionalCashUsd: draft.additionalUsd.trim() === '' ? null : Number(draft.additionalUsd),
@@ -390,8 +431,10 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
       // The panel is gone on success, so the toast is the only confirmation
       // the cashier gets: it names the drawer that was written and the moment
       // it was FILED UNDER, not a bare "done".
-      notify(`${t('shift_close_saved')} ${shiftCountedPairText(result.shift.closing_counted_usd, result.shift.closing_counted_khr, fmtUSD, fmtKHR)}`
-        + (result.shift.closed_at ? ` · ${fmtDateTime24(result.shift.closed_at)}` : ''))
+      notify(result.shift
+        ? `${t('shift_close_saved')} ${shiftCountedPairText(result.shift.closing_counted_usd, result.shift.closing_counted_khr, fmtUSD, fmtKHR)}`
+          + (result.shift.closed_at ? ` · ${fmtDateTime24(result.shift.closed_at)}` : '')
+        : t('shift_close_saved'))
     } catch (e) {
       // An unacknowledged write is not an error the cashier can act on: the
       // shared unresolved banner owns it and this button becomes Retry, which
@@ -406,15 +449,15 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
   }
 
   return {
-    draft, busy, pending, submit,
+    draft, busy, pending, submit, day: shift?.business_date ?? '',
     set: (patch) => setDraft((current) => ({ ...current, ...patch })),
-    dirty: draft.countedUsd.trim() !== '' || draft.countedKhr.trim() !== ''
+    dirty: draft.reason.trim() !== '' || draft.countedUsd.trim() !== '' || draft.countedKhr.trim() !== ''
       || draft.additionalUsd.trim() !== '' || draft.additionalKhr.trim() !== '' || draft.note.trim() !== '',
     reason: savingGate.blocked ? savingGate.reason
-      : blocker === 'admin' ? t('shift_stale_admin_must_close')
-      : blocker === 'time' ? t('shift_close_time_required')
+      : blocker === 'reason' ? t('shift_late_reason_blank')
+      : blocker === 'time' ? t('shift_late_close_outside_day')
       : blocker ? t(shiftCountBlockerKey(blocker)) : null,
-    canPickTime, adminRequired,
+    countHidden,
   }
 }
 
@@ -442,14 +485,9 @@ function CarryOverIntro({ shift, closeBefore }: { shift: Shift; closeBefore?: st
       <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
         {t('shift_previous_open_hint')}
       </p>
+      <ShiftHeaderRow shift={shift} />
       <ShiftFactStrip facts={[
-        !!shift.shift_code && { label: t('shift_code'), value: shift.shift_code },
-        // N7: a drawer left open on a branch that has since been retired is
-        // offered from whichever branch this till now runs, so name the
-        // branch it belongs to (the label stored at open).
-        shift.branch_active === false && { label: t('branch'), value: `${shift.branch_name || '—'} · ${t('shift_branch_inactive')}` },
         { label: t('shift_opened_at'), value: fmtDateTime24(shift.opened_at) },
-        !!shift.user_name && { label: t('shift_opened_by'), value: shift.user_name },
         { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },
         !!closeBefore && { label: t('shift_previous_open_close_before'), value: fmtDateTime24(closeBefore) },
       ]}
@@ -467,62 +505,28 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
   const { t } = useApp() as ShiftGateContext
   const savingGate = useSavingGate()
   const frozen = form.busy || form.pending
-  // An employee cannot end a drawer that another segment follows (closing now would overlap it): no form that can only
-  // fail, the translated line says an administrator must, and the secondary (open today's shift instead) stays.
-  if (form.adminRequired) {
-    return (
-      <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-        <span role="status" className="mr-auto min-w-0 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{t('shift_stale_admin_must_close')}</span>
-        {secondary}
-      </div>
-    )
-  }
   return (
     <>
-      {/* Required, and prefilled to the latest moment the server will accept
-          (carryOverCloseSeedMs, between the row's own opening and the bound
-          /current stated), so the common case -- the till was simply never
-          closed on an earlier day and is closed on arrival -- is one press.
-          The row itself is whichever open shift /current names, oldest first;
-          nothing here assumes it was yesterday, and the strip above prints
-          the bound so the prefill is a number the cashier can check. */}
-      {form.canPickTime ? (
-        <div>
-          <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{t('shift_close_time_required')}</span>
-          <DateTimeEntryInput
-            className="mt-1" value={form.draft.closedAt} disabled={frozen}
-            onChange={(next) => form.set({ closedAt: next })}
-            t={t}
-            dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`}
-            timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`}
-          />
-          <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_time_hint')}</p>
-          <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_count_at_closing_time')}</p>
-        </div>
-      ) : (
-        <p className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('shift_close_time_admin_only')}</p>
-      )}
+      <LateCloseFields
+        reason={form.draft.reason} time={form.draft.time} day={form.day} disabled={frozen}
+        onReason={(value) => form.set({ reason: value })} onTime={(value) => form.set({ time: value })}
+      />
 
       {/* Opening float -> additional change used -> closing count, the same
           order and the same shared fields as the live close, so one drawer is
           never counted two ways. */}
       <ShiftCountPair
-        dense autoFocus disabled={frozen}
+        dense disabled={frozen}
         label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
         hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')}
         usd={form.draft.additionalUsd} khr={form.draft.additionalKhr}
         onUsd={(value) => form.set({ additionalUsd: value })}
         onKhr={(value) => form.set({ additionalKhr: value })}
       />
-      <ShiftCountPair
-        dense disabled={frozen}
-        label={t('shift_counted_cash')} usdLabel={t('shift_counted_usd')} khrLabel={t('shift_counted_khr')}
-        hint={t('shift_registered_cash_hint')}
-        usd={form.draft.countedUsd} khr={form.draft.countedKhr}
-        onUsd={(value) => form.set({ countedUsd: value })}
-        onKhr={(value) => form.set({ countedKhr: value })}
+      <LateCountField
+        hidden={form.countHidden} disabled={frozen} usd={form.draft.countedUsd} khr={form.draft.countedKhr}
+        onUsd={(value) => form.set({ countedUsd: value })} onKhr={(value) => form.set({ countedKhr: value })}
       />
-
       <NoteFold note={form.draft.note} onChange={(value) => form.set({ note: value })} disabled={frozen} />
 
       {/* Close writes; the secondary (the prompt's step switch) only moves
@@ -812,7 +816,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   // (they pick no time): say whose move it is instead of offering an End that can only fail.
   const earlierMustCloseFirst = carryOver != null && !isAdminControlUser(user)
   const endReason = savingGate.blocked ? savingGate.reason
-    : earlierMustCloseFirst ? t('shift_earlier_admin_must_close_first')
+    : earlierMustCloseFirst ? t(carryOver?.capabilities.can_close ? 'shift_earlier_close_first' : 'shift_earlier_admin_must_close_first')
     : endBlocker ? t(shiftCountBlockerKey(endBlocker)) : null
 
   const submitClose = async () => {
@@ -1003,8 +1007,9 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
               // under, after the close as the times it WAS. The operator is
               // reconciling against the opening float, and making them
               // remember it invites a wrong count.
+              <>
+              <ShiftHeaderRow shift={shift} />
               <ShiftFactStrip facts={[
-                !!shift.shift_code && { label: t('shift_code'), value: shift.shift_code },
                 { label: t('shift_opened_at'), value: fmtDateTime24(shift.opened_at) },
                 // Before the close this is the clock, labelled as the moment
                 // about to be stamped; after it, the moment that was.
@@ -1025,6 +1030,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
               />
+              </>
             )}
 
             {/* What the drawer SHOULD hold, from the server's one

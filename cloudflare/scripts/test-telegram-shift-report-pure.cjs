@@ -925,4 +925,24 @@ check('the language mode is applied while composing, never by splitting finished
   /withLanguage\(/.test(source) && !/split\(BILINGUAL_SEPARATOR/.test(source)
   && !/replace\([^\n]*BILINGUAL_SEPARATOR[^\n]*''\)/.test(source))
 
+// A shift closed on a later day than it opened (owner A69.5): ONE line names who closed it late and the reason they typed, in every language mode.
+const lateOptions = { timeReview: [{ code: 'closed_late', by: 'boss', reason: 'Forgot to close' }], closedBy: 'boss', closedById: 9 }
+const lateRows = (mode, options) => render(mode, () => telegram.formatShiftReport('Sunrise Mart', shift, figures, NOW, options)).split('\n').filter((line) => /late|យឺត/i.test(line))
+check('a late close adds one "Closed late by" row, with the reason, in en',
+  JSON.stringify(lateRows('en', lateOptions)) === JSON.stringify(['· Closed late by boss: Forgot to close']), JSON.stringify(lateRows('en', lateOptions)))
+check('and the same row in km',
+  JSON.stringify(lateRows('km', lateOptions)) === JSON.stringify(['· បិទយឺតដោយ boss: Forgot to close']), JSON.stringify(lateRows('km', lateOptions)))
+check('and in both languages, the label pair then the name and the reason',
+  JSON.stringify(lateRows('both', lateOptions)) === JSON.stringify([`· Closed late by${SEP}បិទយឺតដោយ boss: Forgot to close`]), JSON.stringify(lateRows('both', lateOptions)))
+check('the Closed by row is not repeated for the same account (the late row already names it)',
+  !render('en', () => telegram.formatShiftReport('Sunrise Mart', shift, figures, NOW, lateOptions)).includes('Closed by'))
+check('a shift closed on its own day carries no late row, and a late tag with no name or no reason never prints an empty label',
+  lateRows('en', {}).length === 0 && lateRows('en', { timeReview: [{ code: 'closed_late', by: '', reason: 'x' }] }).length === 0
+  && JSON.stringify(lateRows('en', { timeReview: [{ code: 'closed_late', by: 'boss' }] })) === JSON.stringify(['· Closed late by boss: N/A']))
+check('the stale-drawer alert says to close it in the POS with a reason, in both languages, with no amount',
+  (() => {
+    const alert = render('both', () => telegram.formatStaleShiftAlert('Sunrise Mart', { ...shift, closed_at: null }, NOW))
+    return alert.includes(`An earlier shift is still open. Close it in the POS with a reason.${SEP}វេនមុនមួយនៅបើក។ សូមបិទវានៅក្នុង POS ជាមួយមូលហេតុ។`) && !/[$៛]/.test(alert)
+  })())
+
 console.log(`\nALL ${passed} CHECKS PASSED`)
