@@ -789,7 +789,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   } | null>(null)
   const currentSalesStatsRead = isActive && authReady && canViewSales && salesStatsRead?.scope === salesStatsScope
     && isActorReadScopeCurrent(salesStatsRead.readScope, false) ? salesStatsRead : null
-  const salesStats = currentSalesStatsRead?.status === 'ready' && isActorReadScopeCurrent(currentSalesStatsRead.readScope)
+  const salesStats = currentSalesStatsRead?.status === 'ready' && isActorReadScopeCurrent(currentSalesStatsRead.readScope, false)
     ? currentSalesStatsRead.value : null
   const salesStatsError = currentSalesStatsRead?.status === 'error'
     || (currentSalesStatsRead?.status === 'ready' && salesStats === null)

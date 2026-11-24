@@ -238,5 +238,18 @@ try {
     calls[1].respond(json(valid(120, 85))); await p; await h.flush()
     assert.equal(h.view.salesStatsRead.status, 'ready'); assert.equal(h.view.salesStatsRead.value.revenue_usd, 120)
   })
+  await test('defect 2b: a ready total stays on screen after a later sales revision bump', async () => {
+    const h = harness(), p = h.view.loadSalesStats(); h.stats[0].resolve(valid()); await p; await h.flush()
+    scopes.invalidateActorReadChannel('sales'); h.render()
+    assert.equal(h.view.revenue, 120); assert.equal(h.view.salesStatsError, null)
+    actor(2); h.render(); unknown(h.view); assert.equal(h.view.salesStatsError, null, 'an account change still drops it')
+  })
+  await test('defects 1 and 2a, real transport: the recovered totals are on screen, not just ready in state', async () => {
+    const h = harness(getSalesStats); realTransport(); const calls = stubFetch()
+    const p = h.view.loadSalesStats(); await settle()
+    scopes.invalidateActorReadChannel('sales'); calls[0].respond(json(valid(10, 1))); await settle()
+    calls[1].respond(json(valid(120, 85))); await p; await h.flush()
+    assert.equal(h.view.revenue, 120); assert.equal(h.view.salesStatsError, null)
+  })
 } finally { (globalThis as any).window = priorWindow; globalThis.fetch = priorFetch; http.__resetApiHealthForTests(); if (priorNavigator) Object.defineProperty(globalThis, 'navigator', priorNavigator); else delete (globalThis as any).navigator }
 if (failures) process.exitCode = 1

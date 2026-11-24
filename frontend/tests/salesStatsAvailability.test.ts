@@ -203,9 +203,9 @@ try {
     for (const transition of ['revision', 'actor']) {
       const h = harness(), p = h.view.loadSalesStats(); h.stats[0].resolve(valid()); await p; await h.flush()
       if (transition === 'revision') scopes.invalidateActorReadChannel('sales'); else actor(2)
-      h.render(); unknown(h.view)
-      if (transition === 'revision') assert.ok(h.view.salesStatsError, 'an invalidated ready answer supplies Retry instead of exposing stale numbers')
-      else assert.equal(h.view.salesStatsError, null)
+      h.render()
+      if (transition === 'revision') { assert.equal(h.view.revenue, 120, 'a same-actor total already on screen stays until a reload replaces it'); assert.equal(h.view.salesStatsError, null) }
+      else { unknown(h.view); assert.equal(h.view.salesStatsError, null) }
     }
   })
   await test('a later same-actor cache refresh cannot hide the existing Stats Retry error', async () => {
@@ -409,7 +409,7 @@ await test('plain revision change keeps authority query keys stable and causes n
   assert.equal(h.view.salesReadAuthority, authority)
   assert.equal(h.view.salesStatsScope, statsScope); assert.equal(h.view.salesPageScope, pageScope)
   assert.strictEqual(h.view.loadSalesStats, statsCallback); assert.strictEqual(h.view.loadSales, rowsCallback)
-  unknown(h.view); assert.ok(h.view.salesStatsError, 'invalidated numbers remain unavailable with current-actor Retry')
+  assert.equal(h.view.revenue, 120, 'the total on screen survives the revision bump'); assert.equal(h.view.salesStatsError, null)
   h.commit(); h.render(); h.commit()
   assert.equal(h.stats.length, 1); assert.equal(h.rows.length, 1, 'revision alone cannot loop callback effects')
 })
