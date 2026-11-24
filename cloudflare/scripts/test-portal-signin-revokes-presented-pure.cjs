@@ -115,6 +115,65 @@ async function main(sources = {}) {
     assert.deepEqual(after.slice(0, before.length), before, 'the expired row (and every other) is byte-identical: no revoked_at written')
   })
 
+  await check('R3-2 the new session and the revoke of the presented one are ONE batch of two statements, awaited, and nothing else writes portal_sessions', async () => {
+    const a = await signUp(h, '203.0.113.47')
+    const b = await signUp(h, '203.0.113.48')
+    const log = []
+    const realBatch = h.db.batch
+    const realPrepare = h.db.prepare
+    h.db.batch = (items) => {
+      log.push({ kind: 'batch', sqls: items.map((i) => String(i.sql).replace(/\s+/g, ' ').trim()) })
+      return realBatch(items)
+    }
+    h.db.prepare = (sql) => {
+      const stmt = realPrepare(sql)
+      return { ...stmt, run: async (params) => { log.push({ kind: 'run', sql: String(sql).replace(/\s+/g, ' ').trim() }); return stmt.run(params) } }
+    }
+    let res
+    try {
+      res = await signIn(h, b.phone, '203.0.113.49', withCookie(a.token))
+    } finally {
+      h.db.batch = realBatch
+      h.db.prepare = realPrepare
+    }
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    const writes = log.filter((e) => (e.kind === 'run' ? [e.sql] : e.sqls).some((s) => /portal_sessions/.test(s) && /^(INSERT|UPDATE|DELETE)/.test(s)))
+    assert.equal(writes.length, 1, `exactly one write call touches portal_sessions, got ${JSON.stringify(writes)}`)
+    assert.equal(writes[0].kind, 'batch', 'the insert and the revoke go through one batch')
+    assert.equal(writes[0].sqls.length, 2)
+    assert.match(writes[0].sqls[0], /^INSERT INTO portal_sessions/)
+    assert.match(writes[0].sqls[1], /^UPDATE portal_sessions SET revoked_at/)
+    // awaited: the revoke has happened by the time the response is returned
+    assert.equal((await me(h, a.token)).body.account, null)
+  })
+
+  await check('R3-2 a presented session that is already revoked is never written to again', async () => {
+    const a = await signUp(h, '203.0.113.50')
+    const b = await signUp(h, '203.0.113.51')
+    const when = '2020-01-01T00:00:00.000Z'
+    h.raw.prepare('UPDATE portal_sessions SET revoked_at = @when WHERE account_id = (SELECT id FROM portal_accounts WHERE phone = @phone)').run({ when, phone: a.phone })
+    const before = sessions(h)
+    const res = await signIn(h, b.phone, '203.0.113.52', withCookie(a.token))
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    const after = sessions(h)
+    assert.equal(after.length, before.length + 1)
+    assert.deepEqual(after.slice(0, before.length), before, 'the revoked row keeps its original revoked_at')
+    assert.ok(after.slice(0, before.length).filter((s) => s.revoked_at === when).length >= 1)
+  })
+
+  await check('R3-2 only the presented session is revoked: the account\'s other devices stay signed in', async () => {
+    const a = await signUp(h, '203.0.113.53')
+    const a2Res = await signIn(h, a.phone, '203.0.113.54')
+    const a2 = cookieOf(a2Res)
+    assert.ok(a2 && a2 !== a.token)
+    const b = await signUp(h, '203.0.113.55')
+    const res = await signIn(h, b.phone, '203.0.113.56', withCookie(a.token))
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    assert.equal((await me(h, a.token)).body.account, null, 'the presented device is signed out')
+    assert.ok((await me(h, a2)).body.account, "A's other device stays signed in")
+    assert.ok((await me(h, b.token)).body.account, "B's own earlier device stays signed in")
+  })
+
   await check('B1 an ordinary authenticated response sets no cookie when no slide is due', async () => {
     const a = await signUp(h, '203.0.113.43')
     const res = await me(h, a.token)
