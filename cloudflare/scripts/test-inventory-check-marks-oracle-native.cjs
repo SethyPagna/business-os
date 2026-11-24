@@ -51,6 +51,36 @@ async function counter(world) {
   return login.setCookie.split(';')[0]
 }
 
+// The role fixture of A2: another signed-in actor (id, username, role code, permissions). 903 = a counter without the stock field (I9), 904 = a lead who may approve and adjust (W10).
+async function actor(world, id, username, code, permissions) {
+  await world.db.prepare('INSERT OR IGNORE INTO roles(id,name,code,permissions,is_system) VALUES(?,?,?,?,0)').bind(id, 'Oracle ' + username, code, JSON.stringify(permissions)).run()
+  await world.db.prepare("INSERT OR IGNORE INTO users(id,username,name,password,role_id,permissions,is_active,organization_id,must_change_password) VALUES(?,?,?,?,?,'{}',1,?,0)").bind(id, username, username, bcrypt.hashSync('budget-password-1', 4), id, world.orgId).run()
+  await world.db.prepare("INSERT OR IGNORE INTO trusted_devices(user_id, device_id, device_name, status, decided_at) VALUES(?,'budget-device','budget device','approved',datetime('now'))").bind(id).run()
+  const login = await world.send('POST', '/api/auth/login', { username, password: 'budget-password-1', organizationId: world.orgId, deviceId: 'budget-device' }, { cookie: null })
+  if (!login.setCookie) throw new Error(username + ' could not sign in: ' + login.text.slice(0, 200))
+  return login.setCookie.split(';')[0]
+}
+
+// F.6a, the pairing check: what a writer changed must be named by an event it wrote. Read before and after a step: every approval's status, line set, superseded set, line decisions and the sorted KEYS of applied_json.lines,
+// and every item that is or was done/issue (the only items a mark reads: a task's unstarted items carry no mark) as (state, updated_at). An approval whose tuple changed needs an event naming its session with an id in
+// (top before, top after]; an item whose pair changed needs an event naming that session and product in the same range. W6u proves the rule is the KEYS (applied_json.units change, no event is needed).
+async function pairSnap(world) {
+  const approvals = new Map((await world.all("SELECT session_id, status, line_set_json, superseded_json, line_decisions_json, (SELECT group_concat(k) FROM (SELECT key AS k FROM json_each(json_extract(applied_json,'$.lines')) ORDER BY key)) AS applied_keys FROM inventory_check_approvals"))
+    .map((r) => [String(r.session_id), JSON.stringify([r.status, r.line_set_json, r.superseded_json, r.line_decisions_json, r.applied_keys])]))
+  const items = new Map((await world.all("SELECT session_id, product_id, state, updated_at FROM inventory_check_items WHERE state IN ('done','issue')")).map((r) => [`${r.session_id}|${r.product_id}`, `${r.state}|${r.updated_at}`]))
+  const top = Number((await world.all('SELECT COALESCE(MAX(id), 0) AS top FROM inventory_check_events'))[0].top)
+  return { approvals, items, top }
+}
+async function paired(world, before, label) {
+  const after = await pairSnap(world)
+  const events = await world.all('SELECT session_id, product_id FROM inventory_check_events WHERE id > ? AND id <= ?', before.top, after.top)
+  const named = new Set(events.map((e) => String(e.session_id))), namedItem = new Set(events.filter((e) => e.product_id != null).map((e) => `${e.session_id}|${e.product_id}`))
+  const missing = []
+  for (const [sid, tuple] of after.approvals) if (before.approvals.get(sid) !== tuple && !named.has(sid)) missing.push('approval ' + sid)
+  for (const key of new Set([...before.items.keys(), ...after.items.keys()])) if (before.items.get(key) !== after.items.get(key) && !namedItem.has(key)) missing.push('item ' + key)
+  assert.deepEqual(missing.slice(0, 5), [], `${label}: a writer changed ${missing.length} approval(s) or item(s) with no event naming them in (${before.top}, ${after.top}] (F.6a)`)
+}
+
 // The oracle: the marks, and the waiting lists by session (only sessions with a waiting line), sorted.
 async function oracle(world, branch) {
   const marks = new Map((await world.all(LATEST, world.orgId, branch)).map((r) => [Number(r.product_id), [Number(r.t), Number(r.s)]]))
@@ -201,15 +231,21 @@ async function scenario(world, report, patches) {
   world.history = new Map()
   const snap = async () => { const top = Number((await world.all('SELECT COALESCE(MAX(id), 0) AS top FROM inventory_check_events'))[0].top); world.history.set(top, await oracle(world, 1)) }
   const counterCookie = await counter(world)
+  const leadCookie = await actor(world, 904, 'budget_lead', 'lead', { inventory_checks: true, inventory_check_show_stock: true, inventory: true, inventory_check_approve: true })
+  const nostockCookie = await actor(world, 903, 'budget_nostock', 'employee', { inventory_checks: true })
   const device = new Device(world, 1)
   await device.build()
-  const scope = { organization: world.orgId, branchId: 1 }
+  const scope ={ organization: world.orgId, branchId: 1 }
   const limitsOfMarks = { pageEvents: limits.inventoryMarksChangesPageEvents, touchedMax: limits.inventoryMarksTouchedMax }
   // A step: the WRITER makes the change (a throw there is `skipped`, never red); the CHECKER (default: the device catches up and equals the oracle, and so does a freshly built device) is what can turn red.
   const step = async (label, writer, checker) => {
     at(label)
+    // F.6a runs around every step except I7: a restored log reuses event ids, so "an id in (top before, top after]" cannot hold for it.
+    const before = label.startsWith('I7 ') ? null : await pairSnap(world)
     try { await writer() } catch (e) { report.skipped.push(`${label}: ${String(e.message).slice(0, 120)}`); return }
+    if (before) await paired(world, before, label)
     if (checker) await checker(); else { await snap(); await device.sync(); await same(world, device, label) }
+    if (before) await paired(world, before, label)
     const built = new Device(world, 1); await built.build(); await same(world, built, label + ' (fresh build)'); report.steps.push(label)
   }
   const insertSession = (id, branch, when, status = 'closed') => world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,?,1,'oracle fixture',?,0,'{}',?,?,?)").bind(id, world.orgId, branch, status, when, when, when).run()
@@ -229,6 +265,22 @@ async function scenario(world, report, patches) {
   // W1 plain submission (some lines differ: an approval waits)
   const a = await fresh(12)
   await step('W1 plain submission with differing lines', () => submit(a, 3))
+  // W2 lot submission (A2): three products, each on two received dates. X: one date +1 and the other -1 (the totals match, each date is wrong); Y: one date differs; Z: both match. The line set must hold X and Y and not Z
+  // (a rule that judged waiting from the totals would drop X: countDiffersSql). Counted by the counter, as the page sends it.
+  const lotsOf = async (pid) => (await world.all('SELECT s.batch_id AS batch, s.quantity AS q FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE b.variant_product_id=? AND s.branch_id=1 AND s.quantity>0 AND b.is_active=1 ORDER BY b.id', pid)).map((r) => ({ batch: Number(r.batch), q: Number(r.q) }))
+  const twoLots = async (n) => { const rows = await world.all('SELECT b.variant_product_id AS pid FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id AND b.is_active=1 JOIN products p ON p.id=b.variant_product_id AND p.is_active=1 AND COALESCE(p.is_group,0)=0 WHERE s.branch_id=1 AND s.quantity>0 AND p.id NOT IN (SELECT product_id FROM inventory_check_items) GROUP BY b.variant_product_id HAVING COUNT(*)=2 AND MIN(s.quantity)>=3 ORDER BY pid LIMIT ?', n); assert.equal(rows.length, n, 'products with exactly two received dates'); return rows.map((r) => Number(r.pid)) }
+  const oneLot = async (n) => { const rows = await world.all('SELECT b.variant_product_id AS pid, MIN(s.batch_id) AS batch, MIN(s.quantity) AS q FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id AND b.is_active=1 JOIN products p ON p.id=b.variant_product_id AND p.is_active=1 AND COALESCE(p.is_group,0)=0 WHERE s.branch_id=1 AND s.quantity>0 AND p.id NOT IN (SELECT product_id FROM inventory_check_items) GROUP BY b.variant_product_id HAVING COUNT(*)=1 AND MIN(s.quantity)>=4 ORDER BY pid DESC LIMIT ?', n); assert.equal(rows.length, n, 'products with one received date'); return rows.map((r) => ({ pid: Number(r.pid), batch: Number(r.batch), q: Number(r.q) })) }
+  const lotLine = async (pid, deltas) => { const lots = await lotsOf(pid); assert.equal(lots.length, 2, 'two dates of ' + pid); return { productId: pid, lots: lots.map((l, k) => ({ batchId: l.batch, scope: 'lot', counted: l.q + deltas[k], seen: l.q })) } }
+  const submitLots = (lines) => must(world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines }, { cookie: counterCookie }), 'lot submit')
+  const byId = (list) => [...list].sort((x, y) => x - y)
+  const [x2, y2, z2] = await twoLots(3)
+  let w2 = null
+  await step('W2 lot submission, dates differ with equal totals', async () => { w2 = await submitLots([await lotLine(x2, [1, -1]), await lotLine(y2, [1, 0]), await lotLine(z2, [0, 0])]) }, async () => {
+    const sid2 = w2.json.item.id
+    assert.deepEqual((await oracle(world, 1)).bySession.get(sid2), byId([x2, y2]), 'W2: the line set holds the product whose totals match but whose dates differ, and the product with one differing date, and not the matching one')
+    await snap(); await device.sync(); await same(world, device, 'W2 lot submission')
+    assert.deepEqual(byId(device.waitingBySession.get(sid2) || []), byId([x2, y2]), 'W2: the device holds the same list')
+  })
   // W3b supersede across sessions: P is counted again while Q of the old session still waits. The old session's list must lose exactly P (replacing by union keeps it).
   at('W3b supersede across sessions')
   const [p3, q3] = await freshHigh(2)
@@ -262,6 +314,32 @@ async function scenario(world, report, patches) {
   await step('W7 line reject', async () => { await must(world.send('POST', `${IC}/sessions/${bs}/approval/lines`, { requestId: rid('ln'), productId: b[0].id, action: 'reject' }), 'line reject') })
   await step('W7 line reopen', async () => { await must(world.send('POST', `${IC}/sessions/${bs}/approval/lines`, { requestId: rid('ln'), productId: b[0].id, action: 'reopen' }), 'line reopen') })
   await step('W6 approve whole', () => approval(bs, 'approve'))
+  // W6p partial accept by productIds: 2 of 3 lines. The list must lose exactly those two, under their landing events; the third keeps waiting.
+  const pp = await fresh(3)
+  await submit(pp, 1); const pps = await sessionOf(pp[0].id); await device.sync()
+  await step('W6p partial accept by productIds', () => approval(pps, 'approve', { productIds: [pp[0].id, pp[1].id] }), async () => {
+    await snap(); await device.sync(); const o = await same(world, device, 'W6p partial accept by productIds')
+    assert.deepEqual(o.bySession.get(pps), [pp[2].id], 'W6p: exactly the two accepted lines left the list')
+  })
+  // W6u dates-only partial: a product on two dates, both lowered; on Free one date lands a request (stockInLinesPerRequest 1), so the first request changes applied_json.units and plan_json and nothing else. No event is written, the keys
+  // of applied_json.lines do not change, waiting is unchanged. A pairing rule that demanded an event for any applied_json change would report a false defect here (F.6a), and a waiting rule that read units would drop the line.
+  const [u6] = await twoLots(1)
+  const u6s = (await submitLots([await lotLine(u6, [-1, -1])])).json.item.id; await device.sync()
+  const events6 = async () => Number((await world.all('SELECT COUNT(*) AS n FROM inventory_check_events WHERE session_id=?', u6s))[0].n)
+  const applied6 = async () => JSON.parse((await world.all('SELECT applied_json FROM inventory_check_approvals WHERE session_id=?', u6s))[0].applied_json)
+  let u6events = 0
+  await step('W6u dates-only partial', async () => {
+    u6events = await events6()
+    for (let n = 0; n < 4; n++) { const r = await must(world.send('POST', `${IC}/sessions/${u6s}/approval`, { decision: 'approve', requestId: rid('ap') }), 'approval'); if (Object.keys((await applied6()).units || {}).length || r.json.done !== false) break }
+  }, async () => {
+    const applied = await applied6()
+    assert.deepEqual(Object.keys(applied.lines || {}), [], 'W6u: no product is complete, so the keys of applied_json.lines do not change')
+    assert.ok(Object.keys(applied.units || {}).length >= 1, 'W6u: one received date landed (applied_json.units changed)')
+    assert.equal(await events6(), u6events, 'W6u: a dates-only landing writes no event')
+    await snap(); await device.sync(); const o = await same(world, device, 'W6u dates-only partial')
+    assert.deepEqual(o.bySession.get(u6s), [u6], 'W6u: waiting is unchanged')
+  })
+  await step('W6u the second date completes the product', () => approval(u6s, 'approve'))
   // W8b reject whole, 3 lines: the device already holds the 3 waiting lines; the reject's only event names no product.
   at('W8b reject whole, 3 lines')
   const w8 = await freshHigh(3); await submit(w8, 1); const w8s = await sessionOf(w8[0].id); await device.sync()
@@ -314,6 +392,68 @@ async function scenario(world, report, patches) {
     assert.deepEqual((answer.waiting.find((w) => w[0] === 'l2-0') || [null, null])[1], [], 'L2: the decided legacy session answers an empty list')
     await snap(); await device.sync(); await same(world, device, 'L2 decided legacy approval')
   })
+  // W10 takeover (A2): the lead starts approving 3 lines, one lands (Free: one line a request) and the answer is lost (the claim stays). The lead is switched off; the admin takes the approval over. The landed line must leave the list AT
+  // the takeover, under its own events, not at the end (an assertion on the rule itself: the device and the oracle would agree on a server that waited).
+  const w10 = await fresh(3)
+  await submit(w10, 1); const w10s = await sessionOf(w10[0].id); await device.sync()
+  const listOf = async (sid) => (await oracle(world, 1)).bySession.get(sid) || []
+  await step('W10 takeover', async () => {
+    assert.equal((await listOf(w10s)).length, 3)
+    await world.db.exec("CREATE TRIGGER oracle_lost_answer BEFORE UPDATE OF applied_json ON inventory_check_approvals WHEN NEW.applied_json <> OLD.applied_json BEGIN SELECT RAISE(ABORT,'oracle_lost_answer'); END")
+    try {
+      const claim = rid('ap'); let lost = null
+      for (let n = 0; n < 4 && (!lost || lost.status !== 503); n++) lost = await world.send('POST', `${IC}/sessions/${w10s}/approval`, { decision: 'approve', requestId: claim }, { cookie: leadCookie })
+      if (lost.status !== 503) throw new Error('the lost answer was not refused: ' + lost.status + ' ' + lost.text.slice(0, 160))
+    } finally { await world.db.exec('DROP TRIGGER IF EXISTS oracle_lost_answer') }
+    await world.db.prepare('UPDATE users SET is_active=0 WHERE id=904').run()
+  }, async () => {
+    try {
+      const take = await must(world.send('POST', `${IC}/sessions/${w10s}/approval`, { decision: 'approve', requestId: rid('tk') }), 'takeover')
+      assert.equal(take.json.takeover, true, 'W10: the second approver took the approval over')
+      await snap(); await device.sync(); await same(world, device, 'W10 takeover')
+      assert.equal((await listOf(w10s)).length, 2, 'W10: the landed line left the list at the takeover')
+      assert.equal((device.waitingBySession.get(w10s) || []).length, 2, 'W10: the device dropped the landed line at the takeover, not at the end')
+      await approval(w10s, 'approve')
+    } finally { await world.db.prepare('UPDATE users SET is_active=1 WHERE id=904').run() }
+    await snap(); await device.sync(); await same(world, device, 'W10 takeover finished')
+  })
+  // W11 a Set closes an Issue, Undo, Redo, and a Set that cannot close (stockSetClosesIssue.ts, its own batch of items and events naming the product). The Set is the real route; Undo and Redo go through the action history.
+  const [s11, s12] = await oneLot(2)
+  const setLot = (p, quantity, expected) => world.send('POST', '/api/inventory/adjust', { type: 'set', setScope: 'lot', productId: p.pid, branchId: 1, batchId: p.batch, quantity, expectedLotQuantity: expected, reason: 'Physical count', client_request_id: 'inventory_set_' + crypto.randomBytes(8).toString('hex') })
+  const adjust = (p, quantity, expected) => must(setLot(p, quantity, expected), 'set')
+  const markOf = (pid) => device.marks.get(pid) || [0, 0]
+  const itemTime = async (pid) => Number((await world.all(`SELECT ${T('updated_at')} AS t FROM inventory_check_items WHERE product_id=? AND state IN ('done','issue') ORDER BY updated_at DESC, session_id DESC LIMIT 1`, pid))[0].t)
+  await step('W11 an Issue to close', async () => {
+    const s = await must(world.send('POST', `${IC}/sessions`, { branchId: 1, title: 'oracle issue', productIds: [s11.pid], scope: {}, requestId: rid('se') }), 'session'); const sid11 = s.json.item.id
+    await must(world.send('PATCH', `${IC}/sessions/${sid11}/items/${s11.pid}`, { expectedRevision: 0, expectedSessionRevision: 0, requestId: rid('ob'), state: 'issue', counted_quantity: s11.q - 2, reason: 'miscount' }), 'issue')
+    const r = (await world.all('SELECT revision FROM inventory_check_sessions WHERE id=?', sid11))[0]
+    await must(world.send('PATCH', `${IC}/sessions/${sid11}`, { expectedRevision: Number(r.revision), requestId: rid('ck'), action: 'close' }), 'close')
+  }, async () => { await snap(); await device.sync(); await same(world, device, 'W11 an Issue to close'); assert.equal(markOf(s11.pid)[1], 2, 'W11: the product is an Issue') })
+  let closed = null, historyId = 0
+  await step('W11 Set closes the Issue', async () => {
+    closed = await adjust(s11, s11.q - 2, s11.q)
+    historyId = Number((await world.all("SELECT id FROM action_history WHERE entity='stock_quantity_set' ORDER BY id DESC LIMIT 1"))[0].id)
+  }, async () => {
+    assert.equal(closed.json.issue_closed, true, 'W11: the Set that matches the count closes the Issue')
+    await snap(); await device.sync(); await same(world, device, 'W11 Set closes the Issue')
+    assert.deepEqual([markOf(s11.pid)[1], markOf(s11.pid)[0]], [1, await itemTime(s11.pid)], 'W11: the product is Done at the time of the new count')
+  })
+  await step('W11 Undo of the Set', () => must(world.send('POST', `/api/action-history/${historyId}/undo`, { require_applied: true, expected_generation: 0 }), 'undo'), async () => {
+    await snap(); await device.sync(); await same(world, device, 'W11 Undo of the Set')
+    assert.deepEqual([markOf(s11.pid)[1], markOf(s11.pid)[0]], [2, await itemTime(s11.pid)], 'W11: the Issue is open again')
+  })
+  await step('W11 Redo of the Set', () => must(world.send('POST', `/api/action-history/${historyId}/redo`, { require_applied: true, expected_generation: 1 }), 'redo'), async () => {
+    await snap(); await device.sync(); await same(world, device, 'W11 Redo of the Set')
+    assert.deepEqual([markOf(s11.pid)[1], markOf(s11.pid)[0]], [1, await itemTime(s11.pid)], 'W11: the Issue is closed again, at the time of its record')
+  })
+  await submit([{ id: s12.pid, q: s12.q }], 1); await device.sync()
+  let refused = null, listsBefore = null
+  const listsOf = (m) => JSON.stringify([...m].sort((x, y) => (x[0] < y[0] ? -1 : 1)))
+  await step('W11 a Set that cannot close leaves the lists unchanged', async () => { listsBefore = listsOf((await oracle(world, 1)).bySession); refused = await setLot(s12, s12.q + 1, s12.q) }, async () => {
+    assert.equal(refused.status, 409, 'W11: a Set is refused while a count of the product waits (it writes nothing): ' + refused.text.slice(0, 160))
+    await snap(); await device.sync(); const o = await same(world, device, 'W11 a Set that cannot close')
+    assert.equal(listsOf(o.bySession), listsBefore, 'W11: the waiting lists are unchanged')
+  })
   // W13 a product deactivated, counted, reactivated (I10), a header, another organisation's count, the inactive branch's count, a count whose item branch differs from its session's (m6), equal updated_at (m1)
   const g = await fresh(4)
   const permit = () => world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'").run()
@@ -327,6 +467,33 @@ async function scenario(world, report, patches) {
     await unpermit()
   })
   await step('I10 reactivate', async () => { await permit(); await world.db.prepare('UPDATE products SET is_active=1 WHERE id=?').bind(g[0].id).run(); await unpermit() })
+  // (W13 follows I10 so that m2, which hides inactive products from the snapshot, turns red at I10 first.)
+  // W13 merge and header (A2): the catalogue index (the products table, with its population token) moves, the count tables do not. A device keeps the marks of both products; Waiting is the pending ids that are still in the population,
+  // so it drops by one on the device and on the oracle alike. A device that moved the mark to the kept id would differ.
+  const permitProducts = () => world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'").run()
+  const unpermitProducts = () => world.db.prepare("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'").run()
+  const waitingInPopulation = async (ids) => Number((await world.all("SELECT COUNT(*) AS n FROM products WHERE is_active=1 AND COALESCE(is_group,0)=0 AND id IN (SELECT value FROM json_each(?))", JSON.stringify([...ids])))[0].n)
+  const stamp = async () => String((await world.all('SELECT stamp FROM inventory_population_token WHERE id=1'))[0].stamp)
+  const [mk, md, hk] = await freshHigh(3)
+  await submit([mk], 0); await submit([md], 1); await submit([hk], 0); await device.sync()
+  let held = null
+  await step('W13 merge a counted, waiting duplicate', async () => {
+    held = { waiting: await waitingInPopulation(device.pending), stamp: await stamp() }
+    await permitProducts(); try { await world.db.prepare('UPDATE products SET is_active=0, updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(md.id).run() } finally { await unpermitProducts() }
+  }, async () => {
+    await snap(); await device.sync(); const o = await same(world, device, 'W13 merge')
+    assert.ok(device.marks.has(md.id) && device.marks.has(mk.id), 'W13: the marks of both ids stay')
+    assert.notEqual(await stamp(), held.stamp, 'W13: the population token moved')
+    assert.deepEqual([await waitingInPopulation(device.pending), await waitingInPopulation(o.pending)], [held.waiting - 1, held.waiting - 1], 'W13: Waiting (the population that is pending) drops by one on the device and the oracle')
+  })
+  await step('W13 header: a counted product becomes a parent', async () => {
+    held = { waiting: await waitingInPopulation(device.pending), stamp: await stamp() }
+    await permitProducts(); try { await world.db.prepare('UPDATE products SET is_group=1, updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(hk.id).run() } finally { await unpermitProducts() }
+  }, async () => {
+    await snap(); await device.sync(); await same(world, device, 'W13 header')
+    assert.ok(device.marks.has(hk.id), 'W13: the mark of the header stays on the device')
+    assert.notEqual(await stamp(), held.stamp, 'W13: the population token moved')
+  })
   await step('ties on updated_at broken by session id (m1)', async () => {
     for (const s of ['tie-b', 'tie-a']) {
       await world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,1,1,'tie','closed',0,'{}','2026-11-02T01:00:00.000Z','2026-11-02T01:00:00.000Z','2026-11-02T01:00:00.000Z')").bind(s, world.orgId).run()
@@ -359,7 +526,24 @@ async function scenario(world, report, patches) {
     for (const [k, lid] of ['lg-a', 'lg-b'].entries()) await legacySession(lid, pool.slice(k * members, (k + 1) * members), when)
   })
   report.legacyAnswers = device.answers - legacyBefore
-  assert.ok(report.legacyAnswers >= 2, 'the legacy walk needed more than one read (' + report.legacyAnswers + ')')
+  // The batching assertion of this step (the walk needed more than one read) moved to L1b below, which asserts it with the per-answer limit as well; this step keeps the device = oracle check, which m4 turns red.
+  // L1b many legacy sessions (A2): five pending approvals with no stored line set, 200 members each (1,000 in all, twice the walk's limit on Free). Every answer's waiting ids stay within the limit (a legacy session is charged its
+  // members) and the feed needs more than one read. Charging legacy sessions nothing (mw8) answers about a thousand ids in one read.
+  // The sessions and their members' events are read first (the device holds their marks); then ONE page names all five by a product-less event, so only the walk's charge for a legacy session (its members) limits that read.
+  at('L1b many legacy sessions')
+  const pool1b = await freshHigh(1000), when1b = '2026-11-07T01:00:00.000Z'
+  for (let k = 0; k < 5; k++) await legacySession('l1b-' + k, pool1b.slice(k * 200, k * 200 + 200), when1b)
+  await device.sync()
+  await step('L1b many legacy sessions', async () => {
+    for (let k = 0; k < 5; k++) await nullEvent('l1b-' + k, when1b)
+  }, async () => {
+    const from = device.log.length
+    await snap(); await device.sync()
+    const chain = device.log.slice(from).filter((x) => x.chg)
+    assert.ok(chain.length >= 2 && report.legacyAnswers >= 2, `L1b: the legacy walk needed more than one read (${chain.length} here, ${report.legacyAnswers} for the two sessions of 251)`)
+    for (const x of chain) { const ids = x.chg.waiting.reduce((n, w) => n + w[1], 0); assert.ok(ids <= limits.inventoryMarksTouchedMax, `L1b: an answer carried ${ids} waiting ids (limit ${limits.inventoryMarksTouchedMax})`) }
+    await same(world, device, 'L1b many legacy sessions')
+  })
   // R1 a write injected between call 1 and the last batch of a read: a supersede of P (S1 to S2) commits after call 1 and before the closing batch, which reads a newer state than call 1 did.
   // Right: the answer is not exact, `more` is true, nothing is published and the next read is exact. Without the guard (mw11) the device publishes S1 without P and no S2 entry: a state no instant had.
   at('R1 write injected between call 1 and the last batch')
@@ -375,6 +559,34 @@ async function scenario(world, report, patches) {
     const mid = stateDiff(device, before5)
     assert.deepEqual([mid.marks, mid.waiting, mid.pending], [[], [], []], 'R1: nothing is published from an answer that is not exact')
     await snap(); await device.sync(); await same(world, device, 'R1 write injected between call 1 and the last batch')
+  })
+  // I9 native half (A2): a signed-in counter without the stock field gets no `waiting` key from /marks/changes (the strip is in the route, from the signed-in actor of that request) and a 403 from /marks/pending, while the
+  // permitted viewer's answer to the same read carries it.
+  const [i9] = await freshHigh(1)
+  let i9from = null
+  await step('I9 native half: a viewer without the stock field', async () => { await device.sync(); i9from = { cursor: device.cursor, tag: device.tag }; await submit([i9], 1) }, async () => {
+    const url = `${IC}/marks/changes?branchId=1&since=${i9from.cursor}&tag=${i9from.tag}`
+    const permitted = await world.send('GET', url)
+    assert.ok(permitted.status === 200 && 'waiting' in permitted.json, 'I9: the permitted viewer gets waiting (' + permitted.status + ')')
+    const plainView = await world.send('GET', url, undefined, { cookie: nostockCookie })
+    assert.equal(plainView.status, 200, 'I9: the counter without the stock field reads the marks: ' + plainView.text.slice(0, 160))
+    assert.ok(!('waiting' in plainView.json) && Array.isArray(plainView.json.marks), 'I9: no waiting key for a viewer without the stock field')
+    const pending = await world.send('GET', `${IC}/marks/pending?branchId=1`, undefined, { cookie: nostockCookie })
+    assert.deepEqual([pending.status, pending.json.code], [403, 'inventory_check_fix_stock_required'], 'I9: /marks/pending is refused')
+    await snap(); await device.sync(); await same(world, device, 'I9 native half')
+  })
+  // B1 branch parity (A2, lead's answer 2): the same word as branchId gets the same status and error code from every route that takes a branch. A change to the check on one side alone turns this red.
+  await step('B1 branch parity', async () => {}, async () => {
+    const invalid = ['', '0', '-1', '1.5', 'abc', '1e3', '9007199254740993'], valid = [' 7 ', '007', '1234567890']
+    for (const word of [...invalid, ...valid]) {
+      const w = encodeURIComponent(word)
+      const urls = { overlay: `${IC}/overlay?branchId=${w}&ids=${p5.id}`, lots: `${IC}/lots?branchId=${w}&productId=${p5.id}`, marks: `${IC}/marks?branchId=${w}&page=0`, changes: `${IC}/marks/changes?branchId=${w}&since=0&tag=`, pending: `${IC}/marks/pending?branchId=${w}` }
+      const answers = {}
+      for (const [name, url] of Object.entries(urls)) { const r = await world.send('GET', url); answers[name] = [r.status, r.json && r.json.code !== undefined ? r.json.code : null] }
+      const first = JSON.stringify(answers.overlay)
+      assert.deepEqual(Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, JSON.stringify(v)])), Object.fromEntries(Object.keys(answers).map((k) => [k, first])), `B1: the word ${JSON.stringify(word)} is answered alike by every route: ${JSON.stringify(answers)}`)
+      assert.equal(answers.overlay[0] === 400, invalid.includes(word), `B1: ${JSON.stringify(word)} ${invalid.includes(word) ? 'is refused' : 'is accepted'}: ${JSON.stringify(answers)}`)
+    }
   })
   // I7: a rolled-back database. The device cursor is past the restored log: its events are replaced by others with the same ids.
   await step('I7 rolled-back database forces a rebuild', async () => {
@@ -496,6 +708,13 @@ const MUTANTS = [
   { name: 'mA2 no walk on create', file: LIB, from: "row.action === 'create' || Number(row.decides) === 1", to: 'Number(row.decides) === 1', red: 'W1 plain submission' },
   { name: 'mA3 no walk on a line decision', file: LIB, from: "json_extract(after_json,'$.approval') IS NOT NULL ELSE 1 END AS decides", to: "json_extract(after_json,'$.approval') IS NOT NULL AND (product_id IS NULL OR json_extract(after_json,'$.state') IS NOT NULL OR json_extract(after_json,'$.superseded_by') IS NOT NULL) ELSE 1 END AS decides", red: 'W7 line reject' },
   { name: 'mA4 the device drops a held list between answers', model: { dropHeld: true }, worlds: ['r4b'], red: 'A1d unrelated answer keeps the held list' },
+  { name: 'mw8 legacy sessions cost nothing in the walk', file: LIB, from: 'if (freshSession) { charged.add(sid); legacyCost += items }', to: 'if (freshSession) { charged.add(sid); legacyCost += 0 }', red: 'L1b' },
+  // mw17 as the amendment words it (the line decision's -end event) is an equivalent mutant: the line's own event names the session and carries $.approval. The reject-whole event is the one a writer has alone.
+  { name: 'mw17 reject whole writes no event naming its session', file: 'src/lib/inventoryCheckApprovals.ts', from: "eventStatement(actor, { sessionId, action: 'observe', key, hash, before: { approval: 'pending', lines: row.lines }, after: { approval: 'rejected', lines: row.lines }, result: { sessionRevision: session.revision }, now }),", to: '', red: 'W8b' },
+  { name: 'mx2 waiting judged from the totals (no received dates in the line set)', file: 'src/lib/inventoryCheckSessions.ts', from: 'eps: string, dated = true): string =>', to: 'eps: string, dated = false): string =>', red: 'W2' },
+  { name: 'mx10 a takeover records the landed line only later (applied_json kept)', file: 'src/lib/inventoryCheckApprovals.ts', from: 'newApplied: appliedJson(folded.lines, folded.held), unseenIds: JSON.stringify(unseen) }', to: 'newApplied: row.applied_json, unseenIds: JSON.stringify(unseen) }', red: 'W10' },
+  { name: 'mx11 a Set never closes the Issue', file: 'src/lib/stockSetClosesIssue.ts', from: '@now,@now,@now WHERE ${CLOSABLE}`, params },', to: '@now,@now,@now WHERE 0`, params },', red: 'W11' },
+  { name: 'mb1 /overlay accepts only nine digits of branch', file: 'src/routes/inventoryChecks.ts', from: '!/^\\d+$/.test(branchWord)', to: '!/^\\d{1,9}$/.test(branchWord)', red: 'B1' },
   { name: 'mw14 legacy without a.status = pending', file: LIB, from: "a.line_set_json IS NULL AND a.session_id IS NOT NULL AND a.status = 'pending' AS legacy", to: 'a.line_set_json IS NULL AND a.session_id IS NOT NULL AS legacy', red: 'L2' },
 ]
 const SWITCHES = { ic_simple: 'on', ic_marks: 'on', ic_wired: 'on', ic_fix_stock: 'on', ic_lot_counts: 'on', catalog_ranked_scope: 'on' }
