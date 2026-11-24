@@ -242,3 +242,22 @@ test('the Closed late "when" is the late close, not a later administrator time e
   const cleared = { ...editRow, id: 11, after_json: JSON.stringify({ time_review: [] }) }
   assert.equal(model.lateCloseReview([closeRow, editRow, cleared]), null, 'a newest row without the entry is no standing review')
 })
+
+// F2 (shiftf3): the on-screen reason line under the card.
+const textOf = (node: any): string => Array.isArray(node) ? node.map(textOf).join('') : typeof node === 'string' || typeof node === 'number' ? String(node) : node?.props ? textOf(node.props.children) : ''
+async function onScreenReason(source = REPORT) {
+  const late = await run(lateHistory(), source)
+  const line = late.view.nodes(late.tree).find((node: any) => node.type === 'p' && textOf(node.props.children).startsWith('shift_closed_late'))
+  assert.ok(line, 'the report shows an on-screen Closed late line')
+  const text = textOf(line.props.children)
+  for (const part of ['Forgot to close', 'sokha', formatters.fmtDateTime24(CLOSED_AT)]) assert.ok(text.includes(part), `the on-screen line holds ${part}`)
+  const onTime = await run({ shift: baseShift({ closing_counted_usd: 120 }), amendments: [] }, source)
+  assert.ok(!onTime.view.nodes(onTime.tree).some((node: any) => node.type === 'p' && textOf(node.props.children).startsWith('shift_closed_late')), 'a shift closed on time has no such line')
+}
+
+test('the Reports screen shows the Closed late reason, who and when under the card', async () => { await onScreenReason() })
+
+test('mutant: the on-screen reason line removed fails the on-screen test', async () => {
+  const mutant = mutate(REPORT, '{review ? <p className="min-w-0 break-words text-xs text-gray-700', '{false ? <p className="min-w-0 break-words text-xs text-gray-700')
+  await assert.rejects(() => onScreenReason(mutant), /the report shows an on-screen Closed late line/)
+})
