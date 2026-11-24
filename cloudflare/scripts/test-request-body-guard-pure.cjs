@@ -150,7 +150,7 @@ async function main() {
     '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
     '../lib/portalText': load('lib/portalText.ts'),
     '../lib/portalSession': {
-      createPortalSession: async () => ({ token: '', expiresAt: '' }),
+      createPortalSessionReplacingPresented: async () => ({ token: '', expiresAt: '' }), createPortalSession: async () => ({ token: '', expiresAt: '' }),
       setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},
       getPortalAccountState: async () => ({ status: 'unauthenticated', account: null }),
     },

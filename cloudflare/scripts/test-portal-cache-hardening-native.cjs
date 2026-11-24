@@ -119,7 +119,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/portalImagePrivacy': loadReal('lib/portalImagePrivacy.ts'),
   '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
   '../lib/portalSession': {
-    createPortalSession: async () => ({}), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},
+    createPortalSessionReplacingPresented: async () => ({ token: '', expiresAt: '' }), createPortalSession: async () => ({}), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},
     getPortalAccountState: async () => ({ status: 'unauthenticated', account: null }),
   },
   '../lib/portalAuthLockout': { getPortalLockoutState: async () => ({ locked: false }), recordPortalFailure: async () => ({}), clearPortalLockout: async () => {} },

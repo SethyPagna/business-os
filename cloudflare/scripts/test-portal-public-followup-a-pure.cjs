@@ -80,7 +80,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/portalText': loadReal('lib/portalText.ts'),
   '../lib/portalImagePrivacy': loadReal('lib/portalImagePrivacy.ts'),
   '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
-  '../lib/portalSession': { createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
+  '../lib/portalSession': { createPortalSessionReplacingPresented: async () => ({ token: '', expiresAt: '' }), createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
   '../lib/portalAuthLockout': { getPortalLockoutState: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), recordPortalFailure: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), clearPortalLockout: async () => {} },
   '../lib/phone': { canonicalizePhone: (value) => String(value || '').replace(/\D/g, '') || null },
   '../lib/fileAssets': { buildUniqueStoredName: (name) => name },

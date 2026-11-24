@@ -336,7 +336,8 @@ check('positive control: the scanner reports one of every forbidden pattern', ()
     "SELECT COUNT(*) FROM portal_sessions WHERE account_id = @a AND (last_seen_at > datetime(created_at, '+60 seconds') OR 1)",
     "SELECT 1 FROM portal_sessions s WHERE s.token_hash = @h AND substr(s.expires_at, 1, 19) > @now",
     "SELECT 1 FROM portal_sessions WHERE @now < substr(expires_at, 1, 19)",
-    "SELECT 1 FROM portal_sessions WHERE substring(expires_at, 1, 19) <= datetime(@now)",    // R2-4: a column wrapped in a bracket, coalesce(), ifnull(), trim(), CAST(), a || chain or a nested substr() is still raw text
+    // R2-4: a column wrapped in a bracket, coalesce(), ifnull(), trim(), CAST(), a || chain or a nested substr() is still raw text
+    "SELECT 1 FROM portal_sessions WHERE substring(expires_at, 1, 19) <= datetime(@now)",
     "SELECT 1 FROM portal_sessions WHERE (expires_at) < @now",
     "SELECT 1 FROM portal_sessions WHERE @now > (expires_at)",
     "SELECT 1 FROM portal_sessions WHERE coalesce(expires_at, '') < @now",
@@ -380,7 +381,8 @@ check('positive control: look-alikes report nothing', () => {
     "SELECT 1 FROM portal_sessions WHERE (datetime(last_seen_at) > datetime(created_at, '+60 seconds') OR 1)",
     "SELECT 1 FROM portal_sessions WHERE substr(token_hash, 1, 4) <> 'tg1:' AND (revoked_at IS NULL OR id > 0)",
     "SELECT substr(expires_at, 1, 10) AS day FROM portal_sessions WHERE id = @id",
-    "SELECT 1 FROM portal_accounts WHERE id IN (SELECT account_id FROM portal_sessions WHERE datetime(expires_at) > datetime(@now))",    // R2-4 look-alikes: the outermost call is datetime() or julianday(); another table's column; no column at all
+    // R2-4 look-alikes: the outermost call is datetime() or julianday(); another table's column; no column at all
+    "SELECT 1 FROM portal_accounts WHERE id IN (SELECT account_id FROM portal_sessions WHERE datetime(expires_at) > datetime(@now))",
     "SELECT 1 FROM portal_sessions WHERE datetime(coalesce(expires_at, '')) < datetime(@now)",
     "SELECT 1 FROM portal_sessions WHERE datetime(ifnull(expires_at, @x)) > datetime(@now)",
     "SELECT 1 FROM portal_sessions WHERE julianday(trim(expires_at)) < julianday(@now)",

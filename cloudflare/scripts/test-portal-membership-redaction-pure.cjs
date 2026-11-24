@@ -88,7 +88,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   // The membership route is disabled, so these account libs are imported by
   // portal.ts but never invoked here — stub them so the module loads.
   '../lib/portalAccounts': { signupPortalAccount: async () => ({ ok: false }), signinPortalAccount: async () => ({ ok: false }) },
-  '../lib/portalSession': { createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
+  '../lib/portalSession': { createPortalSessionReplacingPresented: async () => ({ token: '', expiresAt: '' }), createPortalSession: async () => ({ token: '', expiresAt: '' }), setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {}, getPortalAccount: async () => null },
   '../lib/portalAuthLockout': { getPortalLockoutState: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), recordPortalFailure: async () => ({ locked: false, failedCount: 0, retryAfterSeconds: 0 }), clearPortalLockout: async () => {} },
   '../lib/phone': { canonicalizePhone: (v) => String(v || '').replace(/\D/g, '') || null },
   '../lib/fileAssets': { buildUniqueStoredName: (n) => n },
