@@ -1,4 +1,6 @@
 import type { Shift, ShiftAmendment } from '../../api/shiftTransport.ts'
+import { holdsCostViewGrant } from '../../utils/acquisitionCostAccess.ts'
+import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 
 function jsonRecord(raw: string): Record<string, unknown> {
   try {
@@ -198,6 +200,35 @@ export function shiftRegisteredCash(shift: Shift): { open: ShiftCountPairValue; 
 
 export function shiftFiguresOf(shift: Shift): ShiftFiguresShape | null {
   return (shift as ShiftWithFigures).figures ?? null
+}
+
+const SHIFT_FIGURE_COST_KEYS = [
+  'cogs_usd', 'profit_usd', 'profit_without_not_paid_usd', 'cost_missing_snapshot_lines',
+  'removal_loss_usd', 'revenue_after_losses_usd', 'profit_after_losses_usd', 'removal_loss_unvalued_rows',
+] as const
+
+/**
+ * What one viewer may see of a shift answer, through ONE rule for every shift screen (the card, the detail, the POS close summary, the Reports shift report and
+ * its print and CSV). Owner, A71 + Q4: employees see nothing new of shift results, and profit follows "View product costs".
+ *   - The Business results block and the cash comparison (with what changed after close) are the administrator's, as the Worker sends them
+ *     (routes/shifts.ts canManageShifts); everyone else keeps only the registered counts on the row, their own drawer.
+ *   - Inside the block, COGS, profit and the removal-loss figures stay only for a holder of the View product costs grant (cloudflare/src/lib/shiftReconciliation.ts
+ *     SHIFT_FIGURE_COST_KEYS): absent, never zero.
+ * Pure; the received shift is returned itself when nothing is removed, and never mutated.
+ */
+export function shiftFiguresForViewer<T extends Shift | null | undefined>(shift: T, user: PermissionUser): T {
+  if (!shift) return shift
+  if (!isAdminControlUser(user)) return { ...shift, reconciliation: null, figures: null, close_drift: null }
+  const figures = (shift as ShiftWithFigures).figures
+  if (!figures || holdsCostViewGrant(user)) return shift
+  return { ...shift, figures: shiftFiguresWithoutCosts(figures) }
+}
+
+/** The figures with the cost keys ABSENT (a screen cannot tell 0 from hidden), the mirror of the Worker's gateShiftFiguresCosts. */
+export function shiftFiguresWithoutCosts(figures: ShiftFiguresShape): ShiftFiguresShape {
+  const kept: Record<string, unknown> = { ...figures }
+  for (const key of SHIFT_FIGURE_COST_KEYS) delete kept[key]
+  return kept as ShiftFiguresShape
 }
 
 export type ShiftRegisteredRow = { key: string; fallback: string; usd: number | null; khr: number | null; added?: true }

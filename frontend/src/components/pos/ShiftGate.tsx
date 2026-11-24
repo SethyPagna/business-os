@@ -15,7 +15,7 @@ import { TimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftHeaderRow from '../shifts/ShiftHeaderRow.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCashUsedLabels, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
-import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional } from '../shifts/shiftReportModel.ts'
+import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional, shiftFiguresForViewer } from '../shifts/shiftReportModel.ts'
 import { retiredBranchNotice } from '../shifts/retiredBranchNotice.ts'
 import { shiftCloseTimeRefusalText } from '../shifts/shiftCloseTimeError.ts'
 
@@ -794,8 +794,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
 
   const now = useWallClock(open && !closed)
   const receivedShift = closed || target || state?.shift || null
-  const shift = receivedShift && !isAdminControlUser(user)
-    ? { ...receivedShift, reconciliation: null, figures: null } : receivedShift
+  const shift = shiftFiguresForViewer(receivedShift, user)
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
   // The same earlier-day row the gate offers, for the case where TODAY is
   // already registered so the gate's prompt is gone. Offered whenever the

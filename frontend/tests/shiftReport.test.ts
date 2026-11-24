@@ -133,7 +133,8 @@ test('Reports uses authorized selection/detail and shared comparison rows rather
   assert.doesNotMatch(report, /fetchCurrentShift/)
   assert.match(report, /shiftComparisonRows\(shift\)/)
   assert.match(breakdown, /shiftComparisonRows\(\{ reconciliation \}\)/)
-  assert.match(report, /isAdminControlUser\(user\)/, 'cached admin response is gated after permission revocation')
+  assert.match(report, /shiftFiguresForViewer\(receivedShift, user\)/, 'cached admin response is gated after permission revocation, through the one viewer rule')
+  assert.match(fs.readFileSync(new URL('../src/components/shifts/shiftReportModel.ts', import.meta.url), 'utf8'), /if \(!isAdminControlUser\(user\)\) return \{ \.\.\.shift, reconciliation: null, figures: null, close_drift: null \}/, 'and that rule drops the block and the drawer from a non-administrator')
 })
 
 const figures: ShiftFiguresShape = {

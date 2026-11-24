@@ -7,8 +7,8 @@ import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
 import ShiftReportFigures from './ShiftReportFigures.tsx'
 import ShiftCloseDriftNote from './ShiftCloseDriftNote.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftAdditionalCash, shiftCountedPairText, shiftDrawerSourceBadge, shiftNotCounted } from './shiftReportModel.ts'
-import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
+import { shiftAdditionalCash, shiftCountedPairText, shiftDrawerSourceBadge, shiftFiguresForViewer, shiftNotCounted } from './shiftReportModel.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 
 type Props = {
   shift: Shift
@@ -28,7 +28,7 @@ function duration(shift: Shift, t: (key: string) => string): string {
 
 export default function ShiftSummary({ shift: receivedShift, detail = false, closedLate = false, className = '' }: Props) {
   const { user } = useApp() as { user: PermissionUser }
-  const shift = isAdminControlUser(user) ? receivedShift : { ...receivedShift, reconciliation: null, figures: null, close_drift: null }
+  const shift = shiftFiguresForViewer(receivedShift, user)
   const { t, fmtUSD, fmtKHR } = useApp() as {
     t: (key: string) => string
     fmtUSD: (value: unknown) => string

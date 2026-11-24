@@ -1,0 +1,14 @@
+{
+  "note": "One user-shape table for who reads which half of a shift answer (owner A71 + Q4: employees see nothing new of shift results; profit follows View product costs). figures = the Business results block, drawer = the cash comparison and what changed after close (administrator only), grant = holds View product costs. Cost keys (COGS, profit, removal loss) are in the answer only when figures AND grant. Read by cloudflare/scripts/test-shift-profit-permission-pure.cjs and frontend/tests/shiftProfitPermission.test.ts.",
+  "users": [
+    { "name": "administrator", "role_code": "admin", "role_permissions": null, "permissions": null, "grant": true, "figures": true, "drawer": true },
+    { "name": "administrator with the grant stored off", "role_code": "admin", "role_permissions": null, "permissions": "{\"product_cost_view\":false}", "grant": true, "figures": true, "drawer": true },
+    { "name": "full access role", "role_code": "manager", "role_permissions": "{\"all\":true}", "permissions": null, "grant": true, "figures": true, "drawer": true },
+    { "name": "manager with the grant", "role_code": "manager", "role_permissions": "{\"pos\":true,\"sales\":true,\"product_cost_view\":true}", "permissions": null, "grant": true, "figures": false, "drawer": false },
+    { "name": "manager without the grant", "role_code": "manager", "role_permissions": "{\"pos\":true,\"sales\":true}", "permissions": null, "grant": false, "figures": false, "drawer": false },
+    { "name": "employee without the grant", "role_code": "employee", "role_permissions": "{\"pos\":true}", "permissions": null, "grant": false, "figures": false, "drawer": false },
+    { "name": "employee with the grant on the account", "role_code": "employee", "role_permissions": "{\"pos\":true}", "permissions": "{\"product_cost_view\":true}", "grant": true, "figures": false, "drawer": false },
+    { "name": "employee whose own setting turns the role grant off", "role_code": "employee", "role_permissions": "{\"pos\":true,\"product_cost_view\":true}", "permissions": "{\"product_cost_view\":false}", "grant": false, "figures": false, "drawer": false },
+    { "name": "edit-only role", "role_code": "manager", "role_permissions": "{\"pos\":true,\"product_cost_edit\":true}", "permissions": null, "grant": false, "figures": false, "drawer": false }
+  ]
+}

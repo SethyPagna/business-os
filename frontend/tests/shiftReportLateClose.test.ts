@@ -25,7 +25,7 @@ const formatters = require('../src/utils/formatters.ts')
 
 function loadModel(source: string): Record<string, unknown> {
   const mod: any = { exports: {} }
-  new Function('require', 'module', 'exports', transformSync(source, { loader: 'ts', format: 'cjs' }).code)((id: string) => require(id), mod, mod.exports)
+  new Function('require', 'module', 'exports', transformSync(source, { loader: 'ts', format: 'cjs' }).code)((id: string) => require(id.startsWith('../../utils/') ? id.replace('../../utils/', '../src/utils/') : id), mod, mod.exports)
   return mod.exports
 }
 

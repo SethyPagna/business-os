@@ -12,7 +12,7 @@ import {
 } from '../../../api/shiftTransport.ts'
 import { useApp } from '../../../AppContext.tsx'
 import { fmtDateOnly, fmtDateTime24 } from '../../../utils/formatters.ts'
-import { isAdminControlUser, type PermissionUser } from '../../../utils/permissions.ts'
+import type { PermissionUser } from '../../../utils/permissions.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../../shared/PaginationControls.tsx'
 import SuggestionTextInput from '../../shared/SuggestionTextInput.tsx'
@@ -22,7 +22,7 @@ import { openPrintExport } from '../../../utils/exportOptions.ts'
 import ShiftHistoryPanel from '../../shifts/ShiftHistoryPanel.tsx'
 import ShiftSummary from '../../shifts/ShiftSummary.tsx'
 import ShiftHeaderRow from '../../shifts/ShiftHeaderRow.tsx'
-import { lateCloseReview, shiftCloseDriftRows, shiftComparisonRowNotCounted, shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows, shiftRowNotCounted } from '../../shifts/shiftReportModel.ts'
+import { lateCloseReview, shiftCloseDriftRows, shiftComparisonRowNotCounted, shiftComparisonRows, shiftFigureRows, shiftFiguresForViewer, shiftFiguresOf, shiftRegisteredRows, shiftRowNotCounted } from '../../shifts/shiftReportModel.ts'
 import { Button, EmptyState, OverflowMenu, Skeleton } from '../../shared/kit'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import { reportFileName, reportQueryParams } from './reportModel.ts'
@@ -68,8 +68,7 @@ export default function ShiftReport(p: ReportViewProps) {
     window.addEventListener(SHIFT_STATE_CHANGED_EVENT, refresh)
     return () => window.removeEventListener(SHIFT_STATE_CHANGED_EVENT, refresh)
   }, [listing.reload, state.reload])
-  const shift = receivedShift && !isAdminControlUser(user)
-    ? { ...receivedShift, reconciliation: null, figures: null, close_drift: null } : receivedShift
+  const shift = shiftFiguresForViewer(receivedShift, user)
 
   // Closed late: read from the history response the report already holds (no second fetch), by the one shared reader.
   const review = useMemo(() => (shift?.closed_at ? lateCloseReview((state.data?.amendments ?? []).filter((row) => row.shift_session_id === shift.id)) : null), [shift, state.data])
