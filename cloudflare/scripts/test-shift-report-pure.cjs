@@ -306,7 +306,7 @@ const ORDER = [
   'Revenue', 'Profit', 'Delivery fee', 'Still owed', 'Refunds',
   // 3. Cash count -- opening, the change used, closing, then the one
   // informational expected/difference pair.
-  'Opening cash', 'Additional change used', 'Closing cash', 'Expected cash', 'Difference',
+  'Opening cash', 'Cash used', 'Closing cash', 'Expected cash', 'Difference',
   // 6. Expenses -- the total, after its own bullets.
   'Total',
 ]
@@ -449,7 +449,7 @@ console.log('PASS honesty: an unrecorded courier cost prints no line and enters 
 assert.equal(lines.filter((line) => line.startsWith(`${lang.ROW_BULLET}Difference${SEP}`)).length, 1)
 // opening 50 + cash 210 - refunds 12 - expenses 4 - courier 3.50 = 240.50,
 // counted 256 -> +15.50. Riel: 100,000 in, 100,000 counted -> 0.
-assert.equal(valueOf('Additional change used'), '$10.00 · 5,000៛')
+assert.equal(valueOf('Cash used'), '$10.00 · 5,000៛')
 assert.equal(valueOf('Expected cash'), '$250.50 · 105,000៛')
 assert.equal(valueOf('Difference'), '+$5.50 · −5,000៛')
 assert.equal(50 + 210 - 12 - 4 - 3.5, 240.5)

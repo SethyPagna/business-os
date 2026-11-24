@@ -84,13 +84,12 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
       {/* Six units on a phone: Open and Close take three each, then Before, Additional and
           After take two each, so the card stays two short rows at 360px (the cash values
           wrap inside their cell instead of widening it). From sm the five cells are one
-          row. The label is the short pack word; the full "Additional change used" is its
-          tooltip. */}
+          row. The label is the full "Cash used", the same word the report and the form use. */}
       <dl className="mt-2 grid min-w-0 grid-cols-6 gap-x-3 gap-y-2 text-xs sm:grid-cols-5">
         <div className="col-span-3 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_open_time', 'Open')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{shiftCellTime(shift.opened_at, shift.business_date)}</dd></div>
         <div className="col-span-3 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_close_time', 'Close')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{closeTime}</dd></div>
         <div className="col-span-2 min-w-0 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{before}</dd></div>
-        <div className="col-span-2 min-w-0 sm:col-span-1" title={tr('shift_recon_additional_cash', 'Additional change used')}><dt className="text-gray-500 dark:text-gray-400">{tr('shift_additional_short', 'Additional')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{between}</dd></div>
+        <div className="col-span-2 min-w-0 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_recon_additional_cash', 'Cash used')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{between}</dd></div>
         <div className="col-span-2 min-w-0 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_after', 'After')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{after}</dd></div>
       </dl>
 

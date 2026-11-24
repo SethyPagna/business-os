@@ -259,7 +259,7 @@ const SWITCH = {
   returns: 'telegram_summary_returns_enabled', expenses: 'telegram_summary_expenses_enabled', compare: 'telegram_summary_compare_enabled',
 }
 // The default overview is SIX sections (owner, 13 Oct 2026, item 14: the shift
-// cash lines Opening -> Additional change used -> Closing are shown everywhere,
+// cash lines Opening -> Cash used -> Closing are shown everywhere,
 // always, $0 included). The sixth is the Cash count of the shift that just closed:
 // it is that shift's own count and not a day-wide extra, so it is not one of the
 // Settings switches below and the 29 Sep "overview only by default" rule still holds
@@ -275,8 +275,8 @@ async function main() {
   const quiet = await overview(envA)
   check('switches unset: the overview is the short default, six sections (the Cash count of the closing shift included, 13 Oct 2026)', JSON.stringify(headersOf(quiet.text)) === JSON.stringify(DEFAULT_HEADERS), quiet.text)
   const quietLines = quiet.text.split('\n')
-  check('switches unset: the Cash count is Opening, Additional change used ($0.00 · 0៛, a measured zero) and Closing, and the shift ID is printed once, in the header',
-    JSON.stringify(rowsUnder(quiet.text, '=====Cash count=====')) === JSON.stringify(['· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛'])
+  check('switches unset: the Cash count is Opening, Cash used ($0.00 · 0៛, a measured zero) and Closing, and the shift ID is printed once, in the header',
+    JSON.stringify(rowsUnder(quiet.text, '=====Cash count=====')) === JSON.stringify(['· Opening cash: $10.00 · 10,000៛', '· Cash used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛'])
       && quietLines[4].startsWith('· ID: S-20260923-') && quietLines.filter((line) => line.includes(quietLines[4].slice('· ID: '.length))).length === 1, quiet.text)
   check('switches unset: the kernel is asked only what the default needs', kernelCalls.length === 2 && kernelCalls[1][2] === 'payment_method', JSON.stringify(kernelCalls))
   check('switches unset: no extra query runs', !preparedSql.some((sql) => /return_items|inventory_movements|payment_details/.test(sql)), preparedSql.filter((sql) => /return_items|inventory_movements|payment_details/.test(sql)).join('\n---\n'))
@@ -374,7 +374,7 @@ async function main() {
     '=====Invoices=====', '· Total: 18 · Cancelled: 1',
     '=====Payment methods=====', '· Cash: 12 · $300.0000', '· ABA Pay: 6 · $112.5000',
     '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00',
-    '=====Cash count=====', '· Opening cash: $10.00 · 10,000៛', '· Additional change used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛',
+    '=====Cash count=====', '· Opening cash: $10.00 · 10,000៛', '· Cash used: $0.00 · 0៛', '· Closing cash: $120.00 · 50,000៛',
     '=====Cashiers=====', '· Za: 12 · $300.0000', '· Sok: 6 · $112.5000',
     '=====Top products=====', '· Rose Serum: 9 · $180.00', '· Lip Tint: 7 · $84.00', '· Toner: 5 · $60.00', '· Soap Bar: 4 · $12.00', '· Sunscreen: 2 · $30.00',
     '=====Low stock=====', '· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)',
@@ -409,7 +409,7 @@ async function main() {
   setting(shopA, 'telegram_language', 'km')
   const khmer = await overview(envA)
   check('Khmer: the new section titles and labels come out in Khmer',
-    ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '=====ការរាប់សាច់ប្រាក់=====', '· សាច់ប្រាក់ដើមវេន: $10.00 · 10,000៛', '· ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛', '· សាច់ប្រាក់បិទវេន: $120.00 · 50,000៛', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· ម្សិលមិញ: $375.00 · +10%',
+    ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '=====ការរាប់សាច់ប្រាក់=====', '· សាច់ប្រាក់ដើមវេន: $10.00 · 10,000៛', '· សាច់ប្រាក់បានប្រើ: $0.00 · 0៛', '· សាច់ប្រាក់បិទវេន: $120.00 · 50,000៛', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· ម្សិលមិញ: $375.00 · +10%',
       '· ចំនួនស្មើជារៀល: 41,000៛', '· ថ្ងៃនីមួយៗរហូតដល់: 18:31'].every((line) => khmer.text.split('\n').includes(line)) && !khmer.text.split('\n').includes('· រៀល: 41,000៛'),
     khmer.text)
   const packs = Object.fromEntries(['en', 'km'].map((pack) => [pack, JSON.parse(fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'lang', `${pack}.json`), 'utf8'))]))

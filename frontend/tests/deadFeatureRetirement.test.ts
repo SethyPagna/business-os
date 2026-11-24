@@ -168,6 +168,7 @@ const retiredKeys = [
   'all_custom_tables',
   'camera_permission_ready',
   'perm_section_users',
+  'shift_additional_short',
   'stock_desc_in',
   'stock_desc_low',
   'stock_desc_out',

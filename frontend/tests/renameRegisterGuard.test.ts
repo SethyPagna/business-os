@@ -156,6 +156,12 @@ const RULES: Rule[] = [
     ],
   },
   {
+    // A70, 23 Nov: the extra change used in a shift is "Cash used" on every surface; only the words changed.
+    id: 'R17 Cash used, not Additional change used', owner: '23 Nov (A70): "Additional change used" becomes "Cash used"',
+    old: /additional change used|ប្រាក់អាប់បន្ថែមដែលបានប្រើ/i, sampleOld: "optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)')", sampleNew: "optionalShiftCount(input.additionalCashUsd, 'Cash used (USD)')",
+    packs: ['en', 'km'], code: true, worker: true,
+  },
+  {
     id: 'R8 concise delivery fee (Khmer fallbacks)', owner: '10 Sep: ថ្លៃដឹក for the fee',
     old: /ថ្លៃដឹកជញ្ជូន/, sampleOld: 'កែថ្លៃដឹកជញ្ជូន?', sampleNew: 'កែថ្លៃដឹក?',
     packs: [], code: true, worker: true,
@@ -169,6 +175,7 @@ for (const rule of RULES) {
   assert.match(rule.sampleOld, rule.old, `${rule.id}: the pattern must catch the retired wording`)
   assert.doesNotMatch(rule.sampleNew, rule.old, `${rule.id}: the pattern must spare the new wording`)
 }
+assert.match('ប្រាក់អាប់បន្ថែមដែលបានប្រើ', RULES.find((rule) => rule.id.startsWith('R17'))!.old, 'R17: the retired Khmer pair is caught too')
 assert.equal(stripComments("// Field history\nconst a = 'Records'").includes('Field history'), false, 'a // comment is dropped')
 assert.equal(stripComments("{/* Review Required */}<b>{t('x')}</b>").includes('Review Required'), false, 'a JSX comment is dropped')
 assert.equal(stripComments("const u = 'https://leangbeauty.com/'; const b = 'Possible Duplicates'").includes('Possible Duplicates'), true, 'code after a URL survives')
@@ -231,7 +238,7 @@ const CANONICAL: Array<[key: string, english: string, khmer: string]> = [
   ['items', 'Items', 'មុខទំនិញ'],
   ['field_history', 'Records', 'កំណត់ត្រា'],
   ['shift_counted_cash', 'Closing cash', 'សាច់ប្រាក់បិទវេន'],
-  ['shift_additional_cash', 'Additional change used', 'ប្រាក់អាប់បន្ថែមដែលបានប្រើ'],
+  ['shift_additional_cash', 'Cash used', 'សាច់ប្រាក់បានប្រើ'],
 ]
 for (const [key, english, khmer] of CANONICAL) {
   assert.equal(en[key], english, `en.json "${key}" must stay ${english}`)

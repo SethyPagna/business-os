@@ -14,7 +14,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //   3. the route passes the account USERNAME (lib/actorSnapshot.ts) and no other
 //      send passes one -- never a phone number or an email, even when the
 //      session user carries both;
-//   4. the three shift cash rows (Opening, Additional change used, Closing) are
+//   4. the three shift cash rows (Opening, Cash used, Closing) are
 //      still all there on an amended report, in order.
 //
 // Run (from cloudflare/): node scripts/test-telegram-shift-amend-actor-pure.cjs

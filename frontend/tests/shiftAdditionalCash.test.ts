@@ -155,17 +155,16 @@ test('the form label, the report row and the breakdown say one thing, in both pa
     assert.equal(pack.shift_additional_cash, pack.shift_recon_additional_cash,
       `${lang}: the close form and the report/breakdown row must not say different things`)
   }
-  assert.equal(en.shift_additional_cash, 'Additional change used')
-  assert.equal(km.shift_additional_cash, 'ប្រាក់អាប់បន្ថែមដែលបានប្រើ')
-  // The Khmer reuses the packs' own word for change money rather than minting
-  // a rival one, and repeats the label's verb on the two inputs.
-  assert.equal(km.change, 'ប្រាក់អាប់')
-  assert.ok(km.shift_additional_cash.includes(km.change))
-  for (const key of ['shift_additional_usd', 'shift_additional_khr']) {
-    assert.ok(km[key].includes('បានប្រើ'), `km ${key} says used, like its label`)
-  }
-  assert.match(en.shift_additional_usd, /USD/)
-  assert.match(en.shift_additional_khr, /KHR/)
+  assert.equal(en.shift_additional_cash, 'Cash used')
+  // PROVISIONAL Khmer (owner question Q6 is open): candidate 1. A later choice changes the values only.
+  assert.equal(km.shift_additional_cash, 'សាច់ប្រាក់បានប្រើ')
+  // The Khmer reads like the opening and closing cash rows (same first word), and the two inputs are just the
+  // currency: the label already says what the money is.
+  assert.ok(km.shift_additional_cash.startsWith('សាច់ប្រាក់') && km.shift_counted_cash.startsWith('សាច់ប្រាក់'))
+  assert.deepEqual([en.shift_additional_khr, en.shift_additional_usd], ['Riel', 'Dollars'])
+  assert.deepEqual([km.shift_additional_khr, km.shift_additional_usd], ['រៀល', 'ដុល្លារ'])
+  assert.equal(en.shift_additional_cash_hint, 'Change money added during the shift.')
+  assert.equal(km.shift_additional_cash_hint, 'ប្រាក់អាប់ដាក់បន្ថែមក្នុងវេន។')
 })
 
 test('the owner\'s example and the report-only rule live behind the InfoHint, not inline', () => {
@@ -194,7 +193,7 @@ test('the owner\'s example and the report-only rule live behind the InfoHint, no
   }
   assert.match(read('../src/components/shifts/ShiftCountFields.tsx'), /hintDetail \? <InfoHint/, 'the pair renders the detail as an InfoHint')
   // The difference formula names the same term as the field it sums.
-  assert.match(en.shift_difference_hint, /additional change used/)
+  assert.match(en.shift_difference_hint, /cash used/)
   assert.ok(km.shift_difference_hint.includes(km.shift_additional_cash))
 })
 
@@ -276,7 +275,7 @@ test('the on-screen report prints Open -> Additional change used -> End, with $0
     const rows = registeredBlock(closedShiftRow({ usd: 0, khr: 0 }))
     assert.equal(rows.length, 3, 'the Khmer report has all three rows too')
     assert.equal(rows[1], `${km.shift_recon_additional_cash}: $0.00 · 0៛`)
-    assert.match(rows[1], /ប្រាក់អាប់បន្ថែមដែលបានប្រើ/)
+    assert.match(rows[1], /សាច់ប្រាក់បានប្រើ/)
   } finally { pack = en }
 })
 
@@ -292,7 +291,7 @@ test('the CSV and the print carry the additional row as a zero line', () => {
   assert.deepEqual(csv, [
     'Section,Line,USD,KHR',
     `Registered cash,${en.shift_registered_open},10,10000`,
-    'Registered cash,Additional change used,0,0',
+    'Registered cash,Cash used,0,0',
     `Registered cash,${en.shift_registered_end},120,50000`,
   ])
   // The print goes through the SAME rows into the real document builder: a 0 must
@@ -301,7 +300,7 @@ test('the CSV and the print carry the additional row as a zero line', () => {
   const tableRows = [...html.matchAll(/<tr>(.*?)<\/tr>/g)].map((match) => [...match[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((cell) => cell[1])).filter((cells) => cells.length)
   assert.deepEqual(tableRows, [
     ['Registered cash', en.shift_registered_open, '10', '10000'],
-    ['Registered cash', 'Additional change used', '0', '0'],
+    ['Registered cash', 'Cash used', '0', '0'],
     ['Registered cash', en.shift_registered_end, '120', '50000'],
   ], 'the printed table carries the Additional change used row as 0 / 0')
 })

@@ -3,7 +3,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // have the opening closing and additional used."
 //
 // The drawer has THREE registered cash figures, in this order (owner, 14 Sep
-// 2026: opening -> additional -> closing): Opening, Additional change used (the
+// 2026: opening -> additional -> closing): Opening, Cash used (the
 // extra change money put in mid-shift and spent), and Closing counted. The shift
 // report printed the additional row ONLY when it was non-zero, so every shift
 // that never needed more change showed Opening and Closing with the middle line
@@ -238,6 +238,9 @@ function registeredRowsOk(text, { closing, mode } = {}) {
         { en: pack.en.shift_additional_cash, km: pack.km.shift_additional_cash },
         { en: pack.en.shift_counted_cash, km: pack.km.shift_counted_cash },
       ])
+    // A70: the words themselves, so a pack and a Telegram label that drift together still fail. The Khmer is PROVISIONAL
+    // (owner question Q6); a later choice changes this value and the two packs' values, nothing else.
+    assert.deepEqual(lang.TELEGRAM_LABELS.additionalCash, { en: 'Cash used', km: 'សាច់ប្រាក់បានប្រើ' })
     assert.equal(pack.en.shift_additional_cash, pack.en.shift_recon_additional_cash)
     assert.equal(pack.km.shift_additional_cash, pack.km.shift_recon_additional_cash)
   })
@@ -327,7 +330,7 @@ function registeredRowsOk(text, { closing, mode } = {}) {
         assert.ok(at >= 0, `[${mode}] no opening row:\n${text}`)
         assert.deepEqual(rows.slice(at, at + 3), expectedRows(mode), `[${mode}] the three rows, adjacent and in order:\n${text}`)
         if (mode === 'en') assert.ok(!/[ក-៿]/.test(text.replace(/៛/g, '')), 'en mode carries no Khmer word')
-        if (mode === 'km') assert.ok(!/Additional change used|Opening cash|Closing cash/.test(text), 'km mode carries no English label')
+        if (mode === 'km') assert.ok(!/Cash used|Opening cash|Closing cash/.test(text), 'km mode carries no English label')
       }
     } finally { setLanguage('both') }
   })

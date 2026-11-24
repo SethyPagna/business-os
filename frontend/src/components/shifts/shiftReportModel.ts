@@ -254,7 +254,7 @@ export function shiftRegisteredRows(shift: Shift): ShiftRegisteredRow[] {
   return [
     { key: 'shift_registered_open', fallback: 'OPEN', usd: registered.open.usd, khr: registered.open.khr },
     {
-      key: 'shift_recon_additional_cash', fallback: 'Additional change used', usd: additional.usd, khr: additional.khr,
+      key: 'shift_recon_additional_cash', fallback: 'Cash used', usd: additional.usd, khr: additional.khr,
       ...(additional.usd || additional.khr ? { added: true as const } : {}),
     },
     { key: 'shift_registered_end', fallback: 'END', usd: registered.end.usd, khr: registered.end.khr },
