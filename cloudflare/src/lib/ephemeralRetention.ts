@@ -25,6 +25,7 @@
 
 import { getDb } from './db'
 import { getPlanLimits } from './planTier'
+import { portalNowIso } from './portalTelegramToken'
 import { sqliteUtcTimestamp } from './rateLimit'
 import { deleteObjectsBulk } from './r2'
 import type { Env } from '../index'
@@ -348,7 +349,11 @@ export async function maybeRunScheduledEphemeralRetention(env: Env, group?: Ephe
   }
   if (want('auth')) {
     await step('user_sessions', (b) => batchDeleteById(env, db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}, b), shared)
-    await step('portal_sessions', (b) => batchDeleteById(env, db, 'portal_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}, b), shared)
+    // S-R1. datetime() on both sides: a raw `expires_at < CURRENT_TIMESTAMP` keeps an ISO row (written by the Worker)
+    // of the same UTC day, because 'T' sorts after ' '. Covers expired Telegram tickets too (they are rows here).
+    await step('portal_sessions', (b) => batchDeleteById(env, db, 'portal_sessions', 'revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND datetime(expires_at) < datetime(@now))', { now: portalNowIso() }, b), shared)
+    // S-R2. Open or stale Telegram join starts; a rowid table holding only those, so the scan is small.
+    await step('portal_telegram_pending', (b) => batchDeleteById(env, db, 'portal_telegram_pending', 'datetime(expires_at) < datetime(@now)', { now: portalNowIso() }, b), shared)
     const verificationNow = Date.now()
     await step('verification_codes', (b) => batchDeleteById(env, db, 'verification_codes', `
       created_at <= @historyCutoff

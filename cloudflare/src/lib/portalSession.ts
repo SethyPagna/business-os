@@ -4,6 +4,8 @@ import { getDb } from './db'
 import { PORTAL_CONSENT_VERSION, portalConsentCurrent } from './portalAccounts'
 import type { Env } from '../index'
 import { customerIsProfileSql } from './anonymousCustomer'
+import { getPlanLimits } from './planTier'
+import { portalNowIso, secondsAgoModifier } from './portalTelegramToken'
 
 // Customer (storefront) sessions. A deliberate, SEPARATE fork of lib/auth.ts's
 // staff session model — different table (portal_sessions), different cookie
@@ -14,7 +16,7 @@ import { customerIsProfileSql } from './anonymousCustomer'
 // Both cookies are host-only (no Domain=), so a cookie set on the public
 // origin (leangbeauty.com) is never sent to admin.leangbeauty.com.
 
-const PORTAL_COOKIE_NAME = 'bos_portal'
+export const PORTAL_COOKIE_NAME = 'bos_portal'
 // RFC 6265bis cookie Expires ceiling (Hono throws past ~400 days) — same cap
 // lib/auth.ts uses.
 const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
@@ -35,16 +37,16 @@ const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
 // cookie was never re-issued: a customer who visited daily was still signed
 // out at 399 days. Matching the two ceilings fixes the retention hole and
 // turns the sliding back on.
-const PORTAL_SESSION_MS = MAX_COOKIE_AGE_MS
+export const PORTAL_SESSION_MS = MAX_COOKIE_AGE_MS
 const SLIDE_AFTER_FRACTION = 0.5
 
-async function hashToken(token: string): Promise<string> {
+export async function hashToken(token: string): Promise<string> {
   const data = new TextEncoder().encode(token)
   const digest = await crypto.subtle.digest('SHA-256', data)
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-function randomToken(): string {
+export function randomToken(): string {
   const bytes = new Uint8Array(32)
   crypto.getRandomValues(bytes)
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -78,14 +80,18 @@ export async function createPortalSession(
 ): Promise<{ token: string; expiresAt: string }> {
   const token = randomToken()
   const tokenHash = await hashToken(token)
-  const expiresAt = new Date(Date.now() + PORTAL_SESSION_MS).toISOString()
+  const nowMs = Date.now()
+  const nowIso = portalNowIso(nowMs)
+  const expiresAt = portalNowIso(nowMs + PORTAL_SESSION_MS)
+  // S-S6. Every time is written in the one ISO form (design 1.3), never the column default.
   await getDb(env).prepare(`
-    INSERT INTO portal_sessions (account_id, token_hash, expires_at)
-    VALUES (@account_id, @token_hash, @expires_at)
+    INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at)
+    VALUES (@account_id, @token_hash, @expires_at, @now, @now)
   `).run({
     account_id: accountId,
     token_hash: tokenHash,
     expires_at: expiresAt,
+    now: nowIso,
   })
   return { token, expiresAt }
 }
@@ -108,72 +114,98 @@ export function clearPortalCookie<E extends { Bindings: Env } = { Bindings: Env 
   deleteCookie(c, PORTAL_COOKIE_NAME, { path: '/' })
 }
 
+// Today's time parser: a stored time is either the column default (`YYYY-MM-DD HH:MM:SS`, UTC) or ISO.
+function asUtc(value: string): number {
+  const text = String(value).trim()
+  const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(text) ? text.replace(' ', 'T') : `${text.replace(' ', 'T')}Z`
+  return Date.parse(normalized)
+}
+
 export async function getPortalAccountState<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<PortalAccountState> {
   const token = getCookie(c, PORTAL_COOKIE_NAME)
   if (!token) return { status: 'unauthenticated', account: null }
   const tokenHash = await hashToken(token)
-  const nowIso = new Date().toISOString()
+  const nowMs = Date.now()
+  const nowIso = portalNowIso(nowMs)
   const db = getDb(c.env)
+  // S-S1: the one statement of an authenticated request. It refuses a Telegram ticket (the `tg1:` prefix) on its
+  // own, a second refusal beside the structural one (a ticket is never the hash of any cookie). It also returns the
+  // session's own times, so the stamp and the slide below need no read of their own.
   const row = await db.prepare(`
     SELECT a.id, a.membership_id, a.member_code, a.name, a.phone, a.email, a.contact_id,
-           a.consent_version, a.consent_at, a.age_confirmed_at
+           a.consent_version, a.consent_at, a.age_confirmed_at,
+           s.created_at AS session_created_at, s.expires_at AS session_expires_at, s.last_seen_at AS session_last_seen_at
     FROM portal_sessions s
     JOIN portal_accounts a ON a.id = s.account_id
     LEFT JOIN customers c ON c.id = a.contact_id
     WHERE s.token_hash = @token_hash
+      AND substr(s.token_hash, 1, 4) <> 'tg1:'
       AND s.revoked_at IS NULL
-      AND s.expires_at > @now
+      AND datetime(s.expires_at) > datetime(@now)
       AND a.status = 'active'
       AND (a.contact_id IS NULL OR (c.id IS NOT NULL AND ${customerIsProfileSql('c')}))
     LIMIT 1
-  `).get<PortalAccount & { consent_version: string | null; consent_at: string | null; age_confirmed_at: string | null }>({ token_hash: tokenHash, now: nowIso })
+  `).get<PortalAccount & {
+    consent_version: string | null; consent_at: string | null; age_confirmed_at: string | null
+    session_created_at: string | null; session_expires_at: string | null; session_last_seen_at: string | null
+  }>({ token_hash: tokenHash, now: nowIso })
   if (!row) return { status: 'unauthenticated', account: null }
   if (!portalConsentCurrent(row)) {
     return { status: 'reconsent_required', account: null, accountId: row.id, membershipId: portalActorLabel(row) }
   }
+  const { session_created_at: _created, session_expires_at: sessionExpiresAt, session_last_seen_at: sessionLastSeenAt, ...account } = row
+  void _created
 
-  c.executionCtx.waitUntil(
-    db.prepare('UPDATE portal_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?').run([tokenHash]),
-  )
-  c.executionCtx.waitUntil(slidePortalSession(c, tokenHash))
-  return { status: 'authenticated', account: row }
+  // The hourly stamp (S-S2). Due when the session was never stamped or the stamp is at least one interval old; a
+  // malformed stored time is never due. The statement repeats the interval in datetime() form, so two concurrent
+  // requests write at most once.
+  const touchSeconds = getPlanLimits(c.env).portalSessionTouchIntervalSeconds
+  const stampDue = sessionLastSeenAt == null || asUtc(sessionLastSeenAt) <= nowMs - touchSeconds * 1000
+  if (stampDue) {
+    c.executionCtx.waitUntil(
+      db.prepare(`
+        UPDATE portal_sessions SET last_seen_at = @now
+        WHERE token_hash = @token_hash
+          AND substr(token_hash, 1, 4) <> 'tg1:'
+          AND revoked_at IS NULL
+          AND datetime(expires_at) > datetime(@now)
+          AND (last_seen_at IS NULL OR datetime(last_seen_at) < datetime(@now, @touch_window))
+      `).run({ token_hash: tokenHash, now: nowIso, touch_window: secondsAgoModifier(touchSeconds) }),
+    )
+  }
+  const expiresAt = sessionExpiresAt == null ? NaN : asUtc(sessionExpiresAt)
+  if (Number.isFinite(expiresAt)) {
+    // The lifetime is the constant, never expires_at - created_at (that grows with every slide, review 6).
+    const ttlMs = PORTAL_SESSION_MS
+    if (expiresAt - nowMs <= ttlMs * (1 - SLIDE_AFTER_FRACTION)) {
+      // never past the cookie ceiling, whatever the lifetime constant is
+      c.executionCtx.waitUntil(slidePortalSession(c, tokenHash, nowMs + Math.min(ttlMs, MAX_COOKIE_AGE_MS)))
+    }
+  }
+  return { status: 'authenticated', account }
 }
 
 export async function getPortalAccount<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<PortalAccount | null> {
   return (await getPortalAccountState(c)).account
 }
 
-// Same inactivity-sliding contract as lib/auth.ts::slideSessionExpiry — keeps
-// an actively-used account signed in without ever shortening its window.
-async function slidePortalSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, tokenHash: string): Promise<void> {
+// Same inactivity-sliding contract as lib/auth.ts::slideSessionExpiry -- keeps an actively-used account signed in
+// without ever shortening its window. Only called when the slide is due (S-S1 returned the times); S-S3 writes only a
+// later expiry, so concurrent requests write once.
+async function slidePortalSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, tokenHash: string, nextExpiryMs: number): Promise<void> {
   try {
-    const db = getDb(c.env)
-    const session = await db.prepare(
-      'SELECT created_at, expires_at FROM portal_sessions WHERE token_hash = ? LIMIT 1',
-    ).get<{ created_at: string; expires_at: string }>([tokenHash])
-    if (!session?.created_at || !session?.expires_at) return
-    const asUtc = (value: string): number => {
-      const text = String(value).trim()
-      const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(text) ? text.replace(' ', 'T') : `${text.replace(' ', 'T')}Z`
-      return Date.parse(normalized)
-    }
-    const createdAt = asUtc(session.created_at)
-    const expiresAt = asUtc(session.expires_at)
-    if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) return
-    const ttlMs = expiresAt - createdAt
-    if (ttlMs <= 0) return
-    const now = Date.now()
-    if (expiresAt - now > ttlMs * (1 - SLIDE_AFTER_FRACTION)) return
-    const nextExpiry = Math.min(now + ttlMs, now + MAX_COOKIE_AGE_MS)
-    if (nextExpiry <= expiresAt) return
-    const nextExpiryIso = new Date(nextExpiry).toISOString()
-    await db.prepare(
-      'UPDATE portal_sessions SET expires_at = @expires_at WHERE token_hash = @token_hash AND revoked_at IS NULL',
-    ).run({ expires_at: nextExpiryIso, token_hash: tokenHash })
+    const nextExpiryIso = portalNowIso(nextExpiryMs)
+    await getDb(c.env).prepare(`
+      UPDATE portal_sessions SET expires_at = @next_expires_at
+      WHERE token_hash = @token_hash
+        AND substr(token_hash, 1, 4) <> 'tg1:'
+        AND revoked_at IS NULL
+        AND datetime(expires_at) < datetime(@next_expires_at)
+    `).run({ next_expires_at: nextExpiryIso, token_hash: tokenHash })
     const token = getCookie(c, PORTAL_COOKIE_NAME)
     if (token) setPortalCookie(c, token, nextExpiryIso)
   } catch (_) {
-    // Best effort — a missed slide just leaves the current expiry in place.
+    // Best effort -- a missed slide just leaves the current expiry in place.
   }
 }
 
@@ -181,15 +213,54 @@ export async function revokePortalSession<E extends { Bindings: Env } = { Bindin
   const token = getCookie(c, PORTAL_COOKIE_NAME)
   if (!token) return
   const tokenHash = await hashToken(token)
-  await getDb(c.env).prepare('UPDATE portal_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?').run([tokenHash])
+  // S-S4
+  await getDb(c.env).prepare(`
+    UPDATE portal_sessions SET revoked_at = @now
+    WHERE token_hash = @token_hash
+      AND substr(token_hash, 1, 4) <> 'tg1:'
+      AND revoked_at IS NULL
+  `).run({ now: portalNowIso(), token_hash: tokenHash })
 }
 
-// Kill every live session for an account — used after a password reset so a
-// stolen/forgotten password can't keep a session alive elsewhere.
+// Kill every live session for an account -- used after a password reset so a stolen/forgotten password can't keep a
+// session alive elsewhere. By account, so it revokes an unclaimed Telegram ticket too, which is wanted (S-S5).
 export async function revokePortalSessionsForAccount(env: Env, accountId: number): Promise<void> {
   await getDb(env).prepare(
-    'UPDATE portal_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE account_id = @account_id AND revoked_at IS NULL',
-  ).run({ account_id: accountId })
+    'UPDATE portal_sessions SET revoked_at = @now WHERE account_id = @account_id AND revoked_at IS NULL',
+  ).run({ now: portalNowIso(), account_id: accountId })
+}
+
+// S-D1: the devices a member is signed in on. Live, not revoked, not a ticket, and either touched more than 60 s
+// after creation or created within the last day (so an orphan from a lost claim response stops counting after a day).
+// One call, no write.
+export async function countPortalDevices(env: Env, accountId: number, nowIso: string): Promise<number> {
+  const row = await getDb(env).prepare(`
+    SELECT COUNT(*) AS n FROM portal_sessions
+    WHERE account_id = @account_id
+      AND revoked_at IS NULL
+      AND substr(token_hash, 1, 4) <> 'tg1:'
+      AND datetime(expires_at) > datetime(@now)
+      AND (datetime(last_seen_at) > datetime(created_at, '+60 seconds')
+           OR datetime(created_at) > datetime(@now, @device_window))
+  `).get<{ n: number }>({
+    account_id: accountId,
+    now: nowIso,
+    // A fixed day: a display rule, not a plan budget, so it is not a limit field (design 7, S-D1).
+    device_window: secondsAgoModifier(86_400),
+  })
+  return Number(row?.n ?? 0)
+}
+
+// S-D2: sign out other devices. Every other session of the member and every unclaimed ticket is revoked (the ticket
+// has no cookie, so it is matched by "not the current hash"). Exported by name: it is one of the statements allowed to
+// name token_hash without the ticket predicate (design 6.1, test T-F2). Returns the rows revoked.
+export const S_D2 = `
+  UPDATE portal_sessions SET revoked_at = @now
+  WHERE account_id = @account_id AND revoked_at IS NULL AND token_hash <> @token_hash
+`
+export async function revokeOtherPortalSessions(env: Env, accountId: number, currentTokenHash: string, nowIso: string): Promise<number> {
+  const result = await getDb(env).prepare(S_D2).run({ now: nowIso, account_id: accountId, token_hash: currentTokenHash })
+  return result.changes || 0
 }
 
 // Hono middleware for the storefront's own account routes. Reads ONLY
