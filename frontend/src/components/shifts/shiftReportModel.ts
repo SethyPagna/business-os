@@ -35,6 +35,11 @@ export function shiftRowNotCounted(row: Pick<ShiftRegisteredRow, 'key'>, shift: 
   return row.key === 'shift_registered_end' && shiftNotCounted(shift, closedLate)
 }
 
+/** Is this breakdown row the closing count of a shift closed late with no count? Same rule as the END row, asked of the breakdown. */
+export function shiftComparisonRowNotCounted(row: { key: string }, shift: Shift, closedLate: boolean): boolean {
+  return row.key === 'shift_recon_counted' && shiftNotCounted(shift, closedLate)
+}
+
 /** True when a shift closed late has no closing count in either currency: it says "Not counted (closed late)", not a bare dash. */
 export function shiftNotCounted(shift: Shift, closedLate: boolean): boolean {
   const end = shiftRegisteredCash(shift).end

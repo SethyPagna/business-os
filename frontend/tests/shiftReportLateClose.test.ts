@@ -261,3 +261,21 @@ test('mutant: the on-screen reason line removed fails the on-screen test', async
   const mutant = mutate(REPORT, '{review ? <p className="min-w-0 break-words text-xs text-gray-700', '{false ? <p className="min-w-0 break-words text-xs text-gray-700')
   await assert.rejects(() => onScreenReason(mutant), /the report shows an on-screen Closed late line/)
 })
+
+// F3 (shiftf3): the breakdown's Closing cash line in the CSV and the print.
+const drawer = {
+  opening: { usd: 10, khr: 10000 }, additional_cash: { usd: 0, khr: 0 }, cash_sales: { usd: 50, khr: 0 }, refunds: { usd: 0, khr: 0 }, expenses: { usd: 0, khr: 0 }, courier: { usd: 0, khr: 0 },
+  expected: { usd: 60, khr: 10000 }, counted: { usd: null, khr: null }, difference: { usd: null, khr: null }, needs_review: false, review_codes: [],
+}
+const countedLine = (rows: any[]) => rows.find((row) => row.Section === 'shift_cash_breakdown' && row.Line.startsWith('shift_recon_counted'))?.Line as string
+async function breakdownCounted(modelSource = MODEL) {
+  const late = await run(lateHistory({ reconciliation: drawer }), REPORT, modelSource)
+  for (const rows of [late.csv.rows, late.print.rows]) assert.equal(countedLine(rows), 'shift_recon_counted · shift_late_not_counted', 'a late close with no count says Not counted (closed late) on the Closing cash line')
+  const sameDay = await run({ shift: baseShift({ reconciliation: drawer }), amendments: [] }, REPORT, modelSource)
+  for (const rows of [sameDay.csv.rows, sameDay.print.rows]) assert.equal(countedLine(rows), 'shift_recon_counted', 'a same-day close with no count keeps today\'s plain Closing cash line')
+}
+test('the Closing cash line of the breakdown says Not counted (closed late) in the CSV and the print, only on a late close', async () => { await breakdownCounted() })
+test('mutant: the late text on a same-day close fails the breakdown test', async () => {
+  const mutant = mutate(MODEL, "return row.key === 'shift_recon_counted' && shiftNotCounted(shift, closedLate)", "return row.key === 'shift_recon_counted' && !!shift.closed_at")
+  await assert.rejects(() => breakdownCounted(mutant), /same-day close with no count keeps/)
+})

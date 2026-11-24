@@ -16,6 +16,8 @@ import type { ShiftReconciliation } from '../../api/shiftTransport.ts'
 
 type Props = {
   reconciliation: ShiftReconciliation | null | undefined
+  /** The shift was closed late and has no closing count: the Closing cash row says so instead of a dash. */
+  notCounted?: boolean
   className?: string
 }
 
@@ -30,7 +32,7 @@ const REVIEW_KEYS: Record<string, string> = {
   reopened_after_earlier_close: 'shift_review_reopened_after_earlier_close',
 }
 
-export default function ShiftCashBreakdown({ reconciliation, className = '' }: Props) {
+export default function ShiftCashBreakdown({ reconciliation, notCounted = false, className = '' }: Props) {
   const { t, fmtUSD, fmtKHR } = useApp() as {
     t: (key: string) => string
     fmtUSD: (value: unknown) => string
@@ -75,7 +77,7 @@ export default function ShiftCashBreakdown({ reconciliation, className = '' }: P
         <div className="flex min-w-0 items-baseline justify-between gap-3 py-1">
           <dt className="shrink-0 text-gray-500 dark:text-gray-400">{t('shift_recon_counted')}</dt>
           <dd className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">
-            {countedPair(reconciliation.counted.usd, reconciliation.counted.khr)}
+            {notCounted ? t('shift_late_not_counted') : countedPair(reconciliation.counted.usd, reconciliation.counted.khr)}
           </dd>
         </div>
         {/* INFORMATIONAL, not a verdict. Owner ruling (Sep 6 2026): the

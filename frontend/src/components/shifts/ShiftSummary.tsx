@@ -119,7 +119,7 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
                 Telegram shift report prints. When the server sent no breakdown
                 (an old row, or a list read) the before/after pair still stands. */}
             {shift.reconciliation
-              ? <ShiftCashBreakdown className="mt-2" reconciliation={shift.reconciliation} />
+              ? <ShiftCashBreakdown className="mt-2" reconciliation={shift.reconciliation} notCounted={shiftNotCounted(shift, closedLate)} />
               : (
                 <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
                   <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="font-medium">{before}</dd></div>

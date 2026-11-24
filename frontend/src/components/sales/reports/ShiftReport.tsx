@@ -22,7 +22,7 @@ import { openPrintExport } from '../../../utils/exportOptions.ts'
 import ShiftHistoryPanel from '../../shifts/ShiftHistoryPanel.tsx'
 import ShiftSummary from '../../shifts/ShiftSummary.tsx'
 import ShiftHeaderRow from '../../shifts/ShiftHeaderRow.tsx'
-import { lateCloseReview, shiftCloseDriftRows, shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows, shiftRowNotCounted } from '../../shifts/shiftReportModel.ts'
+import { lateCloseReview, shiftCloseDriftRows, shiftComparisonRowNotCounted, shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows, shiftRowNotCounted } from '../../shifts/shiftReportModel.ts'
 import { Button, EmptyState, OverflowMenu, Skeleton } from '../../shared/kit'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import { reportFileName, reportQueryParams } from './reportModel.ts'
@@ -96,7 +96,7 @@ export default function ShiftReport(p: ReportViewProps) {
       })),
       ...shiftComparisonRows(shift).map((row) => ({
         Section: tr('shift_cash_breakdown', 'Cash breakdown'),
-        Line: tr(row.key, row.key),
+        Line: shiftComparisonRowNotCounted(row, shift, closedLate) ? `${tr(row.key, row.key)} · ${tr('shift_late_not_counted', 'Not counted (closed late)')}` : tr(row.key, row.key),
         USD: row.usd ?? '',
         KHR: row.khr ?? '',
       })),

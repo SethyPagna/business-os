@@ -105,3 +105,33 @@ test('mutant: the detail text removed fails the detail test', async () => {
 test('each mutant is seen only by its own test: the card mutant leaves the detail text', async () => {
   await detailText([CARD_MUTANT])
 })
+
+// F3 (shiftf3): the breakdown's "Closing cash" row, through the same rule as the END row.
+const money = (usd: number | null, khr: number | null) => ({ usd, khr })
+const reconciliation = {
+  opening: money(10, 10000), additional_cash: money(0, 0), cash_sales: money(50, 0), refunds: money(0, 0), expenses: money(0, 0), courier: money(0, 0),
+  expected: money(60, 10000), counted: money(null, null), difference: money(null, null), needs_review: false, review_codes: [],
+}
+const withDrawer = (patch: Partial<Shift> = {}) => shiftRow({ reconciliation, reconciliation_source: 'stored', ...patch } as Partial<Shift>)
+function closingCash(html: string): string {
+  const match = html.match(/<dt[^>]*>Closing cash<\/dt><dd[^>]*>(.*?)<\/dd>/)
+  assert.ok(match, 'the Closing cash row of the breakdown')
+  return match[1]
+}
+const BREAKDOWN_MUTANT: Mutation = { file: 'ShiftSummary.tsx', from: 'notCounted={shiftNotCounted(shift, closedLate)}', to: 'notCounted={!!shift.closed_at}' }
+
+async function breakdownText(mutations: Mutation[] = []) {
+  assert.equal(closingCash(render(withDrawer(), { detail: true, closedLate: true }, mutations)), NOT_COUNTED, 'a late close with no count says Not counted (closed late) in the breakdown')
+  assert.equal(closingCash(render(withDrawer(), { detail: true, closedLate: false }, mutations)), '—', 'a same-day close with no count keeps the dash in the breakdown')
+}
+test('the breakdown Closing cash row says Not counted (closed late) on a late close with no count', async () => { await breakdownText() })
+test('the breakdown shows a count that was taken, late or not', () => {
+  const counted = withDrawer({ closing_counted_usd: 60, closing_counted_khr: 10000, reconciliation: { ...reconciliation, counted: money(60, 10000) } } as Partial<Shift>)
+  assert.match(closingCash(render(counted, { detail: true, closedLate: true })), /\$60\.00/)
+})
+test('mutant: the same-day close shows the late text in the breakdown', async () => {
+  await assert.rejects(() => breakdownText([BREAKDOWN_MUTANT]), /same-day close with no count keeps the dash in the breakdown/)
+})
+test('mutant: the breakdown prop removed fails the breakdown test', async () => {
+  await assert.rejects(() => breakdownText([{ ...BREAKDOWN_MUTANT, to: '' }]), /late close with no count says Not counted \(closed late\) in the breakdown/)
+})
