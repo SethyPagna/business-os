@@ -86,6 +86,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { isCashPaymentMethod, parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 import { posExactRielTender, posRielCashRowIds } from './posRielCash.ts'
+import { fitCartWidth } from './posCartFit.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import {
@@ -1178,6 +1179,21 @@ export default function POS() {
   // Complete Sale is pinned to the bottom of the cart. While that cart is on screen (always beside the products from md
   // up; the Cart tab on a phone) the scroll buttons step aside and docked floats such as the notes tab sit just above it.
   // (The install band keeps off the whole till by page id: see pageHasBottomActionBar.)
+  const [panelsRowFit, setPanelsRowFit] = useState({ rowPx: 0, productsMinPx: 280 })
+  useEffect(() => {
+    const row = mainPanelsRef.current
+    if (!row) return
+    const measure = () => {
+      const productsMinPx = window.matchMedia('(min-width: 1024px)').matches ? 352 : 288
+      const rowPx = row.getBoundingClientRect().width
+      setPanelsRowFit((prev) => (prev.rowPx === rowPx && prev.productsMinPx === productsMinPx ? prev : { rowPx, productsMinPx }))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(row)
+    return () => observer.disconnect()
+  }, [])
+  const fittedCartWidthPx = fitCartWidth(panelsRowFit.rowPx, cartWidthPx, panelsRowFit.productsMinPx)
   const completeSaleRef = useRef<HTMLButtonElement | null>(null)
   useBottomActionBar({ visible: isActive && (isDesktopViewport || mobileView === 'cart'), actionRef: completeSaleRef })
   const clampCartWidth = useCallback((px: number) => {
@@ -1289,17 +1305,6 @@ export default function POS() {
     setCartDetailsPct(CART_SPLIT_DEFAULT_PCT)
     writePosStorage('local', CART_SPLIT_STORAGE_KEY, String(CART_SPLIT_DEFAULT_PCT))
   }, [])
-
-  // Re-clamp a stored/dragged width against the window itself resizing
-  // (e.g. moving to a smaller monitor, or a browser window shrink) so the
-  // products panel never gets pushed to an unusably small width just by
-  // the window changing size -- clampCartWidth otherwise only runs live
-  // while actively dragging.
-  useEffect(() => {
-    const handleResize = () => setCartWidthPx((current) => clampCartWidth(current))
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [clampCartWidth])
 
   const [detailProduct,    setDetailProduct]    = useState<ProductRecord | null>(null)
   const [loading,          setLoading]          = useState(false)
@@ -3855,7 +3860,7 @@ export default function POS() {
         <div
           ref={cartPanelRef}
           className={`flex flex-col flex-shrink-0 w-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 h-full min-h-0 ${mobileView === 'products' ? 'hidden md:flex' : 'flex'}`}
-          style={isDesktopViewport ? { width: `${cartWidthPx}px`, minWidth: `${cartWidthPx}px` } : undefined}
+          style={isDesktopViewport ? { width: `${fittedCartWidthPx}px`, minWidth: `${fittedCartWidthPx}px` } : undefined}
         >
 
           {/* Order tabs. N4: the Shift-history / End-Shift group used to sit
@@ -3865,7 +3870,7 @@ export default function POS() {
               were reachable only by swiping the tab strip sideways. The
               scroller now holds only the order tabs; the group is its own
               non-scrolling cell pinned beside it. */}
-          <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+          <div className="flex-shrink-0 flex w-full min-w-0 items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
           <div className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x">
             {orders.map((order, orderIndex) => (
               <div key={order.id} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer
