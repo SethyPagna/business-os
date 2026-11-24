@@ -117,7 +117,7 @@ check('T-C2 the stage: absent is 0, 1 is paused, anything else is 3', async () =
 })
 
 check('T-C2 the switch is on only for the text true', async () => {
-  for (const [value, enabled] of [['true', true], ['TRUE', true], [' true ', true], ['false', false], ['1', false], ['yes', false], ['', false], [null, false]]) {
+  for (const [value, enabled] of [['true', true], ['TRUE', false], ['True', false], [' true ', false], ['false', false], ['1', false], ['yes', false], ['', false], [null, false]]) {
     assert.equal(gateLib.gateFromRows([{ key: 'customer_portal_telegram_signin_enabled', value }]).enabled, enabled, String(value))
   }
 })

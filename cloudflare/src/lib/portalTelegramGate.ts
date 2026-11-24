@@ -6,7 +6,7 @@ import type { D1Compat } from './db'
 // Design: AMEND-g38-lean-writes-1.2 sections 2.9, 8.1 and 8.3. Nothing imports this file until S3e mounts the routes.
 //
 // Settings keys read here (S5 adds them to the settings screen and its key lists):
-//   customer_portal_telegram_signin_enabled  the switch; only the text 'true' (any case) turns it on
+//   customer_portal_telegram_signin_enabled  the switch; only the exact text 'true' turns it on (ruling, wave 2)
 //   system_budget_stage                      0 normal, 1 to 3 paused; absent = 0, any other text = 3 (fail closed)
 
 export const TELEGRAM_SIGNIN_SWITCH_KEY = 'customer_portal_telegram_signin_enabled'
@@ -32,7 +32,7 @@ export function gateFromRows(rows: ReadonlyArray<{ key?: unknown; value?: unknow
   let enabled = false
   let stageValue: unknown
   for (const row of rows) {
-    if (row.key === TELEGRAM_SIGNIN_SWITCH_KEY) enabled = String(row.value ?? '').trim().toLowerCase() === 'true'
+    if (row.key === TELEGRAM_SIGNIN_SWITCH_KEY) enabled = row.value === 'true'
     else if (row.key === BUDGET_STAGE_KEY) stageValue = row.value
   }
   return { enabled, stage: budgetStageFrom(stageValue) }
