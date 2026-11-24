@@ -24,7 +24,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const SRC = path.join(path.dirname(here), 'src')
 
 const FIXTURE: Record<string, string> = {
-  portal_legal_official_notice: "English and Khmer are the official text. The four marked languages are machine translations by Google. If a translation differs, the English or Khmer text applies.",
+  portal_legal_official_notice: "English and Khmer are the official text. The Simplified Chinese, Traditional Chinese, French and Spanish versions are machine translations by Google. If a translation differs, the English or Khmer text applies.",
   portal_legal_terms_returns_h: "Return policy",
   portal_legal_terms_nopayment_h: "You cannot pay on this site",
   portal_legal_terms_use_h: "Rules for using this site",
@@ -124,6 +124,10 @@ const renderPage = (page: string, language: 'en' | 'km', props: Record<string, u
 runTest('the official-text notice is a pack key in English and Khmer', () => {
   assert.equal(PORTAL_LEGAL_EN.portal_legal_official_notice, NOTICE)
   assert.ok(KHMER.test(KM_NOTICE))
+  // Ruling C (24 Nov 2026): the notice names the four Google languages; "the four marked languages" read to Google as
+  // "marked with an asterisk", which the page does not have.
+  assert.ok(KM_NOTICE.includes('កំណែភាសាចិនសាមញ្ញ ចិនប្រពៃណី បារាំង និងអេស្ប៉ាញ ជាការបកប្រែដោយម៉ាស៊ីនរបស់ Google។'), 'the Khmer notice names the four languages')
+  assert.doesNotMatch(KM_NOTICE, /ដែលមានសញ្ញា/, 'the Khmer notice says "marked" again')
   const packs = ['en.json', 'km.json'].map((name) => JSON.parse(fs.readFileSync(path.join(SRC, 'lang', name), 'utf8')) as Record<string, string>)
   assert.equal(packs[0].portal_legal_official_notice, NOTICE)
   assert.equal(packs[1].portal_legal_official_notice, KM_NOTICE)
