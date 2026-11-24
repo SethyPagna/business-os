@@ -86,11 +86,16 @@ function accountsModule(db, source = readSrc('lib/portalAccounts.ts'), extra = {
 
 const jar = { value: null }
 const cookieStub = { getCookie: () => jar.value, setCookie: (_c, _n, value) => { jar.value = value }, deleteCookie: () => { jar.value = null } }
+// G38 S3f: the session module now reads the plan limits and the ISO helpers (loader only; no assertion changed).
+const planTier = loadReal('lib/planTier.ts')
+const telegramToken = loadSource(readSrc('lib/portalTelegramToken.ts'), 'lib/portalTelegramToken.ts', { './phone': phone, './planTier': planTier })
 function sessionModule(db, accounts, source = readSrc('lib/portalSession.ts')) {
   return loadSource(source, 'lib/portalSession.ts', {
     './db': { getDb: () => db },
     './portalAccounts': accounts,
     './anonymousCustomer': anonymousCustomer,
+    './planTier': planTier,
+    './portalTelegramToken': telegramToken,
     'hono/cookie': cookieStub,
   })
 }

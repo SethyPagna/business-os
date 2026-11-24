@@ -82,10 +82,14 @@ const accounts = loadReal('lib/portalAccounts.ts', {
 })
 
 const jar = { value: null }
+// G38 S3f: the session module now reads the plan limits and the ISO helpers (loader only; no assertion changed).
+const planTier = loadReal('lib/planTier.ts')
 const session = loadReal('lib/portalSession.ts', {
   './db': dbModule,
   './portalAccounts': accounts,
   './anonymousCustomer': anonymousCustomer,
+  './planTier': planTier,
+  './portalTelegramToken': loadReal('lib/portalTelegramToken.ts', { './phone': phone, './planTier': planTier }),
   'hono/cookie': { getCookie: () => jar.value, setCookie: (_c, _n, value) => { jar.value = value }, deleteCookie: () => { jar.value = null } },
 })
 const pending = []

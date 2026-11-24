@@ -104,7 +104,11 @@ const cookieStub = {
 
 const rawDb = openDb(allMigrationSql())
 const db = wrap(rawDb)
+// G38 S3f: the session module now reads the plan limits and the ISO helpers.
+const planTier = loadReal('lib/planTier.ts')
 const session = loadReal('lib/portalSession.ts', {
+  './planTier': planTier,
+  './portalTelegramToken': loadReal('lib/portalTelegramToken.ts', { './phone': loadReal('lib/phone.ts'), './planTier': planTier }),
   './db': { getDb: () => db },
   './portalAccounts': loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db },
