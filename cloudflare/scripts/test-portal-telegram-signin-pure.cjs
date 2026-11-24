@@ -368,6 +368,23 @@ check('T-C7 a refused confirm writes 0 rows and stamps nobody: R-USED, also for 
   assert.equal(db.account(other).last_seen_at, '2026-11-20 08:00:00', 'member 2 is not marked as seen')
 })
 
+// R2-3 (review F3): the account half of S-C4's binding. Member 2 taps inside the same second as member 1's confirm, so the
+// ticket's created_at matches @now; only s.account_id = portal_accounts.id keeps member 2 unstamped.
+check('R2-3 S-C4 binds the ticket to its member: member 2 tapping a used token inside the same second is not stamped', async () => {
+  for (const delta of [0, 400, 900]) {
+    const db = makeDb()
+    db.member(MEMBER_TG, 'active', '2026-11-20 07:00:00')
+    const other = db.member(OTHER_TG, 'active', '2026-11-20 08:00:00')
+    const text = await freshToken()
+    const { right } = await choiceFor(text)
+    assert.equal((await tap(db, text, right, MEMBER_TG, T0)).id, 'R-SIGNED-IN')
+    db.resetCounters()
+    assert.equal((await tap(db, text, right, OTHER_TG, T0 + delta)).id, 'R-USED', `delta ${delta}`)
+    assert.equal(db.changes, 0, `member 2 changed no row at +${delta} ms`)
+    assert.equal(db.account(other).last_seen_at, '2026-11-20 08:00:00', `member 2 is not marked as seen at +${delta} ms`)
+  }
+})
+
 check('A2 the stamp goes in the batch that inserts the ticket of that same member, 2 rows with it', async () => {
   const db = makeDb()
   const id = db.member(MEMBER_TG, 'active', '2026-11-20 07:00:00')

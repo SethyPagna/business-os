@@ -198,7 +198,8 @@ const iso = (ms) => new Date(ms).toISOString()
 
 // B2: the per-member sign-in cap must survive the sweep. Real confirmKnownMember and the real sweep on one database:
 // ten confirms, the expired unclaimed tickets swept, then an eleventh and twelfth confirm inside the cap window.
-async function capSurvivesSweepScenario(sweepSourceText) {
+// revokedTickets (R2-3): the tickets are not expired but revoked (sign out other devices, password reset: the S-D2 / S-S5 shape).
+async function capSurvivesSweepScenario(sweepSourceText, { revokedTickets = false } = {}) {
   const raw = openDb(allMigrationSql())
   const sweepDb = wrap(raw)
   const retention = loadSweep(sweepDb, sweepSourceText)
@@ -219,7 +220,7 @@ async function capSurvivesSweepScenario(sweepSourceText) {
   ).run({ tg })
   const MIN = 60_000
   // The first confirm is 12 minutes ago; every ticket (ten minutes of life) has expired by now and was never claimed.
-  const t0 = Date.now() - 12 * MIN
+  const t0 = Date.now() - (revokedTickets ? 2 : 12) * MIN
   let n = 0
   const confirm = async (nowMs) => {
     n += 1
@@ -233,6 +234,7 @@ async function capSurvivesSweepScenario(sweepSourceText) {
   for (let i = 0; i < capMax; i += 1) first.push(await confirm(t0 + i * 1000))
   assert.deepEqual(first, Array(capMax).fill('R-SIGNED-IN'), `${capMax} confirms are signed in`)
   assert.equal(await confirm(t0 + 20_000), 'R-CAP', 'the next one in the same minute is refused')
+  if (revokedTickets) raw.prepare('UPDATE portal_sessions SET revoked_at = @now WHERE revoked_at IS NULL').run({ now: new Date().toISOString() })
   const result = await retention.maybeRunScheduledEphemeralRetention({}, 'auth')
   assert.equal(result.skipped, false)
   return { later: await confirm(Date.now()), rows: Number(raw.prepare('SELECT COUNT(*) AS n FROM portal_sessions').get().n), capMax }
@@ -443,6 +445,21 @@ async function run() {
     const out = await capSurvivesSweepScenario()
     assert.equal(out.later, 'R-CAP')
     assert.equal(out.rows, out.capMax, 'the expired tickets are still there: they leave only when created more than one cap window ago')
+  })
+
+  await check('R2-3 B2 revoked tickets count too: ten confirms, every ticket revoked, the sweep, then a confirm inside the window is R-CAP', async () => {
+    const out = await capSurvivesSweepScenario(undefined, { revokedTickets: true })
+    assert.equal(out.later, 'R-CAP')
+    assert.equal(out.rows, out.capMax, 'revoked rows leave only when created more than one cap window ago')
+  })
+
+  await check('R2-3 B2 mutant: the created_at rule applied to expired rows only (revoked rows swept at once) -> the revoked case signs in', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ephemeralRetention.ts'), 'utf8').split('\r\n').join('\n')
+    const from = "'(revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND datetime(expires_at) < datetime(@now))) AND (created_at IS NULL OR datetime(created_at) <= datetime(@now, @cap_window))'"
+    const to = "'revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND datetime(expires_at) < datetime(@now) AND (created_at IS NULL OR datetime(created_at) <= datetime(@now, @cap_window)))'"
+    assert.ok(source.includes(from), 'mutant applies')
+    const out = await capSurvivesSweepScenario(source.split(from).join(to), { revokedTickets: true })
+    assert.equal(out.later, 'R-SIGNED-IN', 'with revoked rows swept at once the cap resets, so the real revoked test above would be red')
   })
 
   await check('B2 mutant: the sweep ignores created_at -> the cap resets and the confirm signs in', async () => {
