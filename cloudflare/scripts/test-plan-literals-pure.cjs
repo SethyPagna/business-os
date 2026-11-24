@@ -289,12 +289,8 @@ const NO_READER_YET = [
   { field: 'portalTelegramPollWindowMs', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
   { field: 'portalTelegramPendingAttemptsMax', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
   { field: 'portalTelegramPendingWindowSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
-  { field: 'portalTelegramSessionsPerMemberMax', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
-  { field: 'portalTelegramSessionsPerMemberWindowSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
   { field: 'portalTelegramJoinsPerWindowMax', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
   { field: 'portalTelegramJoinsWindowSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
-  { field: 'portalTelegramGateMemoSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
-  { field: 'portalMemberSeenIntervalSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
   { field: 'portalSessionTouchIntervalSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
 ]
 
