@@ -390,20 +390,60 @@ check('control: removing any one of the four marks or either key turns the assis
 
 // The repository is public: no test may name a folder that lives outside it. The needles are built from pieces so this
 // file does not match itself.
+// d15fix2 D3: the folder name is matched in any case (the lower-case spelling is the same folder on Windows) and a
+// percent-encoded space (as in a file:// URL) counts as a word boundary, because the 0 of that encoding would
+// otherwise read as the end of a longer word. Rules, in order (the examples are built in the next check, not written here):
+//   1. The word must start a path segment: preceded by a non-word character, the start of the text, or a percent-encoded
+//      space. So a longer word (onOpen..., fetchReturn..., sale_...) followed by the slash is not the folder.
+//   2. Written in the original exact case with a slash or backslash it is flagged whatever follows (original rule, unchanged).
+//   3. In any other case, or with an encoded separator, a path must continue after it (a letter, digit, underscore or
+//      hyphen). A bare lower-case word then slash is how a regular-expression literal ends in prose or in an API path
+//      assertion, and is not a folder.
+const namesInternalRecordsFolder = (text: string): boolean => {
+  const word = 'Record' + 's'
+  const pattern = new RegExp(word + '(?:[/\\\\]|%2f|%5c)', 'gi')
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    const at = match.index
+    const startsSegment = at === 0 || !/[A-Za-z0-9_]/.test(text[at - 1]) || text.slice(Math.max(0, at - 3), at).toLowerCase() === '%20'
+    if (!startsSegment) continue
+    const exactOriginal = match[0] === word + '/' || match[0] === word + String.fromCharCode(92)
+    if (exactOriginal || /[A-Za-z0-9_-]/.test(text[at + match[0].length] ?? '')) return true
+  }
+  return false
+}
+check('the internal-folder guard sees lower case and a percent-encoded space, and still passes a longer word', () => {
+  const word = 'Record' + 's'
+  const lower = word.toLowerCase()
+  const bs = String.fromCharCode(92)
+  const named: Array<[string, string]> = [
+    ['exact case with a slash', `see ${word}/Design/a.md`],
+    ['exact case at the start of the text', `${word}/Design`],
+    ['exact case with a backslash', `C:${bs}x${bs}${word}${bs}Design`],
+    ['lower case', `see ${lower}/design/a.md`],
+    ['lower case with a backslash', `C:${bs}x${bs}${lower}${bs}design`],
+    ['upper case', `see ${word.toUpperCase()}/DESIGN/a.md`],
+    ['a percent-encoded space before it', `file:///C:/x/Organization%20${word}/AI.md`],
+    ['a percent-encoded space before it, lower case', `file:///C:/x/Organization%20${lower}/ai.md`],
+    ['a percent-encoded slash after it', `Organization%20${word}%2FDesign%2Fa.md`],
+    ['a percent-encoded backslash after it', `Organization%20${lower}%5Cdesign`],
+  ]
+  for (const [label, text] of named) assert.equal(namesInternalRecordsFolder(text), true, `${label} must be reported: ${text}`)
+  // The 13 hits in tests/ today, as rule-by-rule stand-ins: all must stay unreported.
+  const exempt: Array<[string, string]> = [
+    ['onOpen' + word + '/ (longer word)', `\`onOpen${word}/\``],
+    ['fetchReturn' + word + '/ (longer word)', `fetchReturn${word}/`],
+    ['sale_' + lower + '/ (longer word with an underscore)', `/${'sale_' + lower}/`],
+    ['regex ending after a lower-case word', `/Barcodes kept on the merged ${lower}/.test(x)`],
+    ['regex ending after an API path', `/\\/api\\/returns\\/\\$\\{id\\}\\/${lower}/)`],
+    ['regex ending in a call', `/received-date ${lower}/)`],
+    ['regex ending in a comma', `/history ${lower}/, 'explained')`],
+  ]
+  for (const [label, text] of exempt) assert.equal(namesInternalRecordsFolder(text), false, `${label} must not be reported: ${text}`)
+})
 check('no file under tests names the internal records folder', () => {
-  const needles = ['Record' + 's/', 'Record' + 's' + String.fromCharCode(92)]
   const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
     entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)])
-  const hits = walk(path.dirname(fileURLToPath(import.meta.url))).filter((file) => {
-    const text = fs.readFileSync(file, 'utf8')
-    // A folder name starts a path segment: `onOpenRecords/` or `groupedRecords\.ts` in code is not a folder.
-    return needles.some((needle) => {
-      for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
-        if (!/[A-Za-z0-9_]/.test(text[at - 1] ?? ' ')) return true
-      }
-      return false
-    })
-  })
+  const hits = walk(path.dirname(fileURLToPath(import.meta.url))).filter((file) => namesInternalRecordsFolder(fs.readFileSync(file, 'utf8')))
   assert.deepEqual(hits.map((file) => path.basename(file)), [], 'a test names a folder outside the repository')
 })
 
