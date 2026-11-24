@@ -118,7 +118,8 @@ assert.equal('portal_legal_map_consent_revoke' in PORTAL_LEGAL_KM || 'portal_leg
 // Owner, 21 Nov 2026 (A63, "Live Google map"): the About map loads straight away, with no consent click. It is the shop's own live embed:
 // lazy, no referrer beyond the origin, a translated title.
 const secondary = source('components/catalog/CatalogSecondaryTabs.tsx')
-assert.match(secondary, /<iframe\s+src=\{mapEmbedUrl \|\| ''\}[\s\S]*?loading="lazy"[\s\S]*?referrerPolicy="strict-origin-when-cross-origin"/, 'the live map is a lazy iframe with a safe referrer policy')
+assert.match(secondary, /<iframe\s+src=\{mapEmbedUrl \|\| ''\}[\s\S]*?loading="lazy"[\s\S]*?referrerPolicy=\{PORTAL_MAP_FRAME_REFERRER\}/, 'the live map is a lazy iframe with a safe referrer policy')
+assert.match(source('components/catalog/portalEditorUtils.ts'), /PORTAL_MAP_FRAME_REFERRER = 'strict-origin-when-cross-origin'/, 'the one referrer value is the origin-only policy')
 assert.doesNotMatch(secondary, /PortalEmbedConsent/, 'About no longer goes through the click-to-load gate')
 
 // The standing storefront notice used to end on "YOUR PRIVACY IS OUR PRIORITY"; an

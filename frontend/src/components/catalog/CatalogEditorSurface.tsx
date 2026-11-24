@@ -28,6 +28,7 @@ import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
 import type { PrivateAiStatus } from './portalPrivateAi.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { createEditorText } from './editor/editorText.ts'
+import { PORTAL_MAP_FRAME_REFERRER, PORTAL_MAP_FRAME_SANDBOX } from './portalEditorUtils.ts'
 import EditorBar from './editor/EditorBar.tsx'
 import {
   EDITOR_SECTIONS,
@@ -1083,7 +1084,7 @@ function CatalogEditorSurfaceContent() {
               </label>
               {draftMapEmbedUrl ? (
                 <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                  <iframe title="portal-map-preview" src={draftMapEmbedUrl} className="h-48 w-full border-0" loading="lazy" referrerPolicy="no-referrer-when-downgrade" />
+                  <iframe title="portal-map-preview" src={draftMapEmbedUrl} className="h-48 w-full border-0" loading="lazy" referrerPolicy={PORTAL_MAP_FRAME_REFERRER} sandbox={PORTAL_MAP_FRAME_SANDBOX} />
                 </div>
               ) : null}
             </div>

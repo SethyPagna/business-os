@@ -128,14 +128,29 @@ run('the details card sits beside the map on a large screen and stacks on a phon
 run('the map is live with no consent click: 16:9 wide, 4:3 on a phone, lazy, safe referrer, one Open in Maps button', () => {
   assert.doesNotMatch(tabs, /PortalEmbedConsent|mapFallbackHref|useEffect\(\(\) => \{ setGranted/, 'no click-to-load gate is used by About')
   assert.match(about, /<div className="aspect-\[4\/3\] w-full[^"]*sm:aspect-video[^"]*">\s*<iframe\s+src=\{mapEmbedUrl \|\| ''\}/, '4:3 on a phone, 16:9 from sm, the iframe fills it')
-  assert.match(about, /loading="lazy"\s+referrerPolicy="strict-origin-when-cross-origin"/)
+  assert.match(about, /loading="lazy"\s+referrerPolicy=\{PORTAL_MAP_FRAME_REFERRER\}/)
   assert.match(about, /title=\{copy\('portal_a11y_map_title'/, 'the title is kept')
   assert.match(about, /copy\('openInMaps', 'Open in Maps', 'បើកក្នុងផែនទី'\)/, 'one button, icon and the words Open in Maps')
   assert.match(about, /portalMapOpenHref\(addressFact\?\.href, addressText\)/, 'to the shop link, else a maps search for the address')
   assert.doesNotMatch(about, /<PortalEmbed/, 'control: nothing gates the iframe')
   // The sandbox does not gate loading: it keeps the frame from navigating the storefront (as the earlier consent frame did).
-  assert.match(about, /sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"/, 'the map frame is sandboxed')
+  assert.match(about, /sandbox=\{PORTAL_MAP_FRAME_SANDBOX\}/, 'the map frame is sandboxed (the value is pinned below and in the rendered check in portalAboutDetails)')
   assert.doesNotMatch(about, /sandbox="[^"]*allow-top-navigation/, 'the map frame can never navigate the storefront')
+})
+
+run('one pair of map-frame attributes, worn by the About frame and the Website Editor preview alike', () => {
+  const utils = code(read('../src/components/catalog/portalEditorUtils.ts'))
+  const editor = code(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  assert.match(utils, /export const PORTAL_MAP_FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox'/, 'the one sandbox value')
+  assert.match(utils, /export const PORTAL_MAP_FRAME_REFERRER = 'strict-origin-when-cross-origin'/, 'the one referrer value')
+  assert.doesNotMatch(utils, /allow-top-navigation/, 'the frame can never navigate the page')
+  const frame = between(editor, '<iframe title="portal-map-preview"', '/>')
+  assert.match(frame, /sandbox=\{PORTAL_MAP_FRAME_SANDBOX\}/, 'the editor preview is sandboxed')
+  assert.match(frame, /referrerPolicy=\{PORTAL_MAP_FRAME_REFERRER\}/, 'the editor preview sends the origin only')
+  assert.doesNotMatch(frame, /no-referrer-when-downgrade|allow-top-navigation/, 'neither the full referrer nor top navigation')
+  assert.match(editor, /import \{[^}]*PORTAL_MAP_FRAME_REFERRER[^}]*PORTAL_MAP_FRAME_SANDBOX[^}]*\} from '\.\/portalEditorUtils\.ts'/, 'the editor takes the values from the one module')
+  assert.match(about, /referrerPolicy=\{PORTAL_MAP_FRAME_REFERRER\}/, 'About wears the same referrer')
+  assert.match(about, /sandbox=\{PORTAL_MAP_FRAME_SANDBOX\}/, 'About wears the same sandbox')
 })
 
 run('every surface on the About page is solid: no opacity suffix, no blur, no transparent fill, in light or dark', () => {

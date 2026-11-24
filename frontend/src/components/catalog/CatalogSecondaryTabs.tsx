@@ -33,6 +33,7 @@ import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { aiConsentGiven, fillAiProviderTemplate, saveAiConsent } from './legal/aiProviderDisclosure.ts'
 import type { AiDisclosureLanguage, AiProviderState } from './legal/aiProviderDisclosure.ts'
 import { contactHref } from '../../utils/socialLinks.ts'
+import { PORTAL_MAP_FRAME_REFERRER, PORTAL_MAP_FRAME_SANDBOX } from './portalEditorUtils.ts'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -521,9 +522,9 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   src={mapEmbedUrl || ''}
                   title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
                   loading="lazy"
-                  referrerPolicy="strict-origin-when-cross-origin"
+                  referrerPolicy={PORTAL_MAP_FRAME_REFERRER}
                   // Google Maps needs scripts and its own origin; it must never navigate the storefront out from under the visitor.
-                  sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                  sandbox={PORTAL_MAP_FRAME_SANDBOX}
                   className="block h-full w-full border-0"
                   allowFullScreen
                 />
