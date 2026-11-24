@@ -35,15 +35,20 @@ function mentions(node, identifiers) {
 
 const LOGICAL = new Set([ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken])
 
-function scan(fileName, text) {
+// Named exceptions: 'src-relative file function name' -> why a writer after an early-return switch gate is correct there. Nothing else is exempt.
+const ALLOW = {
+  'routes/inventoryChecks.ts announceMarks': 'the inventory_checks channel exists only for the marks view; no device holds marks while ic_marks is OFF; cache bumps still run whatever the switch says (they are in the writer middleware, outside this function); a device joining after a flip catches up from the cursor log.',
+}
+function scan(fileName, text, allow = ALLOW) {
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2022, true)
   const out = { switched: 0, violations: [] }
-  const report = (node, label) => {
+  const report = (node, label, exempt = false, only = null) => {
+    if (exempt) return
     const writers = []
-    ;(function visit(n) { if (ts.isCallExpression(n) && WRITER_CALLS.has(calleeName(n))) writers.push(n); ts.forEachChild(n, visit) })(node)
+    ;(function visit(n) { if (ts.isCallExpression(n) && WRITER_CALLS.has(calleeName(n)) && (!only || calleeName(n) === only)) writers.push(n); ts.forEachChild(n, visit) })(node)
     for (const call of writers) out.violations.push(`${path.basename(fileName)}:${source.getLineAndCharacterOfPosition(call.getStart()).line + 1} ${calleeName(call)}( inside ${label}`)
   }
-  function visitFunction(fn) {
+  function visitFunction(fn, fnName) {
     const aliases = new Set()
     ;(function collect(n) {
       if (ts.isVariableDeclaration(n) && n.initializer && ts.isIdentifier(n.name) && containsCall(n.initializer, SWITCH_CALLS)) aliases.add(n.name.text)
@@ -51,7 +56,16 @@ function scan(fileName, text) {
       ts.forEachChild(n, collect)
     })(fn)
     const guarded = (condition) => containsCall(condition, SWITCH_CALLS) || mentions(condition, aliases)
+    const rel = fileName.split(path.sep).join('/')
+    const allowed = Object.keys(allow).some((key) => { const at = key.lastIndexOf(' '); return key.slice(at + 1) === fnName && rel.endsWith('/' + key.slice(0, at)) })
+    const exits = (st) => ts.isReturnStatement(st) || ts.isThrowStatement(st) || (ts.isBlock(st) && st.statements.length > 0 && exits(st.statements[st.statements.length - 1]))
     ;(function visit(n) {
+      // An early-return gate: `if (!on) return` with no else. Every later broadcast( of the block runs only while the switch decides it. Only broadcast: a version bump after a gate can be right (it follows a write that
+      // exists only while the switch is ON, as in routes/inventory.ts), a frame to every open tab never is.
+      if (ts.isBlock(n)) {
+        const at = n.statements.findIndex((st) => ts.isIfStatement(st) && !st.elseStatement && guarded(st.expression) && exits(st.thenStatement))
+        if (at >= 0) for (const st of n.statements.slice(at + 1)) report(st, 'an early-return switch gate in ' + (fnName || 'an anonymous function'), allowed, 'broadcast')
+      }
       if (ts.isIfStatement(n) && guarded(n.expression)) {
         out.switched += 1
         report(n.thenStatement, 'the then-block of a switched if')
@@ -68,7 +82,7 @@ function scan(fileName, text) {
     })(fn)
   }
   ;(function find(n) {
-    if (ts.isFunctionLike(n) && n.body) visitFunction(n.body)
+    if (ts.isFunctionLike(n) && n.body) visitFunction(n.body, (n.name && n.name.text) || (ts.isVariableDeclaration(n.parent) && ts.isIdentifier(n.parent.name) ? n.parent.name.text : ''))
     ts.forEachChild(n, find)
   })(source)
   return out
@@ -94,6 +108,30 @@ check('control: a writer outside the switched block is not a violation, and the 
   const result = scan('clean.ts', CLEAN)
   assert.deepEqual(result.violations, [])
   assert.equal(result.switched, 1)
+})
+// An early-return gate is the same thing in another form: everything after `if (!await readSwitch(...)) return` runs only while the switch is ON.
+const EARLY = {
+  returnGate: "async function a(env) { if (!await readSwitch(env, 'x')) return; broadcast(env, 'x') }",
+  blockGate: "async function a(env) { if (!(await readSwitch(env, 'x'))) { log(); return null } await broadcast(env, 'a') }",
+  aliasGate: "async function a(env) { const on = await readSwitch(env, 'x'); if (!on) return; await broadcast(env, 'a') }",
+  arrow: "const a = async (env) => { if (!await readSwitch(env, 'x')) return; broadcast(env, 'x') }",
+}
+check('control: a writer after an early-return switch gate is found, in every form, and in any file', () => {
+  for (const [name, text] of Object.entries(EARLY)) assert.equal(scan(`routes/${name}.ts`, text).violations.length, 1, name)
+  assert.equal(scan('routes/other.ts', EARLY.arrow.replace('const a =', 'const announceMarks =')).violations.length, 1, 'another file with the allowed name is still flagged')
+  assert.equal(scan('routes/inventoryChecks.ts', EARLY.arrow.replace('const a =', 'const other =')).violations.length, 1, 'the allowed file with another function is still flagged')
+  assert.deepEqual(scan('x.ts', "async function a(env) { if (!await readSwitch(env, 'x')) return; await slow(env) }").violations, [], 'a gate with no broadcast after it is clean')
+  assert.deepEqual(scan('x.ts', "async function a(env) { if (!await readSwitch(env, 'x')) return; await bumpVersion(env, 'a') }").violations, [], 'a version bump after a gate is not this rule (it follows a write that exists only while ON)')
+})
+check('allow entry: announceMarks (routes/inventoryChecks.ts) is the one named exception, with its reason, and without it the guard flags it', () => {
+  assert.deepEqual(Object.keys(ALLOW), ['routes/inventoryChecks.ts announceMarks'])
+  const reason = ALLOW['routes/inventoryChecks.ts announceMarks']
+  for (const part of ['inventory_checks channel exists only for the marks view', 'no device holds marks while ic_marks is OFF', 'cache bumps still run whatever the switch says', 'catches up from the cursor log']) assert.ok(reason.includes(part), 'reason lacks: ' + part)
+  const file = path.join(SRC, 'routes', 'inventoryChecks.ts'), text = fs.readFileSync(file, 'utf8')
+  const without = scan(file, text, {}).violations
+  assert.equal(without.length, 1, without.join(' | '))
+  assert.ok(/inventoryChecks\.ts:\d+ broadcast\( inside an early-return switch gate in announceMarks/.test(without[0]), without[0])
+  assert.deepEqual(scan(file, text).violations, [], 'with the allow entry the file is clean')
 })
 check('source: no bumpVersion(, bumpVersions( or broadcast( call inside a block a switch decides', () => {
   const violations = []
