@@ -12,6 +12,7 @@ import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import { LateCloseFields, LateCountField, SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from '../pos/ShiftGate.tsx'
 import { LATE_CLOSE_DEFAULT_TIME, holdsForgottenCloseGrant, isLateClose, lateCloseDefaultTime, lateCloseIsoForTime, lateReason } from './shiftLateClose.ts'
 import ShiftSummary from './ShiftSummary.tsx'
+import { lateCloseReview } from './shiftReportModel.ts'
 import { shiftCloseTimeRefusalText } from './shiftCloseTimeError.ts'
 import { isAdminControlUser } from '../../utils/permissions.ts'
 import ShiftHeaderRow, { ShiftCodeBreaks } from './ShiftHeaderRow.tsx'
@@ -152,13 +153,7 @@ function jsonRecord(raw: string): Record<string, unknown> {
   } catch { return {} }
 }
 
-/** The standing "closed late" review of one shift: the newest journal row that evaluated the times names who closed it late and why. */
-export function lateCloseReview(rows: ShiftAmendment[]): { by: string; reason: string } | null {
-  const newest = rows.filter((row) => Array.isArray(jsonRecord(row.after_json).time_review)).sort((a, b) => b.id - a.id)[0]
-  const entries = newest ? jsonRecord(newest.after_json).time_review as Array<{ code?: unknown; by?: unknown; reason?: unknown }> : []
-  const entry = entries.find((item) => item?.code === 'closed_late')
-  return entry ? { by: typeof entry.by === 'string' ? entry.by : '', reason: typeof entry.reason === 'string' ? entry.reason : '' } : null
-}
+export { lateCloseReview }
 
 export function ClosedLateNote({ rows }: { rows: ShiftAmendment[] }) {
   const { t } = useApp() as { t: (key: string) => string }

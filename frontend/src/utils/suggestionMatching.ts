@@ -18,6 +18,8 @@
 // can exercise the real logic instead of a copy of it.
 
 export type SuggestionOption = {
+  /** A ready-made row body drawn instead of value + meta (the shift picker's one header row). value and meta still feed matching and the input. */
+  node?: unknown
   /** The text that lands in the input when this row is picked. */
   value: string
   /** Stable React key / dom id fragment. Defaults to the lowercased value. */
@@ -69,6 +71,7 @@ export function normalizeSuggestionOptions(
       meta: option.meta ? String(option.meta) : undefined,
       selected: option.selected === true,
       payload: option.payload,
+      ...(option.node != null ? { node: option.node } : {}),
     })
   }
   return unique

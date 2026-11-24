@@ -7,7 +7,7 @@ import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
 import ShiftReportFigures from './ShiftReportFigures.tsx'
 import ShiftCloseDriftNote from './ShiftCloseDriftNote.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftAdditionalCash, shiftCountedPairText, shiftDrawerSourceBadge } from './shiftReportModel.ts'
+import { shiftAdditionalCash, shiftCountedPairText, shiftDrawerSourceBadge, shiftNotCounted } from './shiftReportModel.ts'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 
 type Props = {
@@ -47,7 +47,9 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
   // left blank in riel used to print a bare "—" for BOTH, hiding a number the
   // cashier actually wrote; now only the uncounted half is a dash, and a
   // wholly uncounted drawer is still one dash.
-  const after = shiftCountedPairText(shift.closing_counted_usd, shift.closing_counted_khr, fmtUSD, fmtKHR)
+  const afterText = shiftCountedPairText(shift.closing_counted_usd, shift.closing_counted_khr, fmtUSD, fmtKHR)
+  // A shift closed late with no count says so, instead of a bare dash (same-day closes keep the dash).
+  const after = shiftNotCounted(shift, closedLate) ? tr('shift_late_not_counted', 'Not counted (closed late)') : afterText
   // Between the two: the extra change put in mid-shift (owner, 13 Oct 2026, item 14:
   // Opening -> Additional -> Closing everywhere, $0 included). The shared rule answers
   // the figure, zero when none; the (+) of an inflow marks only an amount, as in the
@@ -98,7 +100,7 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
               both currencies, then the money. The drawer chain below it stays
               where it was -- it answers a different question (what should be
               in the till), and only an admin's response carries `figures`. */}
-          <ShiftReportFigures shift={shift} />
+          <ShiftReportFigures shift={shift} closedLate={closedLate} />
           <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-zinc-800/70">
             <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-gray-100">
               <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{tr('shift_cash_breakdown', 'Cash breakdown')}

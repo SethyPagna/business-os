@@ -24,6 +24,7 @@ function load(rel: string): Record<string, unknown> {
     if (id === 'react' || id === 'react/jsx-runtime') return require(id)
     if (id.includes('/AppContext')) return { useApp: () => ({ t: (key: string) => en[key] || key, fmtUSD: String, fmtKHR: String }) }
     if (id.includes('utils/formatters')) return require('../src/utils/formatters.ts')
+    if (id.includes('shiftReportModel')) return require('../src/components/shifts/shiftReportModel.ts')
     return { __esModule: true, default: () => null }
   }, mod, mod.exports)
   return mod.exports

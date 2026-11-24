@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   buildSuggestionMatches,
   nextSuggestionIndex,
@@ -223,8 +223,10 @@ export default function SuggestionTextInput({
               <span className="min-w-0 flex-1">
                 {/* Wraps instead of truncating: a suggestion hidden behind an
                     ellipsis is the ambiguity this control exists to remove. */}
-                <span className="block break-words font-medium text-gray-800 dark:text-gray-200">{option.value}</span>
-                {option.meta ? <span className="block break-words text-[11px] text-gray-400">{option.meta}</span> : null}
+                {option.node != null ? option.node as ReactNode : <>
+                  <span className="block break-words font-medium text-gray-800 dark:text-gray-200">{option.value}</span>
+                  {option.meta ? <span className="block break-words text-[11px] text-gray-400">{option.meta}</span> : null}
+                </>}
               </span>
               {option.selected ? <span className="shrink-0 text-xs text-blue-500">✓</span> : null}
             </button>

@@ -1,4 +1,34 @@
-import type { Shift } from '../../api/shiftTransport.ts'
+import type { Shift, ShiftAmendment } from '../../api/shiftTransport.ts'
+
+function jsonRecord(raw: string): Record<string, unknown> {
+  try {
+    const value = JSON.parse(raw)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  } catch { return {} }
+}
+
+/**
+ * The standing "closed late" review of one shift, from the history rows the screen already holds: the newest journal
+ * row that evaluated the times names who closed it late and why, and `at` is when that row was written. The ONE
+ * reader of the closed_late entry: the shift card, the Shifts popup and the Reports shift report all go through it.
+ */
+export function lateCloseReview(rows: ShiftAmendment[]): { by: string; reason: string; at: string } | null {
+  const newest = rows.filter((row) => Array.isArray(jsonRecord(row.after_json).time_review)).sort((a, b) => b.id - a.id)[0]
+  const entries = newest ? jsonRecord(newest.after_json).time_review as Array<{ code?: unknown; by?: unknown; reason?: unknown }> : []
+  const entry = entries.find((item) => item?.code === 'closed_late')
+  return entry ? { by: typeof entry.by === 'string' ? entry.by : '', reason: typeof entry.reason === 'string' ? entry.reason : '', at: newest.created_at || '' } : null
+}
+
+/** Is this registered row the END row of a shift closed late with no count? The one test every surface asks. */
+export function shiftRowNotCounted(row: Pick<ShiftRegisteredRow, 'key'>, shift: Shift, closedLate: boolean): boolean {
+  return row.key === 'shift_registered_end' && shiftNotCounted(shift, closedLate)
+}
+
+/** True when a shift closed late has no closing count in either currency: it says "Not counted (closed late)", not a bare dash. */
+export function shiftNotCounted(shift: Shift, closedLate: boolean): boolean {
+  const end = shiftRegisteredCash(shift).end
+  return closedLate && !!shift.closed_at && end.usd == null && end.khr == null
+}
 
 /** Server-authorized comparison values, without recalculating any money. */
 export function shiftComparisonRows(shift: Pick<Shift, 'reconciliation'>): Array<{ key: string; usd: number | null; khr: number | null }> {

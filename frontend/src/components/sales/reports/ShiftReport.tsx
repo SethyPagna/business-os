@@ -11,7 +11,7 @@ import {
   type ShiftListResult,
 } from '../../../api/shiftTransport.ts'
 import { useApp } from '../../../AppContext.tsx'
-import { fmtDateOnly } from '../../../utils/formatters.ts'
+import { fmtDateOnly, fmtDateTime24 } from '../../../utils/formatters.ts'
 import { isAdminControlUser, type PermissionUser } from '../../../utils/permissions.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../../shared/PaginationControls.tsx'
@@ -21,7 +21,8 @@ import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import ShiftHistoryPanel from '../../shifts/ShiftHistoryPanel.tsx'
 import ShiftSummary from '../../shifts/ShiftSummary.tsx'
-import { shiftCloseDriftRows, shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from '../../shifts/shiftReportModel.ts'
+import ShiftHeaderRow from '../../shifts/ShiftHeaderRow.tsx'
+import { lateCloseReview, shiftCloseDriftRows, shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows, shiftRowNotCounted } from '../../shifts/shiftReportModel.ts'
 import { Button, EmptyState, OverflowMenu, Skeleton } from '../../shared/kit'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import { reportFileName, reportQueryParams } from './reportModel.ts'
@@ -70,6 +71,12 @@ export default function ShiftReport(p: ReportViewProps) {
   const shift = receivedShift && !isAdminControlUser(user)
     ? { ...receivedShift, reconciliation: null, figures: null, close_drift: null } : receivedShift
 
+  // Closed late: read from the history response the report already holds (no second fetch), by the one shared reader.
+  const review = useMemo(() => (shift?.closed_at ? lateCloseReview((state.data?.amendments ?? []).filter((row) => row.shift_session_id === shift.id)) : null), [shift, state.data])
+  const closedLate = review != null
+
+  const closedLateText = (found: NonNullable<typeof review>) => [found.reason, found.by, found.at ? fmtDateTime24(found.at) : ''].filter(Boolean).join(' · ')
+
   const rows = useMemo(() => {
     if (!shift) return []
     return [
@@ -77,7 +84,7 @@ export default function ShiftReport(p: ReportViewProps) {
       // screen prints, so an exported row never contradicts the app.
       ...shiftRegisteredRows(shift).map((row) => ({
         Section: tr('shift_registered_cash', 'Registered cash'),
-        Line: tr(row.key, row.fallback),
+        Line: shiftRowNotCounted(row, shift, closedLate) ? `${tr(row.key, row.fallback)} · ${tr('shift_late_not_counted', 'Not counted (closed late)')}` : tr(row.key, row.fallback),
         USD: row.usd ?? '',
         KHR: row.khr ?? '',
       })),
@@ -102,8 +109,15 @@ export default function ShiftReport(p: ReportViewProps) {
         USD: row.usd ?? '',
         KHR: row.khr ?? '',
       })),
+      // The reason, who closed it and when: one row, in the CSV and the print alike.
+      ...(review ? [{
+        Section: tr('shift_closed_late', 'Closed late'),
+        Line: closedLateText(review),
+        USD: '',
+        KHR: '',
+      }] : []),
     ]
-  }, [shift, tr])
+  }, [shift, tr, review, closedLate])
 
   const exportCsv = () => {
     if (shift) downloadCSV(reportFileName(`shift-${shift.shift_code}`, filters, 'csv'), rows)
@@ -152,6 +166,13 @@ export default function ShiftReport(p: ReportViewProps) {
             key: String(row.id),
             value: `${fmtDateOnly(row.business_date)} · ${row.user_name || tr('shift_staff', 'Staff')}`,
             meta: row.shift_code,
+            // The one header row (date · ID · cashier · branch). The list rows do not say who closed
+            // late, so the tag shows on the shift whose history this report holds.
+            node: (
+              <ShiftHeaderRow shift={row}>
+                {row.id === shift?.id && closedLate ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{tr('shift_closed_late', 'Closed late')}</span> : null}
+              </ShiftHeaderRow>
+            ),
             selected: row.id === selectedId,
             payload: row.id,
           }))}
@@ -170,7 +191,10 @@ export default function ShiftReport(p: ReportViewProps) {
           onPageSizeChange={(size) => setPaging({ scope: pageScope, page: 1, size })} /> : null}
       </div>
       {(pickedId == null && listing.loading) || (state.loading && !state.data) ? <Skeleton rows={6} variant="text" />
-        : shift ? <ShiftSummary shift={shift} detail className="report-shift-plain" />
+        : shift ? <>
+          <ShiftSummary shift={shift} detail closedLate={closedLate} className="report-shift-plain" />
+          {review ? <p className="min-w-0 break-words text-xs text-gray-700 dark:text-gray-200"><span className="font-semibold">{tr('shift_closed_late', 'Closed late')}</span>{': '}{closedLateText(review)}</p> : null}
+        </>
           : query && listing.data && !shifts.length
             ? <EmptyState icon={<Clock3 />} title={tr('shift_search_no_match', 'No shifts match the search.')}
               action={<Button size="sm" variant="secondary" onClick={() => setSearch('')}>{tr('clear_search', 'Clear search')}</Button>} />
