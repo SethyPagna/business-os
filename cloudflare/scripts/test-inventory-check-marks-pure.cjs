@@ -325,7 +325,7 @@ function suite(libText, routeText) {
 
   // A1d registry: every statement of src that can change a waiting set (an INSERT into inventory_check_approvals, an UPDATE of its line_set_json, status, applied_json, superseded_json or line_decisions_json) is paired with an event
   // the changes read treats as set-changing: a create event, or an event whose after_json carries "approval". The unit is the top-level function or constant that holds the statement. A statement builder (a unit that sends nothing)
-  // is paired through every unit that uses it. Event SQL kept in an UPPER_CASE constant counts for the units that name it. The unit is the grain: one marked event in a unit covers its other writers (the oracle steps are the finer proof).
+  // is paired through every unit that uses it. Event SQL kept in an UPPER_CASE constant counts for the units that name it. The grain is the send (each record, commit or batch call of a unit, with the statements built before it): a marked event in one send covers no other send of the unit (the oracle steps are the finer proof).
   const srcFiles = () => {
     const out = new Map()
     const walkDir = (dir) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walkDir(p); else if (p.endsWith('.ts')) out.set(path.relative(ROOT, p).split(path.sep).join('/'), fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')) } }
@@ -339,25 +339,46 @@ function suite(libText, routeText) {
   const WRITES_SET = /\b(?:line_set_json|status|applied_json|superseded_json|line_decisions_json)\s*=/
   const writerSites = (u) => {
     const sites = []
-    for (const m of u.text.matchAll(/INSERT\s+INTO\s+inventory_check_approvals\b/g)) sites.push({ id: 'INSERT', anyEvent: true })
-    for (const m of u.text.matchAll(/UPDATE\s+(?:inventory_check_approvals|\$\{A\})\s+SET\s+([\s\S]*?)\bWHERE\b/g)) if (WRITES_SET.test(m[1])) sites.push({ id: 'UPDATE ' + m[1].trim().slice(0, 36).replace(/\s+/g, ' '), anyEvent: false })
+    for (const m of u.text.matchAll(/INSERT\s+INTO\s+inventory_check_approvals\b/g)) sites.push({ id: 'INSERT', anyEvent: true, index: m.index })
+    for (const m of u.text.matchAll(/UPDATE\s+(?:inventory_check_approvals|\$\{A\})\s+SET\s+([\s\S]*?)\bWHERE\b/g)) if (WRITES_SET.test(m[1])) sites.push({ id: 'UPDATE ' + m[1].trim().slice(0, 36).replace(/\s+/g, ' '), anyEvent: false, index: m.index })
     return sites
   }
   // An INSERT is paired by a create event of the new session (or an approval event); an UPDATE changes a session that already exists, so only an event whose after_json carries "approval" pairs it.
   const eventMarker = (text, anyEvent) => (anyEvent && /action:\s*'create'/.test(text)) || /after:\s*\{[^\n]*\bapproval\s*:/.test(text) || /json_object\('approval',\s*[^'\s]/.test(text)
   const named = (u, name) => new RegExp('\\b' + name + '\\b').test(u.text)
-  const covered = (u, units, anyEvent) => eventMarker(u.text, anyEvent) || units.some((v) => v !== u && /^[A-Z][A-Z0-9_]*$/.test(v.name) && eventMarker(v.text, anyEvent) && named(u, v.name))
+  // The grain is the SEND: the text of a unit is cut after every call that sends statements (record, commit, a batch), so a statement and the event that pairs it must sit in the same cut (the statements the call sends, and the ones built before it since the
+  // previous send). A unit that holds several sends (decideInventoryCheckApproval) is therefore checked one send at a time: a marked event in one of them covers none of the others.
+  const SEND_NAMES = new Set(['record', 'commit', 'batch', 'batchOnce'])
+  const cutsOf = (text) => {
+    const source = ts.createSourceFile('unit.ts', text, ts.ScriptTarget.ES2022, true)
+    const ends = []
+    const visit = (n) => {
+      if (ts.isCallExpression(n)) { const e = n.expression, callee = ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : null; if (callee && SEND_NAMES.has(callee)) ends.push(n.end) }
+      ts.forEachChild(n, visit)
+    }
+    visit(source)
+    return [0, ...ends.sort((a, b) => a - b), text.length]
+  }
+  const segmentsOf = (u) => { const cuts = cutsOf(u.text); return cuts.slice(1).map((end, i) => ({ from: cuts[i], text: u.text.slice(cuts[i], end) })).filter((s) => s.text.length > 0) }
+  const segmentAt = (u, index) => { const segs = segmentsOf(u); const hit = segs.filter((s) => s.from <= index && index < s.from + s.text.length); assert.equal(hit.length, 1, u.name + ': no single send segment at ' + index); return hit[0] }
+  const coveredText = (text, units, anyEvent) => eventMarker(text, anyEvent) || units.some((v) => /^[A-Z][A-Z0-9_]*$/.test(v.name) && eventMarker(v.text, anyEvent) && new RegExp('\\b' + v.name + '\\b').test(text))
   const sends = (u) => /\b(?:record|commit)\(|\.batch\(|batchOnce\(/.test(u.text)
-  const paired = (u, units, anyEvent, depth = 0) => {
-    if (covered(u, units, anyEvent)) return true
-    if (sends(u) || depth > 2) return false
+  // A site written in the unit itself is paired by the event of its own send; a builder (a unit that sends nothing) is paired by every caller, in each send of the caller that names it.
+  const paired = (u, units, anyEvent, index = null, depth = 0) => {
+    if (index !== null && sends(u)) return coveredText(segmentAt(u, index).text, units, anyEvent)
+    if (coveredText(u.text, units, anyEvent)) return true
+    if (depth > 2) return false
     const callers = units.filter((v) => v !== u && named(v, u.name))
-    return callers.length > 0 && callers.every((c) => paired(c, units, anyEvent, depth + 1))
+    return callers.length > 0 && callers.every((c) => {
+      if (!sends(c)) return paired(c, units, anyEvent, null, depth + 1)
+      const using = segmentsOf(c).filter((s) => named({ text: s.text }, u.name))
+      return using.length > 0 && using.every((s) => coveredText(s.text, units, anyEvent))
+    })
   }
   const registry = (files) => {
     const units = [...files].flatMap(([f, text]) => unitsOf(f, text))
     const sites = [], failures = []
-    for (const u of units) for (const s of writerSites(u)) { const id = u.file + ' ' + u.name + ': ' + s.id; sites.push(id); if (!paired(u, units, s.anyEvent)) failures.push(id) }
+    for (const u of units) for (const s of writerSites(u)) { const id = u.file + ' ' + u.name + ': ' + s.id; sites.push(id); if (!paired(u, units, s.anyEvent, s.index)) failures.push(id) }
     return { sites, failures }
   }
   const files = srcFiles()
@@ -386,6 +407,7 @@ function suite(libText, routeText) {
     assert.ok(registry(copy).failures.length > 0, 'the registry stayed green')
   })
   regMutant('closeApproval event without approval', 'src/lib/inventoryCheckApprovals.ts', "after: { approval: status, closed: true,", "after: { status, closed: true,")
+  regMutant('reject-whole event without approval (F3: the unit keeps another marked event)', 'src/lib/inventoryCheckApprovals.ts', "after: { approval: 'rejected', lines: row.lines }, result: { sessionRevision: session.revision }, now }),\n    ])\n    await announce(onDecided, { decision, sessionId, note })", "after: { decision: 'rejected', lines: row.lines }, result: { sessionRevision: session.revision }, now }),\n    ])\n    await announce(onDecided, { decision, sessionId, note })")
   regMutant('supersede events without approval', 'src/lib/inventoryCheckSessions.ts', "json_object('approval',a.status,'superseded_by',@id)", "json_object('state',a.status,'superseded_by',@id)")
   regMutant('plain submission without the create event', 'src/lib/inventoryCheckSessions.ts', "eventStatement(actor, { sessionId: id, action: 'create', key, hash, before: null, after: { status: 'closed', revision: 0, members: productIds.length }, result: { sessionRevision: 0 }, now }),\n    { sql: `INSERT INTO inventory_check_events", "eventStatement(actor, { sessionId: id, action: 'observe', key, hash, before: null, after: { status: 'closed', revision: 0, members: productIds.length }, result: { sessionRevision: 0 }, now }),\n    { sql: `INSERT INTO inventory_check_events")
   check('A1d registry: a new writer of a waiting set with no marked event turns the registry red', () => {
