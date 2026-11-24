@@ -454,6 +454,20 @@ async function scenario(world, report, patches) {
     await snap(); await device.sync(); const o = await same(world, device, 'W11 a Set that cannot close')
     assert.equal(listsOf(o.bySession), listsBefore, 'W11: the waiting lists are unchanged')
   })
+  // W13 a product deactivated, counted, reactivated (I10), a header, another organisation's count, the inactive branch's count, a count whose item branch differs from its session's (m6), equal updated_at (m1)
+  const g = await fresh(4)
+  const permit = () => world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'").run()
+  const unpermit = () => world.db.prepare("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'").run()
+  await step('I10 deactivate, count, reactivate', async () => {
+    await permit()
+    await world.db.prepare('UPDATE products SET is_active=0 WHERE id=?').bind(g[0].id).run()
+    await world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES('or-1',?,1,1,'inactive count','closed',0,'{}','2026-11-01T01:00:00.000Z','2026-11-01T01:00:00.000Z','2026-11-01T01:00:00.000Z')").bind(world.orgId).run()
+    await world.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) VALUES('or-1',?,1,'{}',1,'{}','done',1,1,1,'2026-11-01T01:00:00.000Z')").bind(g[0].id).run()
+    await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES('or-1',?,1,'observe',?, 'h','{}','{}','{}','2026-11-01T01:00:00.000Z')").bind(g[0].id, rid('or')).run()
+    await unpermit()
+  })
+  await step('I10 reactivate', async () => { await permit(); await world.db.prepare('UPDATE products SET is_active=1 WHERE id=?').bind(g[0].id).run(); await unpermit() })
+  // (W13 follows I10 so that m2, which hides inactive products from the snapshot, turns red at I10 first.)
   // W13 merge and header (A2): the catalogue index (the products table, with its population token) moves, the count tables do not. A device keeps the marks of both products; Waiting is the pending ids that are still in the population,
   // so it drops by one on the device and on the oracle alike. A device that moved the mark to the kept id would differ.
   const permitProducts = () => world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'").run()
@@ -480,19 +494,6 @@ async function scenario(world, report, patches) {
     assert.ok(device.marks.has(hk.id), 'W13: the mark of the header stays on the device')
     assert.notEqual(await stamp(), held.stamp, 'W13: the population token moved')
   })
-  // W13 a product deactivated, counted, reactivated (I10), a header, another organisation's count, the inactive branch's count, a count whose item branch differs from its session's (m6), equal updated_at (m1)
-  const g = await fresh(4)
-  const permit = () => world.db.prepare("INSERT OR REPLACE INTO system_flags (key, value, updated_at) SELECT 'stock_transaction_permit', value, CURRENT_TIMESTAMP FROM system_flags WHERE key = 'stock_schema_epoch'").run()
-  const unpermit = () => world.db.prepare("DELETE FROM system_flags WHERE key = 'stock_transaction_permit'").run()
-  await step('I10 deactivate, count, reactivate', async () => {
-    await permit()
-    await world.db.prepare('UPDATE products SET is_active=0 WHERE id=?').bind(g[0].id).run()
-    await world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES('or-1',?,1,1,'inactive count','closed',0,'{}','2026-11-01T01:00:00.000Z','2026-11-01T01:00:00.000Z','2026-11-01T01:00:00.000Z')").bind(world.orgId).run()
-    await world.db.prepare("INSERT INTO inventory_check_items(session_id,product_id,branch_id,product_snapshot_json,baseline_quantity,baseline_json,state,counted_quantity,revision,updated_by,updated_at) VALUES('or-1',?,1,'{}',1,'{}','done',1,1,1,'2026-11-01T01:00:00.000Z')").bind(g[0].id).run()
-    await world.db.prepare("INSERT INTO inventory_check_events(session_id,product_id,actor_id,action,request_id,request_hash,before_json,after_json,result_json,created_at) VALUES('or-1',?,1,'observe',?, 'h','{}','{}','{}','2026-11-01T01:00:00.000Z')").bind(g[0].id, rid('or')).run()
-    await unpermit()
-  })
-  await step('I10 reactivate', async () => { await permit(); await world.db.prepare('UPDATE products SET is_active=1 WHERE id=?').bind(g[0].id).run(); await unpermit() })
   await step('ties on updated_at broken by session id (m1)', async () => {
     for (const s of ['tie-b', 'tie-a']) {
       await world.db.prepare("INSERT INTO inventory_check_sessions(id,organization_id,branch_id,created_by,title,status,revision,scope_json,started_at,updated_at,closed_at) VALUES(?,?,1,1,'tie','closed',0,'{}','2026-11-02T01:00:00.000Z','2026-11-02T01:00:00.000Z','2026-11-02T01:00:00.000Z')").bind(s, world.orgId).run()
@@ -528,9 +529,13 @@ async function scenario(world, report, patches) {
   // The batching assertion of this step (the walk needed more than one read) moved to L1b below, which asserts it with the per-answer limit as well; this step keeps the device = oracle check, which m4 turns red.
   // L1b many legacy sessions (A2): five pending approvals with no stored line set, 200 members each (1,000 in all, twice the walk's limit on Free). Every answer's waiting ids stay within the limit (a legacy session is charged its
   // members) and the feed needs more than one read. Charging legacy sessions nothing (mw8) answers about a thousand ids in one read.
+  // The sessions and their members' events are read first (the device holds their marks); then ONE page names all five by a product-less event, so only the walk's charge for a legacy session (its members) limits that read.
+  at('L1b many legacy sessions')
+  const pool1b = await freshHigh(1000), when1b = '2026-11-07T01:00:00.000Z'
+  for (let k = 0; k < 5; k++) await legacySession('l1b-' + k, pool1b.slice(k * 200, k * 200 + 200), when1b)
+  await device.sync()
   await step('L1b many legacy sessions', async () => {
-    const pool = await freshHigh(1000), when = '2026-11-07T01:00:00.000Z'
-    for (let k = 0; k < 5; k++) await legacySession('l1b-' + k, pool.slice(k * 200, k * 200 + 200), when)
+    for (let k = 0; k < 5; k++) await nullEvent('l1b-' + k, when1b)
   }, async () => {
     const from = device.log.length
     await snap(); await device.sync()
