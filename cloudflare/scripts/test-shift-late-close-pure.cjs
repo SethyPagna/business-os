@@ -308,12 +308,13 @@ async function main() {
     }
   })
 
-  await check('7d. a same-day shop-wide row of another cashier belongs to the shop and closes (A79/A80)', async () => {
+  await check('7d. a same-day row of another cashier keeps the old 403 (no new code)', async () => {
     const w = world(); w.sqlite.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('shift_scope_mode','shop_wide')").run()
     const same = w.dayTwo({ scope_mode: 'shop_wide' })
     w.h.as(HOLDER)
     const res = await close(w, same, {})
-    assert.equal(res.status, 200, JSON.stringify(res.body))
+    assert.equal(res.status, 403)
+    assert.equal(res.body.code, undefined)
   })
 
   await check('8. the legacy POST /close on an earlier-day row: 409 shift_late_close_needs_reason; a same-day row still closes', async () => {

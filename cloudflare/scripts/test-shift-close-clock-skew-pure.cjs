@@ -19,7 +19,7 @@
 //      (duplicate clicks / two tabs)
 //   6. a different pos-only account on the same shift -> 404 (per_account
 //      hides it; under shop_wide it is visible and the close stays
-//      403 for a non-owner of a row that is not the shop's to close today -- test-shift-security-pure.cjs)
+//      403 for a non-owner -- test-shift-security-pure.cjs)
 //   7. a counted drawer far from expected           -> 200 (reconciliation is
 //      informational, never a gate)
 //   8. PATCH /:id with a closed_at seconds ahead    -> 200 clamped;

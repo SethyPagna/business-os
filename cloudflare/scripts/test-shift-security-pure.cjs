@@ -261,8 +261,8 @@ async function main() {
     'a per_account row of another cashier stays hidden even under a shop-wide policy')
   const shopShift = shopWideBody.shifts.find((shift) => shift.shift_code === 'S-SHOP')
   const shopCloseInput = { shift_id: shopShift.id, expected_revision: shopShift.revision, client_request_id: 'legacy-shop-close-0001', branch_id: 1, closing_counted_usd: 10, closing_counted_khr: 10000 }
-  const staleShopClose = await call('POST', '/close', { ...shopCloseInput, expected_revision: shopShift.revision + 5 })
-  assert.equal(staleShopClose.status, 409, 'shop-wide close of today: another POS user passes the permission and meets the revision guard (A79/A80), nothing written')
+  assert.equal((await call('POST', '/close', shopCloseInput)).status, 403,
+    'shop-wide current close no longer lets another POS user close the opener shift')
   // The Sep 14 ruling in action: the shift is the branch's, so another POS account reaches it and may amend it,
   // and the amendment is the accountable record -- it names the ACTOR, not the shift's owner.
   const wideAmend = await call('PATCH', `/${shopShift.id}`, { expected_revision: shopShift.revision, reason: 'Counted the float again', opening_float_usd: 6 })

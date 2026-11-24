@@ -302,25 +302,7 @@ async function main() {
       assert.ok(!body.shift.figures, 'staff sees no admin figures')
     }
     const input = { shift_id: shift.id, expected_revision: 0, client_request_id: 'shift-visibility-replay-001', branch_id: 1, closing_counted_usd: 3 }
-    const sharedNow = await (await call('GET', '/current?branch_id=1')).json()
-    assert.equal(sharedNow.shift.capabilities.can_close, true, 'the shop-wide shift of today is the shop\'s to close (A79/A80); the comparison grants add nothing to that')
-    // The cost and comparison grants never widen who may CLOSE: on a row that is not the shop's to close today they still end in 403 and write nothing.
-    for (const [kind, narrow] of [
-      ['per_account row', "UPDATE shift_sessions SET scope_mode='per_account' WHERE id=@id"],
-      ['earlier-day row', "UPDATE shift_sessions SET business_date=date('now','+7 hours','-1 day'), opened_at=strftime('%Y-%m-%dT13:00:00.000Z', date('now','+7 hours','-1 day')) WHERE id=@id"],
-    ]) {
-      const held = scenario()
-      held.sqlite.prepare("INSERT INTO settings(key,value) VALUES ('shift_scope_mode','shop_wide') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
-      held.sqlite.prepare("INSERT INTO settings(key,value) VALUES ('shift_admin_exempt','false') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
-      const own = await held.open()
-      held.sqlite.prepare(narrow.replace('@id', String(own.id))).run()
-      held.actAs({ id: 8, username: 'colleague', permissions: JSON.stringify({ pos: true, products_cost_view: true }) })
-      const before = held.row(own.id)
-      const refused = await held.call('POST', '/close', { shift_id: own.id, expected_revision: 0, branch_id: 1, client_request_id: `grant-no-widen-${kind.split(' ')[0]}-001`, closing_counted_usd: 3, reason: 'Forgot to close' })
-      assert.ok([403, 404].includes(refused.status), `a cost/comparison grant never widens close rights on a ${kind} (refused, not 200): ${refused.status} ${await refused.clone().text()}`)
-      const after = held.row(own.id)
-      assert.deepEqual([after.closed_at, after.revision], [before.closed_at, before.revision], `nothing written for the ${kind}`)
-    }
+    assert.equal((await call('POST', '/close', input)).status, 403, 'comparison changes never widen mutation authority')
     actAs({ ...user, role_code: 'admin' })
     assert.ok((await (await call('GET', '/current?branch_id=1')).json()).shift.reconciliation)
     const closed = await (await call('POST', '/close', input)).json()
