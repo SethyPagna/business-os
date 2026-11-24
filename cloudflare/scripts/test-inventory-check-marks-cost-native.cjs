@@ -198,8 +198,8 @@ const SCOPE_READ_MEDIAN_MS = 100
       pinOf('changesAfterSubmit20 rows <= 186', m.changesAfterSubmit20.rows, 186), pinOf('changesAfterSubmit20 calls <= 4', m.changesAfterSubmit20.calls, 4),
       pinOf('changesAfterApprove200 rows <= 1784', m.changesAfterApprove200.rows, 1784),
       pinOf('changesIdle rows <= 6', m.changesIdle.rr, 6), pinOf('changesIdle calls <= 2', m.changesIdle.calls, 2),
-      // A3 (G.3): a cache hit at most 8 gross rows and 2 calls = the estimate of B.5 (7 gross: 3 auth + TOP + two AT rows + the closing row of the answer's own check) + 10 percent; A5 replaces the estimate by the measured figure + 10 percent.
-      pinOf('changes cache hit rows <= 8', m.changesCacheHit.rr, 8, { computedBy: m.changesCacheHitComputedBy }), pinOf('changes cache hit calls <= 2', m.changesCacheHit.calls, 2),
+      // A3 (G.3): a cache hit at most 7 gross rows and 2 calls = the measured 6 rows (A3, worlds A, B, C) + 10 percent, rounded up (A5 ruling b.2); it was the B.5 estimate of 7 + 10 percent = 8.
+      pinOf('changes cache hit rows <= 7', m.changesCacheHit.rr, 7, { computedBy: m.changesCacheHitComputedBy }), pinOf('changes cache hit calls <= 2', m.changesCacheHit.calls, 2),
       pinOf('pendingBuild rows <= 2730', m.pendingBuild.rows, 2730),
       pinOf('snapshotCold rows <= ceil(1.1 x (7 x P + pages x (4 + bucket probes)))', m.snapshotCold.rows, m.snapshotColdTerms.pin),
       pinOf('plain 500-line submission read in <= 3 reads', m.changesAfterPlain500.reads, 3),
@@ -221,7 +221,7 @@ const SCOPE_READ_MEDIAN_MS = 100
     for (const line of m.plain500Reads) console.log(line)
     const ct = m.snapshotColdTerms
     console.log('SNAPSHOT COLD (world ' + WORLD + '): measured ' + m.snapshotCold.rows + ' rows, formula 7 x P ' + ct.P + ' + pages ' + ct.pages + ' x (4 + bucket probes ' + ct.bucketProbes + ') = ' + ct.formula + ', pin ceil(1.1 x formula) = ' + ct.pin + '; measured / formula = ' + (m.snapshotCold.rows / ct.formula).toFixed(4) + '; pin without the page overhead term = ' + ct.pinWithoutPageOverhead + ', measured over it: ' + (m.snapshotCold.rows > ct.pinWithoutPageOverhead))
-    console.log('CACHE HIT (world ' + WORLD + '): the second device read ' + m.changesCacheHit.rr + ' rows in ' + m.changesCacheHit.calls + ' calls (gross, auth included; estimate 7 rows, 2 calls; pin 8 rows, 2 calls); the first device computing the same answer read ' + m.changesCacheHitComputedBy.rows + ' rows in ' + m.changesCacheHitComputedBy.calls + ' calls')
+    console.log('CACHE HIT (world ' + WORLD + '): the second device read ' + m.changesCacheHit.rr + ' rows in ' + m.changesCacheHit.calls + ' calls (gross, auth included; measured 6 rows, 2 calls; pin 7 rows, 2 calls); the first device computing the same answer read ' + m.changesCacheHitComputedBy.rows + ' rows in ' + m.changesCacheHitComputedBy.calls + ' calls')
     if (m.scopeRead) console.log('SCOPE READ (world ' + WORLD + '): median D1 time ' + m.scopeRead.medianMetaDurationMs + ' ms over ' + m.scopeRead.metaDurationMs.length + ' reps (' + m.scopeRead.metaDurationMs.join(', ') + '), rows read ' + m.scopeRead.rowsRead + ', guard ' + SCOPE_READ_MEDIAN_MS + ' ms')
     for (const g of out.go) console.log((g.ok ? 'PASS ' : 'OVER ') + g.name + ' (' + g.value + ' vs ' + g.limit + ')')
     process.exitCode = out.go.every((g) => g.ok) ? 0 : 1
