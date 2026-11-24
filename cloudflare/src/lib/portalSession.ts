@@ -179,7 +179,12 @@ export async function getPortalAccountState<E extends { Bindings: Env } = { Bind
     const ttlMs = PORTAL_SESSION_MS
     if (expiresAt - nowMs <= ttlMs * (1 - SLIDE_AFTER_FRACTION)) {
       // never past the cookie ceiling, whatever the lifetime constant is
-      c.executionCtx.waitUntil(slidePortalSession(c, tokenHash, nowMs + Math.min(ttlMs, MAX_COOKIE_AGE_MS)))
+      const nextExpiryIso = portalNowIso(nowMs + Math.min(ttlMs, MAX_COOKIE_AGE_MS))
+      // The cookie is set here, before the response is returned: a header set after the response is finalized lands on
+      // a Response nobody returns (a daily shopper would be signed out at the first cookie expiry). Only the D1 write
+      // stays in waitUntil.
+      setPortalCookie(c, token, nextExpiryIso)
+      c.executionCtx.waitUntil(slidePortalSession(c, tokenHash, nextExpiryIso))
     }
   }
   return { status: 'authenticated', account }
@@ -192,9 +197,8 @@ export async function getPortalAccount<E extends { Bindings: Env } = { Bindings:
 // Same inactivity-sliding contract as lib/auth.ts::slideSessionExpiry -- keeps an actively-used account signed in
 // without ever shortening its window. Only called when the slide is due (S-S1 returned the times); S-S3 writes only a
 // later expiry, so concurrent requests write once.
-async function slidePortalSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, tokenHash: string, nextExpiryMs: number): Promise<void> {
+async function slidePortalSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, tokenHash: string, nextExpiryIso: string): Promise<void> {
   try {
-    const nextExpiryIso = portalNowIso(nextExpiryMs)
     await getDb(c.env).prepare(`
       UPDATE portal_sessions SET expires_at = @next_expires_at
       WHERE token_hash = @token_hash
@@ -202,8 +206,6 @@ async function slidePortalSession<E extends { Bindings: Env } = { Bindings: Env 
         AND revoked_at IS NULL
         AND datetime(expires_at) < datetime(@next_expires_at)
     `).run({ next_expires_at: nextExpiryIso, token_hash: tokenHash })
-    const token = getCookie(c, PORTAL_COOKIE_NAME)
-    if (token) setPortalCookie(c, token, nextExpiryIso)
   } catch (_) {
     // Best effort -- a missed slide just leaves the current expiry in place.
   }

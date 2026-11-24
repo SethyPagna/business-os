@@ -55,7 +55,9 @@ const migrations = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql
 
 // One world per scenario group: its own database, a log of every statement and its changes.
 let readDelayMs = 0
+let writeDelayMs = 0 // D1 is network I/O: a deferred write settles after the handler has returned
 const pause = () => (readDelayMs ? new Promise((resolve) => setTimeout(resolve, readDelayMs)) : null)
+const writePause = () => (writeDelayMs ? new Promise((resolve) => setTimeout(resolve, writeDelayMs)) : null)
 function world() {
   const raw = openDb(migrations)
   const log = []
@@ -66,6 +68,8 @@ function world() {
         get: async (p) => { log.push({ sql, kind: 'read' }); const r = stmt.get(p); await pause(); return r },
         all: async (p) => { log.push({ sql, kind: 'read' }); const r = stmt.all(p) || []; await pause(); return r },
         run: async (p) => {
+          const wait = writePause()
+          if (wait) await wait
           const r = stmt.run(p)
           const changes = r.meta?.changes ?? 0
           log.push({ sql, kind: 'write', changes })
@@ -89,7 +93,7 @@ const cookieStub = {
   deleteCookie: () => { jar.value = null },
 }
 
-function sessionModule(db, source = readSrc('lib/portalSession.ts')) {
+function sessionModule(db, source = readSrc('lib/portalSession.ts'), cookieModule = cookieStub) {
   const accounts = loadReal('lib/portalAccounts.ts', {
     './db': { getDb: () => db },
     './cache': { bumpVersions: async () => {} },
@@ -108,7 +112,7 @@ function sessionModule(db, source = readSrc('lib/portalSession.ts')) {
     './anonymousCustomer': anonymousCustomer,
     './planTier': planTier,
     './portalTelegramToken': telegramToken,
-    'hono/cookie': cookieStub,
+    'hono/cookie': cookieModule,
   })
 }
 
@@ -271,7 +275,55 @@ async function scenarioSlideConcurrent(source) {
   assert.equal(changed(slides(w.log)), 1, 'the SQL guard writes the slide once')
 }
 
+// ---- B1: the slide's Set-Cookie must reach the response ------------------------
+// The real Hono app and the real hono/cookie. The D1 write takes 5 ms, as network I/O does, so it settles after the handler
+// has returned; a header set then goes onto a Response nobody returns.
+const { Hono } = require(path.join(__dirname, '..', 'node_modules', 'hono', 'dist', 'cjs', 'index.js'))
+const honoCookie = require(path.join(__dirname, '..', 'node_modules', 'hono', 'dist', 'cjs', 'helper', 'cookie', 'index.js'))
+async function scenarioSlideCookie(source) {
+  const w = world()
+  const mod = sessionModule(w.db, source, honoCookie)
+  tick = 0
+  clock = Date.parse('2026-11-24T10:00:00.000Z')
+  const due = await newSession(w, mod, { created_at: iso(clock - 300 * DAY), expires_at: iso(clock + 99 * DAY), last_seen_at: iso(clock) })
+  const app = new Hono()
+  app.get('/me', async (c) => { const state = await mod.getPortalAccountState(c); return c.json({ status: state.status }) })
+  const pending = []
+  const execCtx = { waitUntil: (p) => { pending.push(p) }, passThroughOnException() {} }
+  const get = async (token) => {
+    writeDelayMs = 5
+    try {
+      const res = await app.fetch(new Request('https://shop.example/me', { headers: { Cookie: `${mod.PORTAL_COOKIE_NAME}=${token}` } }), {}, execCtx)
+      const body = await res.json()
+      await Promise.all(pending.splice(0))
+      return { body, cookie: res.headers.get('set-cookie') }
+    } finally { writeDelayMs = 0 }
+  }
+  const slid = await get(due.token)
+  assert.equal(slid.body.status, 'authenticated')
+  assert.equal(slides(w.log).length, 1, 'the slide was written')
+  const days = (asUtc(rowOf(w, due.hash).expires_at) - clock) / DAY
+  assert.ok(days > 398 && days <= 399.01, `the row slid to the lifetime, got ${days}`)
+  assert.ok(slid.cookie, 'the response carries a Set-Cookie when the slide is due')
+  assert.ok(slid.cookie.startsWith(`${mod.PORTAL_COOKIE_NAME}=${due.token};`), 'it is the session cookie')
+  const expires = /Expires=([^;]+)/i.exec(slid.cookie)
+  assert.ok(expires, 'with an expiry')
+  assert.ok(Math.abs(Date.parse(expires[1]) - (clock + 399 * DAY)) < 2000, `the new expiry is the slid one, got ${expires[1]}`)
+
+  const young = await newSession(w, mod, { created_at: iso(clock - 10 * DAY), expires_at: iso(clock + 389 * DAY), last_seen_at: iso(clock) })
+  const quiet = await get(young.token)
+  assert.equal(quiet.body.status, 'authenticated')
+  assert.equal(quiet.cookie, null, 'no Set-Cookie when the slide is not due')
+}
+
 async function main() {
+  await check('B1 the slide refreshes the cookie on the response (real Hono app, 5 ms D1 write)', () => scenarioSlideCookie(readSrc('lib/portalSession.ts')))
+  await check('B1 mutant: the cookie set inside waitUntil after the D1 write -> the response has no Set-Cookie', () => mutant(
+    'cookie after the write',
+    /setPortalCookie\(c, token, nextExpiryIso\)\n(\s+)c\.executionCtx\.waitUntil\(slidePortalSession\(c, tokenHash, nextExpiryIso\)\)/,
+    'c.executionCtx.waitUntil(slidePortalSession(c, tokenHash, nextExpiryIso).then(() => setPortalCookie(c, token, nextExpiryIso)))',
+    scenarioSlideCookie,
+  ))
   await check('T-F3 two requests inside the hour write one stamp; the 2nd is not even attempted', () => scenarioStamp(readSrc('lib/portalSession.ts')))
   await check('T-F3 a DEFAULT-format last_seen_at from earlier the same day: 30 minutes old no write, 2 hours old one ISO write', () => scenarioStampDefaultFormat(readSrc('lib/portalSession.ts')))
   await check('T-F3 two concurrent requests: exactly one stamp lands', () => scenarioStampConcurrent(readSrc('lib/portalSession.ts')))
