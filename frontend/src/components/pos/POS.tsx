@@ -86,7 +86,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { isCashPaymentMethod, parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 import { posExactRielTender, posRielCashRowIds } from './posRielCash.ts'
-import { CART_FIT_LG_BREAKPOINT_PX, cartProductsMinPx, fitCartWidth } from './posCartFit.ts'
+import { CART_FIT_LG_BREAKPOINT_PX, cartProductsMinPx, dragCartWidth, fitCartWidth } from './posCartFit.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import {
@@ -1198,12 +1198,8 @@ export default function POS() {
   useBottomActionBar({ visible: isActive && (isDesktopViewport || mobileView === 'cart'), actionRef: completeSaleRef })
   const clampCartWidth = useCallback((px: number) => {
     if (!mainPanelsRef.current) return Math.min(CART_WIDTH_MAX_PX, Math.max(CART_WIDTH_MIN_PX, px))
-    // Leave the products panel at least this wide so it never gets
-    // squeezed into an unusable sliver when someone drags the cart very wide.
-    const PRODUCTS_MIN_PX = 280
-    const containerWidth = mainPanelsRef.current.getBoundingClientRect().width
-    const maxByContainer = Math.max(CART_WIDTH_MIN_PX, containerWidth - PRODUCTS_MIN_PX)
-    return Math.min(CART_WIDTH_MAX_PX, maxByContainer, Math.max(CART_WIDTH_MIN_PX, px))
+    const productsMinPx = cartProductsMinPx(window.matchMedia(`(min-width: ${CART_FIT_LG_BREAKPOINT_PX}px)`).matches)
+    return dragCartWidth(mainPanelsRef.current.getBoundingClientRect().width, px, productsMinPx, CART_WIDTH_MIN_PX, CART_WIDTH_MAX_PX)
   }, [])
 
   const startCartResize = useCallback((clientX: number) => {
@@ -1215,9 +1211,12 @@ export default function POS() {
     document.body.style.userSelect = 'none'
     document.body.style.cursor = 'col-resize'
 
+    let applied = false
     const handleMove = (moveClientX: number) => {
-      const nextWidth = clampCartWidth(containerRect.right - moveClientX)
-      setCartWidthPx(nextWidth)
+      const next = clampCartWidth(containerRect.right - moveClientX)
+      if (next === null) return
+      applied = true
+      setCartWidthPx(next)
     }
     const onMouseMove = (event: MouseEvent) => handleMove(event.clientX)
     const onTouchMove = (event: TouchEvent) => {
@@ -1231,6 +1230,7 @@ export default function POS() {
       document.body.style.userSelect = previousUserSelect
       document.body.style.cursor = previousCursor
       setCartResizing(false)
+      if (!applied) return
       setCartWidthPx((current) => {
         writePosStorage('local', CART_WIDTH_STORAGE_KEY, String(current))
         return current
