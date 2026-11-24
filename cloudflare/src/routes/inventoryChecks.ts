@@ -90,6 +90,12 @@ async function principal(c: Context<{ Bindings: Env; Variables: IcVariables }>) 
   if (!token) throw new InventoryCheckSessionError(401,'invalid_session')
   return { id: c.get('user').id, tokenHash: await inventoryCheckDigest(token) }
 }
+// The count-marks frame: sent only while ic_marks is ON (the memoised read the marks routes use, so no D1 statement), as an early return rather than a switched block. It is not an invalidation: no device holds marks while OFF,
+// the cache versions below are moved whatever the switch says, and a device that joins after a flip catches up from the cursor log. Best effort: an absent execution context sends nothing.
+const announceMarks = async (c: Context<{ Bindings: Env; Variables: IcVariables }>): Promise<void> => {
+  if (!await readSwitch(c.env, 'ic_marks')) return
+  try { c.executionCtx.waitUntil(broadcast(c.env, 'inventory_checks', { branchId: c.get('icBranch') ?? null })) } catch { /* no execution context */ }
+}
 // Every Inventory Check writer moves the inventory_checks version, AWAITED before the answer leaves (the check-state sets and every restricted list key on it). Only a
 // request that wrote or may have written: a refusal before the write (4xx) moves nothing. The bump does NOT depend on ic_wired: a write made while the switch is OFF must still move
 // the version, because the sets and the restricted rankings cached while it was ON live productListCacheSeconds (an hour on Free) and a flip back ON would otherwise serve them
@@ -99,8 +105,9 @@ app.use('*', async (c, next) => {
   if (c.req.method === 'GET' || c.req.method === 'HEAD') return
   const status = c.res.status
   if (status >= 400 && status < 500) return
-  // Best effort and whatever the switch says (a broadcast is not a read): the devices that watch the count marks ask for their changes.
-  try { c.executionCtx.waitUntil(broadcast(c.env, 'inventory_checks', { branchId: c.get('icBranch') ?? null })) } catch { /* no execution context */ }
+  // Best effort, and only while ic_marks is ON (the memoised switch read the marks routes use: no D1 statement of its own). OFF, no device holds marks, so the frame would only wake the hub and every open tab for nothing:
+  // the devices that watch the count marks ask for their changes. A device that joins after a flip catches up from the cursor log.
+  await announceMarks(c)
   // ON, a bump that did not land fails the write's answer (its outcome is unknown to the caller, and a stale set must never be served as fresh). OFF, nothing is being served from these
   // versions right now, so an unreachable cache store must not turn a committed Inventory Check write into an error: the failure is logged and the next flip ON starts from a bumped version
   // anyway (the version is also moved by every later writer).

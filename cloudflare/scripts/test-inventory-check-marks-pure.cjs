@@ -212,6 +212,15 @@ function suite(libText, routeText) {
     const cap = fn(marksRoutes(routeText), 'const marksCapability', 'const nonNegative')
     assert.ok(/jitterMinMs: limits\.inventoryMarksBroadcastJitterMinMs/.test(cap) && /jitterMaxMs: limits\.inventoryMarksBroadcastJitterMaxMs/.test(cap))
   })
+  t('F1: the inventory_checks broadcast is sent only while ic_marks is ON, read through the memoised switch read, and no D1 statement is added to a writer', () => {
+    const mw = fn(routeText, "  await next()\n  if (c.req.method === 'GET'", 'const wired = await readSwitch')
+    assert.equal(routeText.split("broadcast(c.env, 'inventory_checks'").length - 1, 1, 'exactly one inventory_checks broadcast in the route')
+    assert.ok(!mw.includes('broadcast('), 'the writer middleware reaches it only through announceMarks')
+    assert.ok(mw.indexOf('status >= 400') < mw.indexOf('await announceMarks(c)'), 'a 4xx refusal still sends nothing')
+    const helper = fn(routeText, 'const announceMarks = async', '// Every Inventory Check writer moves')
+    assert.ok(/^const announceMarks = async \(c: Context<[^\n]*\n  if \(!await readSwitch\(c\.env, 'ic_marks'\)\) return\n  try \{ c\.executionCtx\.waitUntil\(broadcast\(c\.env, 'inventory_checks'/.test(helper), 'the first statement is the ic_marks read and the broadcast follows it')
+    assert.ok(!/getDb|\.prepare\(|\.batch\(/.test(helper + mw), 'no D1 statement of its own')
+  })
   const stubCheck = (lib, events, topId) => {
     const batches = []
     const db = { async batch(statements) {
@@ -282,6 +291,7 @@ function suite(libText, routeText) {
     check('mutant ' + name + ' turns "' + expectRed + '" red', () => assert.ok(red.some((n) => n.startsWith(expectRed)), 'red: ' + red.join(' | ')))
   }
   await mutate('split the cursor read from the page read', 'lib', '    { sql: SNAPSHOT_PAGE_SQL, params: { ...scope, lo, hi: lo + pageIds } },\n  ])', '  ])\n  await db.batch([{ sql: SNAPSHOT_PAGE_SQL, params: { ...scope, lo, hi: lo + pageIds } }])', 'I5: the snapshot')
+  await mutate('the broadcast is sent whatever the switch says (the old unconditional call)', 'route', "  if (!await readSwitch(c.env, 'ic_marks')) return\n  try { c.executionCtx.waitUntil(broadcast(", "  try { c.executionCtx.waitUntil(broadcast(", 'F1')
   await mutate('switch not checked', 'route', "if (!await readSwitch(c.env, 'ic_marks')) return null", 'if (false) return null', 'OFF')
   await mutate('waiting for every viewer', 'route', 'permitted: access.fields.stock && await fixStockOn(c)', 'permitted: true', 'I9')
   await mutate('waiting not stripped at serve time', 'route', 'start.permitted ? answer : withoutWaiting(answer)', 'answer', 'I9')
