@@ -27,6 +27,17 @@ import { shiftRielCountInvalid, type ShiftCountIssue } from './shiftCountRules.t
  */
 type ShiftGateContext = { t: (key: string) => string }
 
+/**
+ * The accessible names of the cash-used pair: the field and the currency joined from the two labels the packs already
+ * hold ("Cash used, Riel"), so a screen reader never announces a bare "Dollars" or "Riel".
+ */
+export function shiftCashUsedLabels(t: (key: string) => string): { usdLabel: string; khrLabel: string } {
+  return {
+    usdLabel: `${t('shift_additional_cash')}, ${t('shift_additional_usd')}`,
+    khrLabel: `${t('shift_additional_cash')}, ${t('shift_additional_khr')}`,
+  }
+}
+
 type PairProps = {
   label: string
   usd: string

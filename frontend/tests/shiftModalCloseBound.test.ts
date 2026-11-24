@@ -122,7 +122,7 @@ function openCloseForm(source: string, row: Record<string, unknown> = openRow, l
     if (name.includes('PaginationControls')) return { default: () => null, DEFAULT_PAGE_SIZE: 20 }
     if (name.includes('DateEntryInput')) return { DateTimeEntryInput: DateMarker }
     if (name.includes('ShiftSummary')) return { default: SummaryMarker }
-    if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }
+    if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCashUsedLabels: (t: (key: string) => string) => ({ usdLabel: t('shift_additional_usd'), khrLabel: t('shift_additional_khr') }), shiftCountBlockerKey: (key: string) => key }
     if (name.includes('pos/ShiftGate')) return { SHIFT_BRANCH_CHANGED_EVENT: 'shift-branch', SHIFT_STATE_CHANGED_EVENT: 'shift-state' }
     if (name.includes('shiftCountRules')) return shiftCountRules
     if (name.includes('shiftLateClose')) return shiftLateClose

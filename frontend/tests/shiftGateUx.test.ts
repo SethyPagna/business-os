@@ -225,7 +225,7 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name.includes('shiftTransport')) return { fetchCurrentShift: async () => currentShift, pendingShiftMutation: () => null,
     shiftClosingCounts: (usd: string, khr: string) => ({ usd: usd === '' ? null : Number(usd), khr: khr === '' ? null : Number(khr) }),
     closeShift: (input: any) => { submitted = input; return new Promise((resolve) => { resolveClose = resolve }) } }
-  if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
+  if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker, shiftCashUsedLabels: (t: (key: string) => string) => ({ usdLabel: t('shift_additional_usd'), khrLabel: t('shift_additional_khr') }) }
   if (name.includes('shiftReportModel')) return {
     shiftCountedPairText: () => '—',
     // The real rule never answers null (owner, 13 Oct 2026, item 14: the additional row is always there, $0 included).
@@ -296,7 +296,7 @@ try {
     if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
       listShifts: async () => ({ shifts: [historyShift], scope: 'own' }), fetchShiftHistory: async () => ({ shift: historyResult, amendments: [] }),
       closeShiftById: () => new Promise((resolve) => { resolveHistoryClose = resolve }) }
-    if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
+    if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker, shiftCashUsedLabels: (t: (key: string) => string) => ({ usdLabel: t('shift_additional_usd'), khrLabel: t('shift_additional_khr') }) }
     return { default: () => null }
   }, historyModule, historyModule.exports)
   const renderHistory = () => {

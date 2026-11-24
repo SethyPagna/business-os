@@ -91,7 +91,7 @@ async function summaryFacts(closed: Record<string, unknown>): Promise<Array<[str
       }),
     }
     if (name.includes('formatters')) return { fmtDate: String, fmtDateTime24: String, parseServerTimestampMs: Date.parse }
-    if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }
+    if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker, shiftCashUsedLabels: (t: (key: string) => string) => ({ usdLabel: `${t('shift_additional_cash')}, ${t('shift_additional_usd')}`, khrLabel: `${t('shift_additional_cash')}, ${t('shift_additional_khr')}` }), shiftCountBlockerKey: (key: string) => key }
     if (name.includes('useSavingGate')) return { useSavingGate: () => ({ blocked: false, reason: '' }) }
     if (name.includes('shiftReportModel')) return model
     if (name.includes('shiftCountRules')) return shiftCountRules

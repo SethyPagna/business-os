@@ -14,7 +14,7 @@ import { shiftCountIssue, shiftRielCountInvalid } from '../shifts/shiftCountRule
 import { TimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftHeaderRow from '../shifts/ShiftHeaderRow.tsx'
-import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
+import ShiftCountPair, { ShiftSubmitRow, shiftCashUsedLabels, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional } from '../shifts/shiftReportModel.ts'
 import { retiredBranchNotice } from '../shifts/retiredBranchNotice.ts'
 import { shiftCloseTimeRefusalText } from '../shifts/shiftCloseTimeError.ts'
@@ -517,7 +517,7 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
           never counted two ways. */}
       <ShiftCountPair
         dense disabled={frozen}
-        label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
+        label={t('shift_additional_cash')} {...shiftCashUsedLabels(t)}
         hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')}
         usd={form.draft.additionalUsd} khr={form.draft.additionalKhr}
         onUsd={(value) => form.set({ additionalUsd: value })}
@@ -1053,7 +1053,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                     other -- the server's one reconciliation reads both. */}
                 <ShiftCountPair
                   dense autoFocus disabled={busy || pending}
-                  label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
+                  label={t('shift_additional_cash')} {...shiftCashUsedLabels(t)}
                   hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')}
                   usd={additionalUsd} khr={additionalKhr} onUsd={setAdditionalUsd} onKhr={setAdditionalKhr}
                 />
