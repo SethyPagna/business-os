@@ -53,12 +53,16 @@ export async function readPortalTelegramGate(env: PortalTelegramEnv, db: GateDb,
   // Only a resolved value is shared between requests. A read in flight belongs to the request that started it: awaiting
   // another request's promise can hang for good once that request answered or was cancelled (workerd), so a request that
   // finds no fresh value runs its own S-G1.
+  // The memo object is its own version: every write makes a new one. A failure decides the grace only if the memo is still the
+  // one this request found; if another outcome landed first (a success, or a failure that already took the grace), this one changes nothing.
+  const seen = memo
   try {
     const rows = await db.prepare(GATE_SQL).all<{ key: unknown; value: unknown }>()
     const value = gateFromRows(rows)
     memo = { value, at: nowMs, graceUsed: false }
     return value
   } catch {
+    if (memo !== seen) return memo ? memo.value : GATE_OFF
     if (memo && !memo.graceUsed) memo = { value: memo.value, at: nowMs, graceUsed: true }
     else memo = { value: GATE_OFF, at: nowMs, graceUsed: true }
     return memo.value

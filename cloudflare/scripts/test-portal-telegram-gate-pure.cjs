@@ -192,6 +192,46 @@ check('T-C2 a failed refresh keeps the previous value for one more period, then 
   assert.equal((await gateLib.readPortalTelegramGate({}, db, T0 + 3 * PERIOD)).enabled, true)
 })
 
+// R2-1 (review F1): the grace decision is made once per refresh outcome, against the memo as it is when the outcome lands.
+check('R2-1 two concurrent failed refreshes use one grace: both answer on, and a request later in the period still does', async () => {
+  for (const burst of [2, 3]) {
+    gateLib.resetPortalTelegramGateMemo()
+    let fail = false
+    const db = fakeDb(() => { if (fail) return Promise.reject(new Error('D1 blip')); return rowsOn('0') })
+    assert.equal((await gateLib.readPortalTelegramGate({}, db, T0)).enabled, true)
+    fail = true
+    const t1 = T0 + PERIOD + 1
+    const answers = await Promise.all(Array.from({ length: burst }, () => gateLib.readPortalTelegramGate({}, db, t1)))
+    assert.deepEqual(answers.map((g) => g.enabled), Array(burst).fill(true), `burst of ${burst}`)
+    fail = false
+    assert.equal((await gateLib.readPortalTelegramGate({}, db, t1 + 1000)).enabled, true, 'inside the one grace period')
+    assert.equal(db.calls, 1 + burst, 'the memo answered the later request')
+  }
+})
+
+check('R2-1 a slow failure that settles after a newer success changes nothing; the later failure still gets its grace', async () => {
+  gateLib.resetPortalTelegramGateMemo()
+  let mode = 'ok'
+  let rejectSlow
+  const db = fakeDb((call) => {
+    if (mode === 'ok') return rowsOn('0')
+    if (mode === 'slow') return new Promise((_, reject) => { rejectSlow = reject })
+    if (mode === 'fast') return rowsOn('0')
+    return Promise.reject(new Error('D1 blip'))
+  })
+  assert.equal((await gateLib.readPortalTelegramGate({}, db, T0)).enabled, true)
+  mode = 'slow'
+  const slow = gateLib.readPortalTelegramGate({}, db, T0 + PERIOD)
+  mode = 'fast'
+  const t1 = T0 + PERIOD + 5
+  assert.equal((await gateLib.readPortalTelegramGate({}, db, t1)).enabled, true)
+  rejectSlow(new Error('D1 slow failure'))
+  assert.equal((await slow).enabled, true, 'the slow request answers with the newer success')
+  mode = 'fail'
+  const t2 = t1 + PERIOD
+  assert.equal((await gateLib.readPortalTelegramGate({}, db, t2)).enabled, true, 'the success kept its unused grace')
+})
+
 check('T-C2 an invalid stage text in D1 pauses (3), it is never read as 0', async () => {
   gateLib.resetPortalTelegramGateMemo()
   const db = fakeDb(() => rowsOn('x'))
