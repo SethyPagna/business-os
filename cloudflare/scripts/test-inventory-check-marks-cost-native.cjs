@@ -90,9 +90,15 @@ const SCOPE_READ_MEDIAN_MS = 100
     const twenty = await fresh(20, 0)
     const submit = await world.send('POST', `${IC}/submissions`, { branchId: 1, requestId: rid('sb'), lines: lines(twenty, 5) }, { cookie: counterCookie })
     out.measured.submit20 = { status: submit.status, rr: submit.rr, rw: submit.rw, calls: submit.calls }
+    // A second device that holds the same cursor reads after the first one computed: the shared answer (B.5, A3). Its first changes read is served from the stored answer after ONE validation call (TOP_SQL, AT_SQL for since, AT_SQL for the stored cursor).
+    const twin = Object.assign(new Device(world, 1, { miss: false }), { cursor: device.cursor, tag: device.tag })
     const s0 = device.log.length
     await device.sync()
     out.measured.changesAfterSubmit20 = await chainOf(device.log.slice(s0))
+    const t0twin = twin.log.length
+    await twin.sync()
+    out.measured.changesCacheHit = twin.log.slice(t0twin).find((x) => x.chg)
+    out.measured.changesCacheHitComputedBy = { rows: out.measured.changesAfterSubmit20.answers[0].rows, calls: out.measured.changesAfterSubmit20.answers[0].calls }
     out.measured.changesAfterSubmit20Statements = (await world.last()).stmts.map((x) => ({ sql: x.raw.slice(0, 100).split(/\s+/).join(' '), rr: x.rr }))
     // 5. Approve all of 200 lines: five submissions of 40 differing lines, then the device catches up on them (not measured), then they are approved, then the device catches up on the approvals only (the pin).
     //    A second device that stayed before the submissions answers both at once: the figure the previous slice measured (1,832 rows), which Q-L3 explains.
@@ -192,6 +198,8 @@ const SCOPE_READ_MEDIAN_MS = 100
       pinOf('changesAfterSubmit20 rows <= 186', m.changesAfterSubmit20.rows, 186), pinOf('changesAfterSubmit20 calls <= 4', m.changesAfterSubmit20.calls, 4),
       pinOf('changesAfterApprove200 rows <= 1784', m.changesAfterApprove200.rows, 1784),
       pinOf('changesIdle rows <= 6', m.changesIdle.rr, 6), pinOf('changesIdle calls <= 2', m.changesIdle.calls, 2),
+      // A3 (G.3): a cache hit at most 8 gross rows and 2 calls = the estimate of B.5 (7 gross: 3 auth + TOP + two AT rows + the closing row of the answer's own check) + 10 percent; A5 replaces the estimate by the measured figure + 10 percent.
+      pinOf('changes cache hit rows <= 8', m.changesCacheHit.rr, 8, { computedBy: m.changesCacheHitComputedBy }), pinOf('changes cache hit calls <= 2', m.changesCacheHit.calls, 2),
       pinOf('pendingBuild rows <= 2730', m.pendingBuild.rows, 2730),
       pinOf('snapshotCold rows <= ceil(1.1 x (7 x P + pages x (4 + bucket probes)))', m.snapshotCold.rows, m.snapshotColdTerms.pin),
       pinOf('plain 500-line submission read in <= 3 reads', m.changesAfterPlain500.reads, 3),
@@ -213,6 +221,7 @@ const SCOPE_READ_MEDIAN_MS = 100
     for (const line of m.plain500Reads) console.log(line)
     const ct = m.snapshotColdTerms
     console.log('SNAPSHOT COLD (world ' + WORLD + '): measured ' + m.snapshotCold.rows + ' rows, formula 7 x P ' + ct.P + ' + pages ' + ct.pages + ' x (4 + bucket probes ' + ct.bucketProbes + ') = ' + ct.formula + ', pin ceil(1.1 x formula) = ' + ct.pin + '; measured / formula = ' + (m.snapshotCold.rows / ct.formula).toFixed(4) + '; pin without the page overhead term = ' + ct.pinWithoutPageOverhead + ', measured over it: ' + (m.snapshotCold.rows > ct.pinWithoutPageOverhead))
+    console.log('CACHE HIT (world ' + WORLD + '): the second device read ' + m.changesCacheHit.rr + ' rows in ' + m.changesCacheHit.calls + ' calls (gross, auth included; estimate 7 rows, 2 calls; pin 8 rows, 2 calls); the first device computing the same answer read ' + m.changesCacheHitComputedBy.rows + ' rows in ' + m.changesCacheHitComputedBy.calls + ' calls')
     if (m.scopeRead) console.log('SCOPE READ (world ' + WORLD + '): median D1 time ' + m.scopeRead.medianMetaDurationMs + ' ms over ' + m.scopeRead.metaDurationMs.length + ' reps (' + m.scopeRead.metaDurationMs.join(', ') + '), rows read ' + m.scopeRead.rowsRead + ', guard ' + SCOPE_READ_MEDIAN_MS + ' ms')
     for (const g of out.go) console.log((g.ok ? 'PASS ' : 'OVER ') + g.name + ' (' + g.value + ' vs ' + g.limit + ')')
     process.exitCode = out.go.every((g) => g.ok) ? 0 : 1
