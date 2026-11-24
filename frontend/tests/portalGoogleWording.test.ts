@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { buildSync } from 'esbuild'
 import React from 'react'
@@ -385,6 +386,25 @@ check('control: removing any one of the four marks or either key turns the assis
     assert.ok(problems.length >= 1, `${name}: removing it must turn the check red`)
   }
   assert.deepEqual(assistantViolations(sourceOf(original)), [], 'the unmutated source is clean')
+})
+
+// The repository is public: no test may name a folder that lives outside it. The needles are built from pieces so this
+// file does not match itself.
+check('no file under tests names the internal records folder', () => {
+  const needles = ['Record' + 's/', 'Record' + 's' + String.fromCharCode(92)]
+  const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)])
+  const hits = walk(path.dirname(fileURLToPath(import.meta.url))).filter((file) => {
+    const text = fs.readFileSync(file, 'utf8')
+    // A folder name starts a path segment: `onOpenRecords/` or `groupedRecords\.ts` in code is not a folder.
+    return needles.some((needle) => {
+      for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+        if (!/[A-Za-z0-9_]/.test(text[at - 1] ?? ' ')) return true
+      }
+      return false
+    })
+  })
+  assert.deepEqual(hits.map((file) => path.basename(file)), [], 'a test names a folder outside the repository')
 })
 
 console.log(`portalGoogleWording: ${passed} checks passed`)

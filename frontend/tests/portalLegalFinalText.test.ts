@@ -1,7 +1,6 @@
 // The final English of the storefront legal pages, decided 21 Nov 2026 (owner: keep Google Translate, say plainly that
-// English and Khmer are the official text, protect the facts). FIXTURE below is copied from
-// Records/Design/2026-11-21/real-google/legal/review/FINAL-LEGAL-TEXT.md; every key must equal it byte for byte, so a
-// later edit of the wording has to change this file on purpose.
+// English and Khmer are the official text, protect the facts). FIXTURE below is the decided final English;
+// every key must equal it byte for byte, so a later edit of the wording has to change this file on purpose.
 //
 //   1. every changed key equals the fixture (English), and has real Khmer that differs from the English
 //   2. the official-text notice is a pack key, is rendered on all three pages under the dates, in both languages
