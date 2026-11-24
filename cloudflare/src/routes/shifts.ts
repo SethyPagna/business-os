@@ -742,13 +742,14 @@ export async function readShiftPolicy(db: D1Compat): Promise<ShiftPolicy> {
     admin_exempt: values.shift_admin_exempt == null ? true : values.shift_admin_exempt !== 'false',
   }
 }
+/** A branch-filtered till also sees a shift opened under "All branches" (branch_id NULL), the exact-branch row first. */
 async function readCurrent(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null) {
   const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
     WHERE scope_mode = @scopeMode ${accountClause}
       AND business_date = ${localTodayExpr()}
-      AND ((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId)
-    ORDER BY opened_at DESC, id DESC LIMIT 1`).get<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId })
+      AND (branch_id IS @branchId OR (@branchId IS NOT NULL AND branch_id IS NULL))
+    ORDER BY (branch_id IS NULL) ASC, opened_at DESC, id DESC LIMIT 1`).get<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId })
 }
 /**
  * ---- The shift left OPEN on an earlier business day ----------------------
@@ -794,7 +795,7 @@ async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: numbe
       AND business_date < ${localTodayExpr()}
       AND closed_at IS NULL AND cancelled_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
-      AND ((((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId) ${accountClause})
+      AND ((((branch_id IS @branchId OR (@branchId IS NOT NULL AND branch_id IS NULL))) ${accountClause})
         OR (user_id = @userId AND branch_id IS NOT NULL AND (${BRANCH_ACTIVE_SQL}) = 0))
     ORDER BY business_date ASC, opened_at ASC, id ASC LIMIT 1`)
     .get<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId })
@@ -814,7 +815,7 @@ async function readStaleDrawersToAlert(db: D1Compat, policy: ShiftPolicy, userId
       AND business_date < ${localTodayExpr()}
       AND closed_at IS NULL AND cancelled_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
-      AND ((((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId) ${accountClause})
+      AND ((((branch_id IS @branchId OR (@branchId IS NOT NULL AND branch_id IS NULL))) ${accountClause})
         OR (user_id = @userId AND branch_id IS NOT NULL AND (${BRANCH_ACTIVE_SQL}) = 0))
       AND NOT EXISTS (SELECT 1 FROM shift_sessions seen
         WHERE seen.id != @newShiftId AND seen.parent_shift_id IS NULL AND seen.scope_mode = shift_sessions.scope_mode
