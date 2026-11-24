@@ -24,6 +24,8 @@ const MUTANT = process.env.MUTANT || ''
 if (MUTANT && !PATCHES[MUTANT]) throw new Error('unknown MUTANT ' + MUTANT)
 // Pins: [name, limit of rows, limit of calls or null]. A pin is within when the figure is at most its limit; the self-check below proves each one turns red one above.
 const within = (value, limit) => value <= limit
+// The D1 time of SCOPE_WAITING_SQL over 500 pending sessions of 20 lines (lead ruling 2, 24 Nov): D1 query time is I/O wait, not Worker CPU, so this is a regression guard, not a CPU limit.
+const SCOPE_READ_MEDIAN_MS = 100
 
 ;(async () => {
   const limits = limitsOf('free')
@@ -62,6 +64,13 @@ const within = (value, limit) => value <= limit
     await device.build()
     const build = device.log.slice(t0)
     out.measured.snapshotCold = { ...sum(build.filter((r) => r.url.includes('/marks?'))), pages: build.filter((r) => r.url.includes('/marks?')).map((r) => ({ url: r.url, rr: r.rr, calls: r.calls })) }
+    // The cold snapshot formula (C.1, snapshot part; lead ruling 1 of 24 Nov): rows = 7 x P + pages x (4 + bucket probes). P = the products of the world (every product id of a page range is seeked, active or not), pages = the cold page requests of the build,
+    // 4 = 3 (auth) + 1 (TOP) per page request, bucket probes = the occupied id ranges (one MIN(id) primary-key probe each), counted here by SQL on the products table, not by the route's statement.
+    const coldTerms = (await world.all('SELECT COUNT(*) AS p, COUNT(DISTINCT CAST(id AS INTEGER) / CAST(? AS INTEGER)) AS buckets FROM products WHERE id >= 0', limits.inventoryMarksPageIds))[0]
+    out.measured.snapshotColdTerms = { P: Number(coldTerms.p), pages: out.measured.snapshotCold.pages.length, bucketProbes: Number(coldTerms.buckets) }
+    out.measured.snapshotColdTerms.formula = 7 * out.measured.snapshotColdTerms.P + out.measured.snapshotColdTerms.pages * (4 + out.measured.snapshotColdTerms.bucketProbes)
+    out.measured.snapshotColdTerms.pin = Math.ceil(1.1 * out.measured.snapshotColdTerms.formula)
+    out.measured.snapshotColdTerms.pinWithoutPageOverhead = Math.ceil(1.1 * 7 * out.measured.snapshotColdTerms.P)
     out.measured.pendingBuild = sum(build.filter((r) => r.url.includes('/marks/pending')))
     out.measured.firstChanges = sum(build.filter((r) => r.url.includes('/marks/changes')))
     // 2. Warm pages (cache allowed): each page is validated by one call.
@@ -173,7 +182,7 @@ const within = (value, limit) => value <= limit
       }
       const median = (xs) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]
       out.measured.scopeRead = { sessions: sessionIds.length, linesEach: 20, rowsRead: scopeProbe.times[0].statements[0].rowsRead, bytesAverage: { lineSet: Math.round(Number(bytes.line_set)), applied: Math.round(Number(bytes.applied)), decisions: Math.round(Number(bytes.decisions)) },
-        metaDurationMs: durations, wallMs: walls, medianMetaDurationMs: median(durations), medianWallMs: median(walls), passLineMs: 13.7,
+        metaDurationMs: durations, wallMs: walls, medianMetaDurationMs: median(durations), medianWallMs: median(walls), passLineMs: SCOPE_READ_MEDIAN_MS,
         note: 'local miniflare D1 on the laptop: the SQL engine time of the statement, as the spike measured it; not production D1' }
     }
     // The budgets (G.3 A1c; gross, auth included, formula + 10 percent). Written first, asserted last.
@@ -184,6 +193,7 @@ const within = (value, limit) => value <= limit
       pinOf('changesAfterApprove200 rows <= 1784', m.changesAfterApprove200.rows, 1784),
       pinOf('changesIdle rows <= 6', m.changesIdle.rr, 6), pinOf('changesIdle calls <= 2', m.changesIdle.calls, 2),
       pinOf('pendingBuild rows <= 2730', m.pendingBuild.rows, 2730),
+      pinOf('snapshotCold rows <= ceil(1.1 x (7 x P + pages x (4 + bucket probes)))', m.snapshotCold.rows, m.snapshotColdTerms.pin),
       pinOf('plain 500-line submission read in <= 3 reads', m.changesAfterPlain500.reads, 3),
     ]
     for (const pin of pins) assert.equal(within(pin.limit + 1, pin.limit), false, 'MUTANT: a figure one above ' + pin.name + ' must be red')
@@ -196,11 +206,14 @@ const within = (value, limit) => value <= limit
     const formulaChecks = [over(m.changesAfterSubmit20, 'changesAfterSubmit20'), over(m.changesAfterApprove200, 'changesAfterApprove200'), over(m.changesAfterSubmitsAndApprovals200, 'changesAfterSubmitsAndApprovals200'),
       over(m.changesAfterPlain500, 'changesAfterPlain500'), ...plainReads,
       { name: 'changesAfterPlain500 read 2 scope statement rows <= 1.1 x (3 x S)', ok: secondScope <= Math.floor(1.1 * 3 * secondS), value: secondScope, limit: Math.floor(1.1 * 3 * secondS) }]
-    const go = [{ name: 'snapshotCold rows <= 60000 (the spike\'s check, left as it is: A4 sets the page size)', ok: m.snapshotCold.rows <= 60000, value: m.snapshotCold.rows, limit: 60000 }, ...pins, ...formulaChecks, ...(m.scopeRead ? [{ name: 'SCOPE_WAITING_SQL over 500 pending sessions: median D1 time <= 13.7 ms (A4)', ok: m.scopeRead.medianMetaDurationMs <= 13.7, value: m.scopeRead.medianMetaDurationMs, limit: 13.7 }] : [])]
+    const go = [...pins, ...formulaChecks, ...(m.scopeRead ? [{ name: 'SCOPE_WAITING_SQL over 500 pending sessions: median D1 time <= ' + SCOPE_READ_MEDIAN_MS + ' ms (regression guard, lead ruling 2; D1 time is I/O wait, not Worker CPU)', ok: m.scopeRead.medianMetaDurationMs <= SCOPE_READ_MEDIAN_MS, value: m.scopeRead.medianMetaDurationMs, limit: SCOPE_READ_MEDIAN_MS }] : [])]
     out.go = go
     if (OUT) fs.writeFileSync(OUT, JSON.stringify(out, null, 1))
     console.log(JSON.stringify(out, null, 1))
     for (const line of m.plain500Reads) console.log(line)
+    const ct = m.snapshotColdTerms
+    console.log('SNAPSHOT COLD (world ' + WORLD + '): measured ' + m.snapshotCold.rows + ' rows, formula 7 x P ' + ct.P + ' + pages ' + ct.pages + ' x (4 + bucket probes ' + ct.bucketProbes + ') = ' + ct.formula + ', pin ceil(1.1 x formula) = ' + ct.pin + '; measured / formula = ' + (m.snapshotCold.rows / ct.formula).toFixed(4) + '; pin without the page overhead term = ' + ct.pinWithoutPageOverhead + ', measured over it: ' + (m.snapshotCold.rows > ct.pinWithoutPageOverhead))
+    if (m.scopeRead) console.log('SCOPE READ (world ' + WORLD + '): median D1 time ' + m.scopeRead.medianMetaDurationMs + ' ms over ' + m.scopeRead.metaDurationMs.length + ' reps (' + m.scopeRead.metaDurationMs.join(', ') + '), rows read ' + m.scopeRead.rowsRead + ', guard ' + SCOPE_READ_MEDIAN_MS + ' ms')
     for (const g of out.go) console.log((g.ok ? 'PASS ' : 'OVER ') + g.name + ' (' + g.value + ' vs ' + g.limit + ')')
     process.exitCode = out.go.every((g) => g.ok) ? 0 : 1
   } finally { await world.dispose() }
