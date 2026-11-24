@@ -86,7 +86,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { isCashPaymentMethod, parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 import { posExactRielTender, posRielCashRowIds } from './posRielCash.ts'
-import { fitCartWidth } from './posCartFit.ts'
+import { CART_FIT_LG_BREAKPOINT_PX, cartProductsMinPx, fitCartWidth } from './posCartFit.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import {
@@ -1179,12 +1179,12 @@ export default function POS() {
   // Complete Sale is pinned to the bottom of the cart. While that cart is on screen (always beside the products from md
   // up; the Cart tab on a phone) the scroll buttons step aside and docked floats such as the notes tab sit just above it.
   // (The install band keeps off the whole till by page id: see pageHasBottomActionBar.)
-  const [panelsRowFit, setPanelsRowFit] = useState({ rowPx: 0, productsMinPx: 280 })
+  const [panelsRowFit, setPanelsRowFit] = useState({ rowPx: 0, productsMinPx: cartProductsMinPx(false) })
   useEffect(() => {
     const row = mainPanelsRef.current
     if (!row) return
     const measure = () => {
-      const productsMinPx = window.matchMedia('(min-width: 1024px)').matches ? 352 : 288
+      const productsMinPx = cartProductsMinPx(window.matchMedia(`(min-width: ${CART_FIT_LG_BREAKPOINT_PX}px)`).matches)
       const rowPx = row.getBoundingClientRect().width
       setPanelsRowFit((prev) => (prev.rowPx === rowPx && prev.productsMinPx === productsMinPx ? prev : { rowPx, productsMinPx }))
     }
