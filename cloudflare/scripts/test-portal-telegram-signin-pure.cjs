@@ -389,6 +389,22 @@ check('R2-3 S-C4 binds the ticket to its member: member 2 tapping a used token i
   }
 })
 
+// R2-6 (review F8): S-C4's sub-select finds the ticket by the token index; it does not walk the member's session rows.
+check('R2-6 S-C4 looks the ticket up through idx_portal_sessions_token, never through the member\'s session rows', async () => {
+  const db = makeDb()
+  const names = []
+  const values = []
+  const text = signIn.S_C4.replace(/@(\w+)/g, (_, name) => {
+    if (!names.includes(name)) { names.push(name); values.push({ now: '2026-11-24T08:00:00.000Z', tg: MEMBER_TG, ticket: 'tg1:x', seen_window: '-86400 seconds' }[name]) }
+    return `?${names.indexOf(name) + 1}`
+  })
+  for (const name of names) assert.ok(['now', 'tg', 'ticket', 'seen_window'].includes(name), `unexpected parameter @${name}`)
+  const plan = db.sqlite.prepare(`EXPLAIN QUERY PLAN ${text}`).all(...values).map((row) => String(row.detail)).join(' | ')
+  assert.match(plan, /idx_portal_sessions_token \(token_hash=\?\)/, plan)
+  assert.doesNotMatch(plan, /idx_portal_sessions_account/, plan)
+  assert.doesNotMatch(plan, /CORRELATED/, plan)
+})
+
 check('A2 the stamp goes in the batch that inserts the ticket of that same member, 2 rows with it', async () => {
   const db = makeDb()
   const id = db.member(MEMBER_TG, 'active', '2026-11-20 07:00:00')

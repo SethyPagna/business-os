@@ -52,7 +52,7 @@ export const S_C4 = `UPDATE portal_accounts SET last_seen_at = @now
 WHERE telegram_user_id = @tg
   AND status = 'active'
   AND (last_seen_at IS NULL OR datetime(last_seen_at) < datetime(@now, @seen_window))
-  AND EXISTS (SELECT 1 FROM portal_sessions s WHERE s.token_hash = @ticket AND s.account_id = portal_accounts.id AND datetime(s.created_at) = datetime(@now))`
+  AND id = (SELECT s.account_id FROM portal_sessions s WHERE s.token_hash = @ticket AND datetime(s.created_at) = datetime(@now) LIMIT 1)`
 
 export type ConfirmButton = { text: string; data: string }
 
