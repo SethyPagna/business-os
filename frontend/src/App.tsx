@@ -1248,7 +1248,7 @@ function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
     <div
       role="alert"
       aria-live="assertive"
-      className="fixed inset-x-0 top-0 z-[1500] flex min-h-[calc(3rem+env(safe-area-inset-top))] w-full items-center bg-blue-700 px-[calc(0.75rem+env(safe-area-inset-left))] pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] text-white shadow-lg dark:bg-blue-600"
+      className="fixed inset-x-0 top-0 z-[1500] flex min-h-[calc(3rem+env(safe-area-inset-top))] w-full items-center bg-blue-700 px-[calc(0.75rem+env(safe-area-inset-left))] pb-1.5 pt-[calc(0.375rem+env(safe-area-inset-top))] text-white shadow-lg dark:bg-blue-600"
     >
       <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-3">
         <span className="min-w-0 text-sm font-semibold">
@@ -1259,7 +1259,7 @@ function AppUpdateBanner({ update, onDismiss }: AppUpdateBannerProps) {
             type="button"
             onClick={() => { void restart() }}
             disabled={restarting}
-            className="rounded-lg bg-white px-3 py-1.5 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-70 dark:text-blue-700"
+            className="h-9 rounded-lg bg-white px-3 text-sm font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-wait disabled:opacity-70 dark:text-blue-700"
           >
             {restarting
               ? (t('restarting_app') || 'Restarting...')
