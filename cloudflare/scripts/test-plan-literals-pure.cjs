@@ -287,10 +287,6 @@ const NO_READER_YET = [
   { field: 'd1DailyRowsWritten', row: 14, why: 'reported platform fact; the 70/85/95 governor (S1) is its first reader and is not built' },
   { field: 'd1MaxDatabaseBytes', row: 14, why: 'reported platform fact; no reader in any tree' },
   { field: 'portalTelegramPollWindowMs', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
-  { field: 'portalTelegramPendingAttemptsMax', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
-  { field: 'portalTelegramPendingWindowSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
-  { field: 'portalTelegramJoinsPerWindowMax', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
-  { field: 'portalTelegramJoinsWindowSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
   { field: 'portalSessionTouchIntervalSeconds', row: 14, why: 'G38 S3a library: its readers are S3c to S3f and are not built yet' },
 ]
 
