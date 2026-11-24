@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { mock } from 'node:test'
+import { parseText, retiredKeyUseProblems } from './retiredStorageKeyUses.ts'
 
 let failed = 0
 const runTest = async (name: string, fn: () => void | Promise<void>): Promise<void> => {
@@ -64,6 +65,11 @@ await runTest('no code path reads or writes the retired storefront cache; the pa
   const keyUses = module.split(RETIRED_CACHE_KEY).length - 1
   assert.equal(keyUses, 1, 'the retired key is declared exactly once')
   assert.doesNotMatch(module, /getItem\(RETIRED_PORTAL_CACHE_KEY|setItem\(RETIRED_PORTAL_CACHE_KEY/, 'the retired key is never read or written')
+  // d15fix2 D1: the same holds for EVERY retired key (map consent too), by constant, by literal and through RETIRED_PORTAL_STORAGE_KEYS[i].
+  for (const key of need().RETIRED_PORTAL_STORAGE_KEYS) assert.equal(module.split(key).length - 1, 1, `${key} is written out exactly once, in its declaration`)
+  assert.deepEqual(retiredKeyUseProblems(parseText(module)), [], 'no retired key is read, written, indexed or copied: first paint only removes them')
+  assert.doesNotMatch(module, /RETIRED_PORTAL_STORAGE_KEYS\s*\[/, 'the removal list is never indexed')
+  assert.doesNotMatch(module, /(?:get|set)Item\(\s*(?:RETIRED_\w+|['"`]business-os-portal-map-consent-v1)/, 'the map-consent key is never read or written')
   assert.match(module, /RETIRED_PORTAL_STORAGE_KEYS[^=]*= \[RETIRED_PORTAL_CACHE_KEY[,\]]/, 'the removal list names the retired cache key')
   assert.match(module, /for \(const key of RETIRED_PORTAL_STORAGE_KEYS\) storage\?\.removeItem\(key\)/, 'every listed key is removed')
 })
@@ -107,7 +113,7 @@ await runTest('clearRetiredPortalCache empties both storages, keeps the shopper 
 await runTest('the retired map-consent entry is removed at first paint, from both storages, and the removal list names it', () => {
   const { clearRetiredPortalCache, RETIRED_PORTAL_STORAGE_KEYS } = need()
   assert.deepEqual([...RETIRED_PORTAL_STORAGE_KEYS].sort(), [RETIRED_CACHE_KEY, RETIRED_MAP_CONSENT_KEY].sort(), 'the removal list names both retired keys')
-  assert.match(code(read('../src/components/catalog/PublicCatalogPage.tsx')), /clearRetiredPortalCache()/, 'the first-paint path runs the removal')
+  assert.match(code(read('../src/components/catalog/PublicCatalogPage.tsx')), /^(?!\s*import\b).*\bclearRetiredPortalCache\(\)/m, 'the first-paint path runs the removal: a call site, not the import line')
   const makeStore = () => {
     const entries = new Map<string, string>([[RETIRED_MAP_CONSENT_KEY, 'granted'], [SHOPPER_LIST_KEY, '[{"id":7,"qty":2}]']])
     return { entries, store: { getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => { entries.set(key, value) }, removeItem: (key: string) => { entries.delete(key) } } }

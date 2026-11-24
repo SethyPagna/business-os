@@ -14,6 +14,7 @@ import ts from 'typescript'
 import { LEGAL_PAGE_SECTIONS, LEGAL_STORAGE_ROWS, PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
 import { AI_CONSENT_STORAGE_KEY } from '../src/components/catalog/legal/aiProviderDisclosure.ts'
 import { parseSource, storefrontModules } from './storefrontCopyScan.ts'
+import { parseText, retiredKeyUseProblems } from './retiredStorageKeyUses.ts'
 
 // 1. The privacy paragraph.
 const privacySections = LEGAL_PAGE_SECTIONS.privacy
@@ -151,7 +152,8 @@ for (const file of storefrontModules()) {
   const visit = (node: ts.Node) => {
     // A retired key named only in first paint's removal list is the opposite of storing: nothing writes it, so it gets no row. Exempt by exact key AND file.
     if (ts.isStringLiteral(node) && KEY_SHAPE.test(node.text)) {
-      const removedOnly = RETIRED_KEYS_REMOVED_AT_FIRST_PAINT.has(node.text) && /publicFirstPaint\.ts$/.test(file)
+      // D1 (d15fix2): the exemption holds only while EVERY use of the retired key in this file is a removal. A setItem, a getItem, a second literal or RETIRED_PORTAL_STORAGE_KEYS[1] makes it a stored key that needs a row.
+      const removedOnly = RETIRED_KEYS_REMOVED_AT_FIRST_PAINT.has(node.text) && /publicFirstPaint\.ts$/.test(file) && retiredKeyUseProblems(source).length === 0
       if (!removedOnly) keysInCode.set(node.text, file)
     }
     ts.forEachChild(node, visit)
@@ -160,6 +162,32 @@ for (const file of storefrontModules()) {
 }
 for (const [key, file] of keysInCode) {
   assert.ok(rowByName.has(key), `${key} is written by ${file.split('src').pop()} but the cookie table has no row for it`)
+}
+for (const file of storefrontModules()) {
+  assert.deepEqual(retiredKeyUseProblems(parseSource(file)), [], `${file.split('src').pop()} uses a retired storage key for something other than removing it`)
+}
+// Controls: the real first-paint file, with each of the reviewer's surviving mutants added, must be reported. Without these the exemption above could rot back to "exact key and file".
+{
+  const firstPaintFile = storefrontModules().find((file) => /publicFirstPaint\.ts$/.test(file))
+  assert.ok(firstPaintFile, 'control: publicFirstPaint.ts is a storefront module')
+  const real = fs.readFileSync(firstPaintFile, 'utf8')
+  const anchor = 'export function clearRetiredPortalCache(): void {'
+  assert.ok(real.includes(anchor), 'control: the anchor line for the mutants exists')
+  const withExtra = (extra: string) => parseText(real.replace(anchor, `${extra}\n${anchor}`), firstPaintFile)
+  assert.deepEqual(retiredKeyUseProblems(parseText(real, firstPaintFile)), [], 'control: the real file is clean')
+  const mutants: Array<[string, string]> = [
+    ['writes the retired key by its constant', "export function rememberMapChoice(): void {\n  globalThis.window?.localStorage?.setItem(RETIRED_PORTAL_MAP_CONSENT_KEY, 'granted')\n}\n"],
+    ['writes the retired key through RETIRED_PORTAL_STORAGE_KEYS[1]', "export function rememberMapChoice(): void {\n  globalThis.window?.localStorage?.setItem(RETIRED_PORTAL_STORAGE_KEYS[1], 'granted')\n}\n"],
+    ['reads the retired key', "export function mapChosen(): boolean {\n  return globalThis.window?.localStorage?.getItem(RETIRED_PORTAL_MAP_CONSENT_KEY) === 'granted'\n}\n"],
+    ['writes the retired key as a second literal', "export function rememberMapChoice(): void {\n  globalThis.window?.localStorage?.setItem('business-os-portal-map-consent-v1', 'granted')\n}\n"],
+    ['writes the retired key as a template literal', 'export function rememberMapChoice(): void {\n  globalThis.window?.localStorage?.setItem(`business-os-portal-map-consent-v1`, \'granted\')\n}\n'],
+    ['writes the retired key through a copy of the list', "export function rememberMapChoice(): void {\n  const [, consent] = [...RETIRED_PORTAL_STORAGE_KEYS]\n  globalThis.window?.localStorage?.setItem(consent, 'granted')\n}\n"],
+    ['sets a cookie from the retired key', "export function rememberMapChoice(): void {\n  document.cookie = RETIRED_PORTAL_MAP_CONSENT_KEY + '=granted'\n}\n"],
+    ['reads the retired key in the removal loop', "export function peek(): void {\n  for (const key of RETIRED_PORTAL_STORAGE_KEYS) globalThis.window?.localStorage?.getItem(key)\n}\n"],
+  ]
+  for (const [label, extra] of mutants) {
+    assert.ok(retiredKeyUseProblems(withExtra(extra)).length > 0, `control: a first-paint file that ${label} is reported, so the removal-only exemption would not apply`)
+  }
 }
 const CODE_FREE_ROWS = new Set(['bos_portal', 'googtrans', 'Business OS app-shell/static caches', 'businessos_device_settings', 'businessos_public_asset_base_url'])
 const everyKeyInSrc = new Set(keysInCode.keys())
