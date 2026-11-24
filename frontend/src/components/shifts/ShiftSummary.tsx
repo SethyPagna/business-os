@@ -7,7 +7,7 @@ import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
 import ShiftReportFigures from './ShiftReportFigures.tsx'
 import ShiftCloseDriftNote from './ShiftCloseDriftNote.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftAdditionalCash, shiftCountedPairText, shiftDrawerSourceBadge, shiftFiguresForViewer, shiftNotCounted } from './shiftReportModel.ts'
+import { shiftAdditionalCash, shiftDrawerSourceBadge, shiftFiguresForViewer, shiftHasUsd, shiftMoneyText, shiftNotCounted } from './shiftReportModel.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
 
 type Props = {
@@ -42,12 +42,14 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
     ? tr('shift_status_cancelled', 'Cancelled / closed out')
     : shift.closed_at ? tr('shift_status_closed', 'Closed') : tr('shift_status_open', 'Open')
   const closeTime = shift.closed_at ? `${shiftCellTime(shift.closed_at, shift.business_date)}${detail ? ` · ${duration(shift, t)}` : ''}` : status
-  const before = shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR)
+  // Riel first; the dollar half only when this shift has any dollar figure, on every pair row of it (owner A72 + Q3).
+  const showUsd = shiftHasUsd(shift)
+  const before = shiftMoneyText({ usd: shift.opening_float_usd, khr: shift.opening_float_khr }, showUsd, fmtUSD, fmtKHR)
   // Per currency, through the shared rule. A drawer counted in dollars and
   // left blank in riel used to print a bare "—" for BOTH, hiding a number the
   // cashier actually wrote; now only the uncounted half is a dash, and a
   // wholly uncounted drawer is still one dash.
-  const afterText = shiftCountedPairText(shift.closing_counted_usd, shift.closing_counted_khr, fmtUSD, fmtKHR)
+  const afterText = shiftMoneyText({ usd: shift.closing_counted_usd, khr: shift.closing_counted_khr }, showUsd, fmtUSD, fmtKHR)
   // A shift closed late with no count says so, instead of a bare dash (same-day closes keep the dash).
   const after = shiftNotCounted(shift, closedLate) ? tr('shift_late_not_counted', 'Not counted (closed late)') : afterText
   // Between the two: the extra change put in mid-shift (owner, 13 Oct 2026, item 14:
@@ -55,7 +57,7 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
   // the figure, zero when none; the (+) of an inflow marks only an amount, as in the
   // report block and the POS summary.
   const additional = shiftAdditionalCash(shift)
-  const between = `${additional.usd || additional.khr ? '+ ' : ''}${shiftCountedPairText(additional.usd, additional.khr, fmtUSD, fmtKHR)}`
+  const between = `${additional.usd || additional.khr ? '+ ' : ''}${shiftMoneyText(additional, showUsd, fmtUSD, fmtKHR)}`
   const sourceBadge = shiftDrawerSourceBadge(shift)
 
   return (
@@ -119,7 +121,7 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
                 Telegram shift report prints. When the server sent no breakdown
                 (an old row, or a list read) the before/after pair still stands. */}
             {shift.reconciliation
-              ? <ShiftCashBreakdown className="mt-2" reconciliation={shift.reconciliation} notCounted={shiftNotCounted(shift, closedLate)} />
+              ? <ShiftCashBreakdown className="mt-2" reconciliation={shift.reconciliation} showUsd={showUsd} notCounted={shiftNotCounted(shift, closedLate)} />
               : (
                 <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
                   <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="font-medium">{before}</dd></div>

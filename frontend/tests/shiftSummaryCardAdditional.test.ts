@@ -79,30 +79,30 @@ const ok = (cond: unknown, message: string) => { assert.ok(cond, message); check
   const rows = cells(shiftRow())
   assert.deepEqual(rows.map(([label]) => label), [en.shift_open_time, en.shift_close_time, en.shift_before, en.shift_recon_additional_cash, en.shift_after])
   const value = Object.fromEntries(rows.map(([label, text]) => [label, text]))
-  assert.equal(value[en.shift_before], '$10.00 · 10,000៛')
-  assert.equal(value[en.shift_recon_additional_cash], '$0.00 · 0៛', 'a zero, with no (+) because nothing was added')
-  assert.equal(value[en.shift_after], '$120.00 · 50,000៛')
-  ok(true, 'EN card: Open, Close, Before, Additional, After, with Additional reading $0.00 · 0៛ between Before and After')
+  assert.equal(value[en.shift_before], '10,000៛ · $10.00')
+  assert.equal(value[en.shift_recon_additional_cash], '0៛ · $0.00', 'a zero, with no (+) because nothing was added')
+  assert.equal(value[en.shift_after], '50,000៛ · $120.00')
+  ok(true, 'EN card: Open, Close, Before, Additional, After, with Additional reading 0៛ · $0.00 between Before and After')
 }
 
 // ---- an amount keeps its (+) and its own figures ----------------------------------
 {
   pack = en
   const value = Object.fromEntries(cells(shiftRow({ additional_cash_usd: 12.5, additional_cash_khr: 8000 } as Partial<Shift>)).map(([label, text]) => [label, text]))
-  assert.equal(value[en.shift_recon_additional_cash], '+ $12.50 · 8,000៛')
+  assert.equal(value[en.shift_recon_additional_cash], '+ 8,000៛ · $12.50')
   const khrOnly = Object.fromEntries(cells(shiftRow({ additional_cash_usd: 0, additional_cash_khr: 20000 } as Partial<Shift>)).map(([label, text]) => [label, text]))
-  assert.equal(khrOnly[en.shift_recon_additional_cash], '+ $0.00 · 20,000៛')
-  ok(true, 'an amount reads "+ $12.50 · 8,000៛", one currency is enough for the (+)')
+  assert.equal(khrOnly[en.shift_recon_additional_cash], '+ 20,000៛ · $0.00')
+  ok(true, 'an amount reads "+ 8,000៛ · $12.50", one currency is enough for the (+)')
 }
 
 // ---- other shapes of the same card -------------------------------------------------
 {
   pack = en
   const open = Object.fromEntries(cells(shiftRow({ closed_at: null, closing_counted_usd: null, closing_counted_khr: null } as Partial<Shift>)).map(([label, text]) => [label, text]))
-  assert.equal(open[en.shift_recon_additional_cash], '$0.00 · 0៛', 'an open shift still shows the row')
+  assert.equal(open[en.shift_recon_additional_cash], '0៛ · $0.00', 'an open shift still shows the row')
   assert.equal(open[en.shift_after], '—', 'and its uncounted closing stays unknown, not zero')
   const bare = Object.fromEntries(cells(shiftRow({ additional_cash_usd: undefined, additional_cash_khr: undefined } as Partial<Shift>)).map(([label, text]) => [label, text]))
-  assert.equal(bare[en.shift_recon_additional_cash], '$0.00 · 0៛', 'a response that does not carry the columns is none added')
+  assert.equal(bare[en.shift_recon_additional_cash], '0៛ · $0.00', 'a response that does not carry the columns is none added')
   ok(true, 'open shift and a response without the columns: the Additional cell is still a zero, the uncounted closing stays a dash')
 }
 
@@ -114,7 +114,7 @@ const ok = (cond: unknown, message: string) => { assert.ok(cond, message); check
     assert.deepEqual(rows.map(([label]) => label), [km.shift_open_time, km.shift_close_time, km.shift_before, km.shift_recon_additional_cash, km.shift_after])
     assert.match(km.shift_recon_additional_cash, /[ក-៿]/)
     assert.notEqual(km.shift_recon_additional_cash, en.shift_recon_additional_cash, 'km.json carries Khmer, not the English value')
-    assert.equal(rows[3][1], '$0.00 · 0៛')
+    assert.equal(rows[3][1], '0៛ · $0.00')
     ok(true, `KM card: the same five cells; the label is ${km.shift_recon_additional_cash}`)
   } finally { pack = en }
 }

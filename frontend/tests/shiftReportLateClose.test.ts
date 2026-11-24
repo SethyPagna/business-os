@@ -209,7 +209,7 @@ const mutate = (source: string, from: string, to: string) => {
 }
 
 test('mutant: the Closed late row left out of the CSV fails the row test', async () => {
-  const mutant = mutate(REPORT, "filters, 'csv'), rows)", "filters, 'csv'), rows.filter((row) => row.Section !== tr('shift_closed_late', 'Closed late')))")
+  const mutant = mutate(REPORT, "filters, 'csv'), shiftExportRows(rows).rows)", "filters, 'csv'), shiftExportRows(rows.filter((row) => row.Section !== tr('shift_closed_late', 'Closed late'))).rows)")
   await assert.rejects(() => closedLateRow(mutant), /the CSV has a Closed late row/)
 })
 

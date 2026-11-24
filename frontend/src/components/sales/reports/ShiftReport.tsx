@@ -22,7 +22,7 @@ import { openPrintExport } from '../../../utils/exportOptions.ts'
 import ShiftHistoryPanel from '../../shifts/ShiftHistoryPanel.tsx'
 import ShiftSummary from '../../shifts/ShiftSummary.tsx'
 import ShiftHeaderRow from '../../shifts/ShiftHeaderRow.tsx'
-import { lateCloseReview, shiftCloseDriftRows, shiftComparisonRowNotCounted, shiftComparisonRows, shiftFigureRows, shiftFiguresForViewer, shiftFiguresOf, shiftRegisteredRows, shiftRowNotCounted } from '../../shifts/shiftReportModel.ts'
+import { lateCloseReview, shiftCloseDriftRows, shiftComparisonRowNotCounted, shiftComparisonRows, shiftFigureRows, shiftExportRows, shiftFiguresForViewer, shiftFiguresOf, shiftHasUsd, shiftMoneyColumns, shiftRegisteredRows, shiftRowNotCounted, type ShiftExportRow } from '../../shifts/shiftReportModel.ts'
 import { Button, EmptyState, OverflowMenu, Skeleton } from '../../shared/kit'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import { reportFileName, reportQueryParams } from './reportModel.ts'
@@ -76,28 +76,28 @@ export default function ShiftReport(p: ReportViewProps) {
 
   const closedLateText = (found: NonNullable<typeof review>) => [found.reason, found.by, found.at ? fmtDateTime24(found.at) : ''].filter(Boolean).join(' · ')
 
-  const rows = useMemo(() => {
+  // Riel first; the dollar cell of a PAIR row is filled only when the shift has any dollar figure (owner A72 + Q3). Business results are dollars (canonical
+  // revenue) and keep their USD cell, which is what keeps the USD column on a riel-only shift that has them.
+  const rows = useMemo((): ShiftExportRow[] => {
     if (!shift) return []
+    const showUsd = shiftHasUsd(shift)
     return [
       // Open, additional change used, end -- the same shared order the shift
       // screen prints, so an exported row never contradicts the app.
       ...shiftRegisteredRows(shift).map((row) => ({
         Section: tr('shift_registered_cash', 'Registered cash'),
         Line: shiftRowNotCounted(row, shift, closedLate) ? `${tr(row.key, row.fallback)} · ${tr('shift_late_not_counted', 'Not counted (closed late)')}` : tr(row.key, row.fallback),
-        USD: row.usd ?? '',
-        KHR: row.khr ?? '',
+        ...shiftMoneyColumns(row, showUsd),
       })),
       ...shiftFigureRows(shiftFiguresOf(shift)).map((row) => ({
         Section: tr('shift_report_figures', 'Business results'),
         Line: tr(row.key, row.key === 'credit_awaiting_payment' ? 'Not Paid' : row.key),
-        USD: row.usd,
-        KHR: row.khr ?? '',
+        ...(row.khr == null ? { KHR: '', USD: row.usd } : shiftMoneyColumns({ usd: row.usd, khr: row.khr }, showUsd)),
       })),
       ...shiftComparisonRows(shift).map((row) => ({
         Section: tr('shift_cash_breakdown', 'Cash breakdown'),
         Line: shiftComparisonRowNotCounted(row, shift, closedLate) ? `${tr(row.key, row.key)} · ${tr('shift_late_not_counted', 'Not counted (closed late)')}` : tr(row.key, row.key),
-        USD: row.usd ?? '',
-        KHR: row.khr ?? '',
+        ...shiftMoneyColumns(row, showUsd),
       })),
       // N4: the breakdown above is the drawer as closed; what moved since is
       // its own section -- today's value per moved line, and each sale's cash
@@ -105,29 +105,29 @@ export default function ShiftReport(p: ReportViewProps) {
       ...shiftCloseDriftRows(shift).map((row) => ({
         Section: tr('shift_changed_after_close', 'Changed after close'),
         Line: row.label ? `${row.label} · ${tr(row.labelKey, row.labelKey)}` : tr(row.labelKey, row.labelKey),
-        USD: row.usd ?? '',
-        KHR: row.khr ?? '',
+        ...shiftMoneyColumns(row, showUsd),
       })),
       // The reason, who closed it and when: one row, in the CSV and the print alike.
       ...(review ? [{
         Section: tr('shift_closed_late', 'Closed late'),
         Line: closedLateText(review),
-        USD: '',
         KHR: '',
+        USD: '',
       }] : []),
     ]
   }, [shift, tr, review, closedLate])
 
   const exportCsv = () => {
-    if (shift) downloadCSV(reportFileName(`shift-${shift.shift_code}`, filters, 'csv'), rows)
+    if (shift) downloadCSV(reportFileName(`shift-${shift.shift_code}`, filters, 'csv'), shiftExportRows(rows).rows)
   }
   const exportPrint = () => {
     if (!shift) return
+    const table = shiftExportRows(rows)
     openPrintExport({
       title: `${tr('shift_report', 'Shift Report')} · ${shift.shift_code}`,
       subtitle: [fmtDateOnly(shift.business_date), shift.shift_code, shift.user_name || tr('shift_staff', 'Staff'), shift.branch_name || tr('all_branches', 'All branches')].join(' · '),
-      headers: ['Section', 'Line', 'USD', 'KHR'],
-      rows,
+      headers: table.headers,
+      rows: table.rows,
     })
   }
 

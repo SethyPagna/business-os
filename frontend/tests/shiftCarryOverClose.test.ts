@@ -506,7 +506,9 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     if (name.includes('ShiftHeaderRow')) return { default: function ShiftHeaderRow() { return null } }
     if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCashUsedLabels: (t: (key: string) => string) => ({ usdLabel: `${t('shift_additional_cash')}, ${t('shift_additional_usd')}`, khrLabel: `${t('shift_additional_cash')}, ${t('shift_additional_khr')}` }), shiftCountBlockerKey: (key: string) => key }
     if (name.includes('shiftReportModel')) return {
-      shiftCountedPairText: (usd: unknown, khr: unknown) => `${usd}|${khr}`,
+      shiftMoneyText: (pair: { usd: unknown; khr: unknown }) => `${pair.usd}|${pair.khr}`,
+      shiftHasUsd: () => true,
+      shiftTypedHasUsd: () => false,
       shiftFiguresForViewer: (shift: unknown) => shift,
       // The real rule never answers null (owner, 13 Oct 2026, item 14: the additional row is always there, $0 included).
       shiftAdditionalCash: () => ({ usd: 0, khr: 0 }),

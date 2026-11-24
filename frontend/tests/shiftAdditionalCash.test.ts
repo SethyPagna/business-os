@@ -30,6 +30,9 @@ import type { Shift } from '../src/api/shiftTransport.ts'
 import {
   shiftAdditionalCash,
   shiftExpectedWithTypedAdditional,
+  shiftExportRows,
+  shiftHasUsd,
+  shiftMoneyColumns,
   shiftRegisteredRows,
   type ShiftFiguresShape,
 } from '../src/components/shifts/shiftReportModel.ts'
@@ -263,45 +266,47 @@ const registeredBlock = (shift: Shift): string[] => {
 test('the on-screen report prints Open -> Additional change used -> End, with $0 when nothing was added (EN and KM)', () => {
   pack = en
   assert.deepEqual(registeredBlock(closedShiftRow({ usd: 0, khr: 0 })), [
-    `${en.shift_registered_open}: $10.00 · 10,000៛`,
-    `${en.shift_recon_additional_cash}: $0.00 · 0៛`,
-    `${en.shift_registered_end}: $120.00 · 50,000៛`,
+    `${en.shift_registered_open}: 10,000៛ · $10.00`,
+    `${en.shift_recon_additional_cash}: 0៛ · $0.00`,
+    `${en.shift_registered_end}: 50,000៛ · $120.00`,
   ])
   assert.deepEqual(registeredBlock(closedShiftRow({ usd: 12.5, khr: 8000 })).map((row) => row.replace(/^[^:]*: /, '')), [
-    '$10.00 · 10,000៛', '+ $12.50 · 8,000៛', '$120.00 · 50,000៛',
+    '10,000៛ · $10.00', '+ 8,000៛ · $12.50', '50,000៛ · $120.00',
   ], 'an amount keeps its (+) and its own figures')
   pack = km
   try {
     const rows = registeredBlock(closedShiftRow({ usd: 0, khr: 0 }))
     assert.equal(rows.length, 3, 'the Khmer report has all three rows too')
-    assert.equal(rows[1], `${km.shift_recon_additional_cash}: $0.00 · 0៛`)
+    assert.equal(rows[1], `${km.shift_recon_additional_cash}: 0៛ · $0.00`)
     assert.match(rows[1], /សាច់ប្រាក់បានប្រើ/)
   } finally { pack = en }
 })
 
 test('the CSV and the print carry the additional row as a zero line', () => {
   // ShiftReport.tsx builds one `rows` list for both exports from shiftRegisteredRows.
-  // `row.usd ?? ''` keeps a 0 as 0 -- the same expression is asserted in the source below.
+  // shiftMoneyColumns keeps a 0 as 0 (KHR first, USD when the shift has any dollar) -- the spread is asserted in the source below.
   const source = read('../src/components/sales/reports/ShiftReport.tsx')
-  assert.match(source, /\.\.\.shiftRegisteredRows\(shift\)\.map\(\(row\) => \(\{[\s\S]*?USD: row\.usd \?\? '',[\s\S]*?KHR: row\.khr \?\? '',/, 'a zero stays a zero in the export rows')
-  const rows = shiftRegisteredRows(closedShiftRow({ usd: 0, khr: 0 })).map((row) => ({
-    Section: 'Registered cash', Line: en[row.key] ?? row.fallback, USD: row.usd ?? '', KHR: row.khr ?? '',
-  }))
+  assert.match(source, /\.\.\.shiftRegisteredRows\(shift\)\.map\(\(row\) => \(\{[\s\S]*?\.\.\.shiftMoneyColumns\(row, showUsd\),/, 'a zero stays a zero in the export rows')
+  const registeredShift = closedShiftRow({ usd: 0, khr: 0 })
+  const table = shiftExportRows(shiftRegisteredRows(registeredShift).map((row) => ({
+    Section: 'Registered cash', Line: en[row.key] ?? row.fallback, ...shiftMoneyColumns(row, shiftHasUsd(registeredShift)),
+  })))
+  const rows = table.rows
   const csv = buildCSV(rows).split('\n')
   assert.deepEqual(csv, [
-    'Section,Line,USD,KHR',
-    `Registered cash,${en.shift_registered_open},10,10000`,
+    'Section,Line,KHR,USD',
+    `Registered cash,${en.shift_registered_open},10000,10`,
     'Registered cash,Cash used,0,0',
-    `Registered cash,${en.shift_registered_end},120,50000`,
+    `Registered cash,${en.shift_registered_end},50000,120`,
   ])
   // The print goes through the SAME rows into the real document builder: a 0 must
   // survive as a printed 0 in its own table row, not be dropped or blanked.
-  const html = buildPrintDocument({ title: 'Shift Report · S-20261013-0807-Za', headers: ['Section', 'Line', 'USD', 'KHR'], rows, autoPrint: false })
+  const html = buildPrintDocument({ title: 'Shift Report · S-20261013-0807-Za', headers: table.headers, rows, autoPrint: false })
   const tableRows = [...html.matchAll(/<tr>(.*?)<\/tr>/g)].map((match) => [...match[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((cell) => cell[1])).filter((cells) => cells.length)
   assert.deepEqual(tableRows, [
-    ['Registered cash', en.shift_registered_open, '10', '10000'],
+    ['Registered cash', en.shift_registered_open, '10000', '10'],
     ['Registered cash', 'Cash used', '0', '0'],
-    ['Registered cash', en.shift_registered_end, '120', '50000'],
+    ['Registered cash', en.shift_registered_end, '50000', '120'],
   ], 'the printed table carries the Additional change used row as 0 / 0')
 })
 

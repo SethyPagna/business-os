@@ -1,6 +1,6 @@
 import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftComparisonRows, shiftCountedPairText } from './shiftReportModel.ts'
+import { shiftComparisonRows, shiftMoneyText } from './shiftReportModel.ts'
 import type { ShiftReconciliation } from '../../api/shiftTransport.ts'
 
 // The same signed cash movements as the report export, including refunds.
@@ -16,6 +16,8 @@ import type { ShiftReconciliation } from '../../api/shiftTransport.ts'
 
 type Props = {
   reconciliation: ShiftReconciliation | null | undefined
+  /** Whether this SHIFT has any dollar figure (shiftHasUsd): riel first, and the dollar half on every pair row or on none. */
+  showUsd: boolean
   /** The shift was closed late and has no closing count: the Closing cash row says so instead of a dash. */
   notCounted?: boolean
   className?: string
@@ -32,7 +34,7 @@ const REVIEW_KEYS: Record<string, string> = {
   reopened_after_earlier_close: 'shift_review_reopened_after_earlier_close',
 }
 
-export default function ShiftCashBreakdown({ reconciliation, notCounted = false, className = '' }: Props) {
+export default function ShiftCashBreakdown({ reconciliation, showUsd, notCounted = false, className = '' }: Props) {
   const { t, fmtUSD, fmtKHR } = useApp() as {
     t: (key: string) => string
     fmtUSD: (value: unknown) => string
@@ -40,12 +42,11 @@ export default function ShiftCashBreakdown({ reconciliation, notCounted = false,
   }
   if (!reconciliation) return null
 
-  const pair = (usd: number | null, khr: number | null) => shiftCountedPairText(usd, khr, fmtUSD, fmtKHR)
-  // The COUNTED row is the one pair that can be half-present: a cashier may
-  // count the dollars and leave the riel blank, and that half is a fact they
-  // recorded. shiftCountedPairText is the shared rule -- the summary header
+  // Riel first, the dollar half on every row or on none (shiftHasUsd, per shift). The COUNTED row is the one pair that can be half-present: a cashier may
+  // count the dollars and leave the riel blank, and that half is a fact they recorded. shiftMoneyText is the shared rule -- the summary header
   // and the report block print the same drawer the same way.
-  const countedPair = (usd: number | null, khr: number | null) => shiftCountedPairText(usd, khr, fmtUSD, fmtKHR)
+  const pair = (usd: number | null, khr: number | null) => shiftMoneyText({ usd, khr }, showUsd, fmtUSD, fmtKHR)
+  const countedPair = pair
   // A shortage and a surplus must be distinguishable at a glance, so the sign
   // is explicit on both currencies rather than implied by a minus that a
   // formatter may drop.
@@ -96,7 +97,7 @@ export default function ShiftCashBreakdown({ reconciliation, notCounted = false,
           <dd className="min-w-0 break-words text-right font-semibold text-gray-800 dark:text-gray-100">
             {reconciliation.difference.usd == null && reconciliation.difference.khr == null
               ? '—'
-              : `${signed(reconciliation.difference.usd, fmtUSD)} · ${signed(reconciliation.difference.khr, fmtKHR)}`}
+              : [signed(reconciliation.difference.khr, fmtKHR), ...(showUsd ? [signed(reconciliation.difference.usd, fmtUSD)] : [])].join(' · ')}
           </dd>
         </div>
       </dl>

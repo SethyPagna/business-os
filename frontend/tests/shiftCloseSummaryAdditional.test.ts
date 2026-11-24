@@ -147,18 +147,18 @@ for (const [name, additional] of [
     'shift_opened_with', 'shift_recon_additional_cash', 'shift_counted_close',
   ], `${name}: the summary reads Opened with -> Additional change used -> Counted at close\n${JSON.stringify(facts)}`)
   const value = Object.fromEntries(facts)
-  assert.equal(value.shift_opened_with, '$10.00 · 10,000៛')
-  assert.equal(value.shift_recon_additional_cash, '$0.00 · 0៛', `${name}: a zero, with no (+) because nothing was added`)
-  assert.equal(value.shift_counted_close, '$120.00 · 50,000៛')
-  ok(true, `close summary with ${name}: the Additional change used row is there and reads $0.00 · 0៛`)
+  assert.equal(value.shift_opened_with, '10,000៛ · $10.00')
+  assert.equal(value.shift_recon_additional_cash, '0៛ · $0.00', `${name}: a zero, with no (+) because nothing was added`)
+  assert.equal(value.shift_counted_close, '50,000៛ · $120.00')
+  ok(true, `close summary with ${name}: the Additional change used row is there and reads 0៛ · $0.00 (riel first)`)
 }
 
 // ---- something added: unchanged, its own figures and the (+) of an inflow -----------
 {
   const facts = Object.fromEntries(await summaryFacts(closedRow({ usd: 12.5, khr: 8000 })))
-  assert.equal(facts.shift_recon_additional_cash, '+ $12.50 · 8,000៛')
+  assert.equal(facts.shift_recon_additional_cash, '+ 8,000៛ · $12.50')
   const khrOnly = Object.fromEntries(await summaryFacts(closedRow({ usd: 0, khr: 20000 })))
-  assert.equal(khrOnly.shift_recon_additional_cash, '+ $0.00 · 20,000៛', 'one currency is enough for the (+)')
+  assert.equal(khrOnly.shift_recon_additional_cash, '+ 20,000៛ · $0.00', 'one currency is enough for the (+)')
   ok(true, 'close summary with an amount keeps its (+) and its own figures per currency')
 }
 

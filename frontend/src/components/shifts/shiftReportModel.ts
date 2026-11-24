@@ -291,9 +291,9 @@ export function shiftExpectedWithTypedAdditional(
  * another. Report-only, like every figure here.
  *
  * All three rows are ALWAYS there (owner, 13 Oct 2026, item 14), the additional
- * included when nothing was added: `$0.00 · 0៛`, the same line the Telegram shift
+ * included when nothing was added: `0៛ · $0.00` (riel first; riel alone on a shift with no dollar), the same line the Telegram shift
  * report prints. `added` -- the (+) of an inflow -- is set only for an amount,
- * so a shift that needed no more change reads "$0.00 · 0៛" and not "+ $0.00 · 0៛".
+ * so a shift that needed no more change reads "0៛ · $0.00" and not "+ 0៛ · $0.00".
  */
 export function shiftRegisteredRows(shift: Shift): ShiftRegisteredRow[] {
   const registered = shiftRegisteredCash(shift)
@@ -313,14 +313,71 @@ export function shiftCountText(value: number | null | undefined, format: (input:
   return value == null ? '—' : format(value)
 }
 
-export function shiftCountedPairText(
-  usd: number | null | undefined,
-  khr: number | null | undefined,
+const isDollar = (value: unknown): boolean => typeof value === 'number' && Number.isFinite(value) && value !== 0
+
+/**
+ * Does this shift hold any dollar figure? Owner, A72 + Q3 (A78): riel is the shop's money, dollars appear on a shift's pair rows only when the SHIFT has any,
+ * and then on every pair row (per shift, not per line: the rows keep their columns, and a missing dollar half never reads as "not counted").
+ * Non-zero and not null, in the registered counts (opening, cash used, closing) and in every dollar half of what the answer carries: the cash comparison, the
+ * delivery cost and other expenses of the figures, and what moved after close. An employee's answer carries only the counts, so an administrator may see the
+ * dollar half where an employee does not: that employee has no dollar figure on screen. Business results are not cash and never decide it.
+ * The Telegram twin is cloudflare/src/lib/telegram.ts shiftHasUsdCash.
+ */
+export function shiftHasUsd(shift: Shift): boolean {
+  const registered = shiftRegisteredCash(shift)
+  const additional = shiftAdditionalCash(shift)
+  if ([registered.open.usd, additional.usd, registered.end.usd, shift.opening_float_usd, shift.additional_cash_usd, shift.closing_counted_usd].some(isDollar)) return true
+  const reconciliation = shift.reconciliation
+  if (reconciliation && [reconciliation.opening, reconciliation.additional_cash, reconciliation.cash_sales, reconciliation.refunds, reconciliation.expenses,
+    reconciliation.courier, reconciliation.expected, reconciliation.counted, reconciliation.difference].some((pair) => isDollar(pair?.usd))) return true
+  const figures = shiftFiguresOf(shift)
+  if (figures && [figures.delivery_cost?.usd, figures.other_expenses?.usd].some(isDollar)) return true
+  const drift = shift.close_drift
+  if (drift) {
+    if (drift.components.some((component) => isDollar(component.stored?.usd) || isDollar(component.current?.usd))) return true
+    // A sale's [cash USD, cash KHR, other USD, other KHR] at the close and now.
+    if (drift.sales.some((sale) => [sale.before, sale.after].some((values) => values && (isDollar(values[0]) || isDollar(values[2]))))) return true
+  }
+  return false
+}
+
+/**
+ * One money pair on a shift surface: riel first, then dollars only when the shift has any (shiftHasUsd). An uncounted half is a dash, a wholly uncounted
+ * pair is one dash. The ONE text for every shift surface that prints a pair (card, detail, breakdown, drift note, close summary), so no two disagree on order.
+ */
+export function shiftMoneyText(
+  pair: { usd: number | null | undefined; khr: number | null | undefined },
+  showUsd: boolean,
   fmtUSD: (input: unknown) => string,
   fmtKHR: (input: unknown) => string,
 ): string {
-  if (usd == null && khr == null) return '—'
-  return `${shiftCountText(usd, fmtUSD)} · ${shiftCountText(khr, fmtKHR)}`
+  if (pair.usd == null && pair.khr == null) return '—'
+  const riel = shiftCountText(pair.khr, fmtKHR)
+  return showUsd ? `${riel} · ${shiftCountText(pair.usd, fmtUSD)}` : riel
+}
+
+/** Typed (not yet saved) count text, as the close form holds it: does any of it name a dollar amount? Lets the form show the dollar half once one is typed. */
+export function shiftTypedHasUsd(...typed: string[]): boolean {
+  return typed.some((text) => text.trim() !== '' && isDollar(Number(text)))
+}
+
+/** The two money cells of one export row: KHR first, then USD (blank when the shift has no dollar, never a "0"). */
+export function shiftMoneyColumns(pair: { usd: number | null | undefined; khr: number | null | undefined }, showUsd: boolean): { KHR: number | string; USD: number | string } {
+  return { KHR: pair.khr ?? '', USD: showUsd ? pair.usd ?? '' : '' }
+}
+
+export type ShiftExportRow = { Section: string; Line: string; KHR: number | string; USD: number | string }
+
+/**
+ * The Reports print and CSV table: columns Section, Line, KHR, USD, the USD column left out when none of its cells holds a figure (a riel-only shift with no
+ * business results). Business results are dollars and bring the column with them, with a blank dollar cell on the pair rows of a riel-only shift.
+ */
+export function shiftExportRows(rows: ShiftExportRow[]): { headers: string[]; rows: Array<Record<string, number | string>> } {
+  const withUsd = rows.some((row) => row.USD !== '' && row.USD != null)
+  return {
+    headers: withUsd ? ['Section', 'Line', 'KHR', 'USD'] : ['Section', 'Line', 'KHR'],
+    rows: rows.map((row): Record<string, number | string> => (withUsd ? { Section: row.Section, Line: row.Line, KHR: row.KHR, USD: row.USD } : { Section: row.Section, Line: row.Line, KHR: row.KHR })),
+  }
 }
 
 export type ShiftFigureRow = {

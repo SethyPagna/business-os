@@ -40,12 +40,12 @@ function names(source?: string, pack = en): string[] {
 }
 
 test('the cash-used inputs are named "Cash used, Dollars" and "Cash used, Riel"', () => {
-  assert.deepEqual(names(), ['Cash used, Dollars', 'Cash used, Riel'])
+  assert.deepEqual(names(), ['Cash used, Riel', 'Cash used, Dollars'])
 })
 
 test('in Khmer the names join the two existing labels and add no new word', () => {
   const got = names(undefined, km)
-  assert.deepEqual(got, [`${km.shift_additional_cash}, ${km.shift_additional_usd}`, `${km.shift_additional_cash}, ${km.shift_additional_khr}`])
+  assert.deepEqual(got, [`${km.shift_additional_cash}, ${km.shift_additional_khr}`, `${km.shift_additional_cash}, ${km.shift_additional_usd}`])
   for (const name of got) assert.ok(!/[A-Za-z]{3}/.test(name), 'no English placeholder in the Khmer names')
 })
 
@@ -62,5 +62,5 @@ test('mutant: the helper returning the bare currency words fails the name test',
   assert.ok(source.includes('shiftCashUsedLabels'), 'the helper exists')
   const mutant = source.replace(/usdLabel: `[^`]*`/, "usdLabel: t('shift_additional_usd')")
   assert.notEqual(mutant, source, 'the mutant target exists')
-  assert.throws(() => assert.deepEqual(names(mutant), ['Cash used, Dollars', 'Cash used, Riel']))
+  assert.throws(() => assert.deepEqual(names(mutant), ['Cash used, Riel', 'Cash used, Dollars']))
 })
