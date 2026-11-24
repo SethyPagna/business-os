@@ -66,6 +66,7 @@ const read = (p: string) => fs.readFileSync(path.join(here, '..', p), 'utf8')
 
 const gate = read('src/components/pos/ShiftGate.tsx')
 const transport = read('src/api/shiftTransport.ts')
+const lateCloseSource = read('src/components/shifts/shiftLateClose.ts')
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
 
@@ -173,9 +174,9 @@ const pins: Pin[] = [
   },
   {
     label: 'and ONE closing-time field, inside that one form',
-    holds: ({ gate: g }) => (g.match(/<DateTimeEntryInput/g) || []).length === 1
-      && /<DateTimeEntryInput/.test(carryFields(g)),
-    mutate: (source) => editGate(source, '<DateTimeEntryInput', '<DateTimeEntryInput /><DateTimeEntryInput'),
+    holds: ({ gate: g }) => (g.match(/<TimeEntryInput/g) || []).length === 1
+      && /<LateCloseFields/.test(carryFields(g)),
+    mutate: (source) => editGate(source, '<TimeEntryInput', '<TimeEntryInput /><TimeEntryInput'),
   },
   {
     label: 'both entry points render that one component: the prompt step and the POS header panel',
@@ -186,9 +187,9 @@ const pins: Pin[] = [
 
   // ---- 4. the two closes keep their two different rules -------------------
   {
-    label: 'the carry-over close goes through closeShiftById with an explicit closedAt for an administrator and none for an employee',
-    holds: ({ gate: g }) => /closeShiftById\([\s\S]{0,600}?closedAt: canPickTime \? shiftLocalDateTimeToIso\(draft\.closedAt\) : undefined/.test(carryHook(g)),
-    mutate: (source) => editGate(source, 'closedAt: canPickTime ? shiftLocalDateTimeToIso(draft.closedAt) : undefined,', 'closedAt: new Date().toISOString(),'),
+    label: 'the carry-over close goes through closeShiftById with the picked time (none for the default 23:59) and the reason',
+    holds: ({ gate: g }) => /closeShiftById\([\s\S]{0,600}?closedAt: draft\.time === LATE_CLOSE_DEFAULT_TIME \? undefined : lateCloseIsoForTime\(businessDate, draft\.time\) \?\? undefined,\s+reason: lateReason\(draft\.reason\)/.test(carryHook(g)),
+    mutate: (source) => editGate(source, 'closedAt: draft.time === LATE_CLOSE_DEFAULT_TIME ? undefined : lateCloseIsoForTime(businessDate, draft.time) ?? undefined,', 'closedAt: new Date().toISOString(),'),
   },
   {
     label: 'and it never calls the live closeShift()',
@@ -236,15 +237,10 @@ const pins: Pin[] = [
       'Number.isFinite(ownMs) ? Math.max(seedMs, Math.ceil(ownMs / 60_000) * 60_000) : seedMs', 'seedMs'),
   },
   {
-    label: 'the form seeds through that ONE rule, not through Date.now() directly',
-    // ONE definition, in the transport, IMPORTED here: the Shifts popup's
-    // close form seeds through the same function, and a second copy in the
-    // gate is how the two POS forms drifted apart the last time.
-    holds: ({ gate: g, transport: t }) => /shiftLocalDateTimeFromMs\([\s\S]{0,140}?carryOverCloseSeedMs\(closeBefore, ownOpenedAt, Date\.now\(\)\)\)/.test(carryHook(g))
-      && (g.match(/carryOverCloseSeedMs\(/g) || []).length === 1
-      && /import \{ carryOverCloseSeedMs,/.test(g)
-      && (t.match(/export function carryOverCloseSeedMs\(/g) || []).length === 1,
-    mutate: (source) => editRegion(source, carryHook, 'carryOverCloseSeedMs(closeBefore, ownOpenedAt, Date.now())', 'Date.now()'),
+    label: "the form seeds the end of the shift's own day (23:59), or a minute before a same-day next opening, never the clock",
+    holds: ({ gate: g }) => /: body != null \? LATE_CLOSE_DEFAULT_TIME : lateCloseDefaultTime\(businessDate, closeBefore, ownOpenedAt\),/.test(carryHook(g))
+      && /const LATE_CLOSE_DEFAULT_TIME = '23:59'/.test(lateCloseSource),
+    mutate: (source) => editRegion(source, carryHook, 'lateCloseDefaultTime(businessDate, closeBefore, ownOpenedAt),', 'shiftLocalDateTimeFromMs(Date.now()).slice(11, 16),'),
   },
   {
     label: 'and BOTH entry points hand it the bound the WORKER computed, never today\'s opening',
@@ -264,13 +260,13 @@ const pins: Pin[] = [
       "!!closeBefore && { label: t('shift_previous_open_close_before'), value: fmtDateTime24(closeBefore) },", ''),
   },
   {
-    label: 'and so is the account that opened the row -- the username, as every history surface prints it',
+    label: 'and so is the account that opened the row -- the username, in the one header row every shift header shares',
     holds: ({ gate: g }) => {
       const intro = between(g, 'function CarryOverIntro', 'function CarryOverCloseFields')
-      return /\{ label: t\('shift_opened_by'\), value: shift\.user_name \}/.test(intro)
+      return /<ShiftHeaderRow shift=\{shift\} \/>/.test(intro)
     },
     mutate: (source) => editGate(source,
-      "!!shift.user_name && { label: t('shift_opened_by'), value: shift.user_name },", ''),
+      '<ShiftHeaderRow shift={shift} />', ''),
   },
 
   // ---- 6. the retry-replay contract, on this form too --------------------
@@ -395,20 +391,31 @@ for (const key of ['shift_previous_open_title', 'shift_previous_open_hint', 'shi
   assert.ok(typeof km[key] === 'string' && km[key].trim().length > 0, `km.json is missing ${key}`)
   assert.notEqual(km[key], en[key], `km.json falls back to the English string for ${key}`)
   assert.match(km[key], /[ក-៿]/, `km.json carries no Khmer script for ${key}`)
-  assert.match(gate, new RegExp(`t\\('${key}'\\)`), `${key} is in the packs but nothing renders it`)
+  assert.match(gate + read('src/components/shifts/ShiftHeaderRow.tsx'), new RegExp(`t\\('${key}'\\)`), `${key} is in the packs but nothing renders it`)
   checks += 5
   console.log(`  ok - ${key} is written in both packs and rendered`)
 }
-// The hint has to say the one thing the cashier cannot guess, and say it
-// RIGHT: the closing time must precede the NEXT shift opened after this row,
-// or the Worker rejects the close with a 409. The old copy named today's
-// opening, which is the wrong instant whenever a second stale day sits between
-// them -- so the words it used are pinned out as well as the words it needs.
-assert.match(en.shift_previous_open_hint, /earlier than the next shift that was opened after it/)
-assert.doesNotMatch(en.shift_previous_open_hint, /earlier than that opening|yesterday|today's opening/)
+// The prompt only ever shows a row left open on an EARLIER day, so its hint states the late-close rule (close at a time on that
+// day, and say why). The old "earlier than the next shift that was opened after it" rule no longer applies to this prompt and is
+// pinned out, so it cannot come back.
+assert.match(en.shift_previous_open_hint, /left open on an earlier day/)
+assert.match(en.shift_previous_open_hint, /Close it at a time on that day and say why/)
+assert.doesNotMatch(en.shift_previous_open_hint, /earlier than the next shift|next shift that was opened|nothing closes it automatically/)
 assert.doesNotMatch(km.shift_previous_open_hint, /ថ្ងៃនេះ/) // "today", the instant the rule is NOT about
-checks += 3
-console.log('  ok - the hint states the ordering rule the Worker actually enforces, in both packs')
+checks += 4
+console.log('  ok - the hint states the late-close rule, in both packs')
+// The closing-time label names the shift's own day (dd/mm/yyyy) on both late forms; the wording of the two refusals is the Worker's sentence.
+const dayLabels = await import('../src/components/shifts/shiftLateClose.ts')
+assert.equal(en.shift_late_time, 'Closing time on {date}')
+assert.ok(km.shift_late_time.includes('{date}'), 'the Khmer label carries the day too')
+assert.equal(typeof (dayLabels as Record<string, unknown>).lateCloseDayLabel, 'undefined', 'the day label is fmtDateOnly, not a second formatter')
+assert.ok(gate.includes('fmtDateOnly(day)'), 'the POS time label names the day through fmtDateOnly')
+assert.ok(gate.includes('time={form.draft.time} day={form.day}'), "the POS form passes the shift's day to the time label")
+assert.ok(read('src/components/shifts/ShiftHistoryModal.tsx').includes("day={selected?.business_date ?? ''}"), "the Shifts popup late form passes the shift's day too")
+assert.equal(en.shift_previous_open_locked, 'Only the cashier who opened it, an administrator, or someone allowed can close it.')
+assert.equal(en.shift_late_close_not_permitted, en.shift_previous_open_locked, "the same sentence as the Worker's 403")
+assert.equal(km.shift_late_close_not_permitted, km.shift_previous_open_locked, 'the same meaning in Khmer')
+checks += 9
 
 // ---- 10. EXECUTED: the two rules a spelling check cannot prove ------------
 //
@@ -426,6 +433,7 @@ globalThis.window = Object.assign(new EventTarget(), {
 }) as unknown as Window & typeof globalThis
 const transportModule = await import('../src/api/shiftTransport.ts')
 const shiftCountRules = await import('../src/components/shifts/shiftCountRules.ts') // the riel rule ShiftGate / ShiftHistoryModal ask
+const shiftLateClose = await import('../src/components/shifts/shiftLateClose.ts')
 
 // THREE segments, which is the shape the old seed got wrong: two days left
 // open plus today. The offered row is the OLDEST, and the bound the Worker
@@ -436,7 +444,7 @@ const TODAY_OPENED_AT = '2026-09-01T02:00:00.000Z'
 const NEXT_STALE_OPENED_AT = '2026-08-31T01:30:00.000Z'
 const EARLIER_OPENED_AT = '2026-08-30T01:00:00.000Z'
 const previousOpenShift = {
-  id: 60, revision: 1, shift_code: 'S-20260830-0800', opened_at: EARLIER_OPENED_AT,
+  id: 60, revision: 1, business_date: '2026-08-30', shift_code: 'S-20260830-0800', opened_at: EARLIER_OPENED_AT,
   user_name: 'sopheak', opening_float_usd: 20, opening_float_khr: 40_000,
   capabilities: { can_close: true },
 }
@@ -471,7 +479,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     },
     useRef(initial: any) { const slot = cursor++; return slots[slot] ||= { current: initial } },
   }
-  const DateMarker = () => null
+  const TimeMarker = () => null
   const PairMarker = () => null
   const SubmitMarker = () => null
   const notices: any[] = []
@@ -493,8 +501,9 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     if (name.includes('useSavingGate')) return { useSavingGate: () => ({ blocked: false, reason: '' }) }
     if (name.includes('shared/Modal')) return { default: () => null }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: (...args: any[]) => notices.push(args), user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }
-    if (name.includes('formatters')) return { fmtDate: String, fmtDateTime24: String, parseServerTimestampMs: Date.parse }
-    if (name.includes('DateEntryInput')) return { DateTimeEntryInput: DateMarker }
+    if (name.includes('formatters')) return { fmtDate: String, fmtDateOnly: String, fmtDateTime24: String, parseServerTimestampMs: Date.parse }
+    if (name.includes('DateEntryInput')) return { TimeEntryInput: TimeMarker }
+    if (name.includes('ShiftHeaderRow')) return { default: function ShiftHeaderRow() { return null } }
     if (name.includes('ShiftCountFields')) return { default: PairMarker, ShiftSubmitRow: SubmitMarker, shiftCountBlockerKey: (key: string) => key }
     if (name.includes('shiftReportModel')) return {
       shiftCountedPairText: (usd: unknown, khr: unknown) => `${usd}|${khr}`,
@@ -503,6 +512,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
       shiftExpectedWithTypedAdditional: () => ({ usd: null, khr: null }),
     }
     if (name.includes('shiftCountRules')) return shiftCountRules
+    if (name.includes('shiftLateClose')) return shiftLateClose
     if (name.includes('shiftTransport')) return {
       ...transportModule,
       // The seed rule is the transport's; a negative control replaces it here
@@ -527,7 +537,7 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     // The shared carry-over components are pure functions of their props --
     // they hold no hooks of their own -- so the harness renders them in place
     // to reach the fields the fold moved inside them.
-    const own = typeof tree.type === 'function' && /^CarryOver/.test(tree.type.name)
+    const own = typeof tree.type === 'function' && /^(CarryOver|LateClose|LateCount)/.test(tree.type.name)
       ? nodes(tree.type(tree.props)) : []
     return [tree, ...own, ...nodes(tree.props?.children)]
   }
@@ -540,17 +550,21 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
   tree = render()
   const found = nodes(tree)
   return {
-    closedAt: found.find((node) => node.type === DateMarker)?.props.value as string,
+    time: found.find((node) => node.type === TimeMarker)?.props.value as string,
+    reasonBox: found.filter((node) => node.type === "input" && node.props["aria-label"] === "shift_late_reason"),
+    notCounted: found.some((node) => node.type === "p" && node.props.children === "shift_late_not_counted"),
+    typeReason: (value: string) => nodes(render()).find((node) => node.type === "input" && node.props["aria-label"] === "shift_late_reason")!.props.onChange({ target: { value } }),
     label: found.find((node) => node.type === SubmitMarker)?.props.label as string,
     pairs: found.filter((node) => node.type === PairMarker).map((node) => node.props),
     // The fact strip CarryOverIntro renders, flattened to label -> value. The
     // component filters nothing out itself; falsy entries are its own "omit".
+    header: found.find((node) => typeof node.type === 'function' && node.type.name === 'ShiftHeaderRow')?.props.shift as { user_name?: string } | undefined,
     facts: Object.fromEntries(found
       .filter((node) => typeof node.type === 'function' && node.type.name === 'ShiftFactStrip')
       .flatMap((node) => (node.props.facts as any[]) || [])
       .filter(Boolean)
       .map((fact: any) => [fact.label, fact.value])) as Record<string, string>,
-    submit: () => found.find((node) => node.type === SubmitMarker)!.props.onClick(),
+    submit: () => nodes(render()).find((node) => node.type === SubmitMarker)!.props.onClick(),
     finish: (value: any) => resolveClose(value),
     call: () => closeCall,
     notices,
@@ -559,112 +573,71 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
 
 try {
   const fresh = openCarryOverPanel(gate, null)
-  const expectedSeed = transportModule.shiftLocalDateTimeFromMs(Date.parse(NEXT_STALE_OPENED_AT) - 60_000)
-  assert.equal(fresh.closedAt, expectedSeed,
-    'the panel opens a minute before the bound /current stated, which is the NEXT STALE day here')
-  // The negative control on the VALUE, not on the source: the instant the old
-  // build used. With a second stale day in between it is the wrong one, and a
-  // prefill equal to it would 409 on the very first press.
-  assert.notEqual(fresh.closedAt, transportModule.shiftLocalDateTimeFromMs(Date.parse(TODAY_OPENED_AT) - 60_000),
-    "the prefill is NOT a minute before today's opening -- that is the instant the 409 was blamed on")
-  assert.ok(Date.parse(transportModule.shiftLocalDateTimeToIso(fresh.closedAt)) < Date.parse(NEXT_STALE_OPENED_AT),
-    'and it is strictly before that bound, which is the whole 409 rule')
-  assert.ok(Date.parse(transportModule.shiftLocalDateTimeToIso(fresh.closedAt)) >= Date.parse(EARLIER_OPENED_AT),
-    'and not before the row\'s own opening, which is the 400 rule')
+  assert.equal(fresh.time, '23:59',
+    "a stale row whose next segment is today: the picker starts at 23:59 of the row's own day")
+  assert.equal(fresh.reasonBox.length, 1, 'the late form shows the reason box')
   assert.equal(fresh.label, 'shift_action_close', 'with nothing unacknowledged, the button writes rather than retries')
-  checks += 5
-  console.log('  ok - executed: the prefill is a minute before the SERVER-STATED bound, not today\'s opening')
+  checks += 3
+  console.log('  ok - executed: a stale row starts the picker at 23:59 of its own day')
 
-  // The strip the cashier reads the prefill against: who opened the row, and
-  // the instant the close has to precede. Neither is guessable from the form.
-  assert.equal(fresh.facts.shift_opened_by, 'sopheak', 'the strip names the account that opened the row')
+  // A later segment on the SAME day: the picker starts a minute before that opening.
+  const SAME_DAY_NEXT = '2026-08-30T08:30:00.000Z'
+  const sameDay = openCarryOverPanel(gate, null, { ...currentShift, previous_open_close_before: SAME_DAY_NEXT })
+  assert.equal(sameDay.time, '15:29', 'a later segment opened 15:30 the same day: the picker starts at 15:29')
+  assert.equal(shiftLateClose.lateCloseDefaultTime('2026-08-30', SAME_DAY_NEXT, EARLIER_OPENED_AT), '15:29')
+  checks += 2
+  console.log('  ok - executed: a later segment on the same day starts the picker a minute before it')
+
+  // Never before the row's own opening, on the whole minute the field holds.
+  assert.equal(shiftLateClose.lateCloseDefaultTime('2026-08-30', '2026-08-30T01:00:20.000Z', '2026-08-30T01:00:10.000Z'), '08:01',
+    "clamped up to the first whole minute at or after the row's own opening")
+  assert.equal(shiftLateClose.lateCloseDefaultTime('2026-08-30', null, EARLIER_OPENED_AT), '23:59', 'no later segment: 23:59')
+  assert.equal(shiftLateClose.lateCloseDefaultTime('2026-08-30', '2026-08-31T01:30:00.000Z', EARLIER_OPENED_AT), '23:59',
+    'a later segment on a LATER day never moves it')
+  checks += 3
+  console.log('  ok - executed: the default never precedes the row\'s own opening')
+
+  // The strip the cashier reads the picker against.
+  assert.equal(fresh.header?.user_name, 'sopheak', 'the header row above the strip names the account that opened the row')
   assert.equal(fresh.facts.shift_previous_open_close_before, NEXT_STALE_OPENED_AT,
     'and the bound the close must precede, formatted by the shop\'s own date-time formatter')
   assert.equal(fresh.facts.shift_opened_at, EARLIER_OPENED_AT, 'beside the row\'s own opening, unchanged')
   checks += 3
-  console.log('  ok - executed: the strip shows the username and the bound, so the prefill can be checked')
+  console.log('  ok - executed: the strip shows the username and the bound')
 
-  // The negative control for the seed, run through the same harness.
-  const mutant = gate.replace('carryOverCloseSeedMs(closeBefore, ownOpenedAt, Date.now())', 'Date.now()')
-  assert.notEqual(mutant, gate, 'the seed negative control could not find its target')
-  assert.notEqual(openCarryOverPanel(mutant, null).closedAt, expectedSeed,
-    'NOT DISCRIMINATING -- seeding from the bare clock produced the same moment')
-  checks += 1
-  console.log('  ok - executed: seeding from the bare clock is caught by that same check')
-
-  // NO bound at all -- the registration prompt's own case, where today has not
-  // been opened yet and nothing follows the offered row. Only the clock bounds
-  // the close then, and the form must not invent a bound of its own.
-  const before = Date.now()
+  // The count is hidden while a later segment follows; with none, it is asked.
+  assert.equal(fresh.pairs.some((pair) => pair.label === 'shift_late_count_now'), false, 'a later segment follows: no count fields render')
+  assert.equal(fresh.notCounted, true, 'and the line says it is not counted')
   const unbounded = openCarryOverPanel(gate, null, { ...currentShift, previous_open_close_before: null })
-  const after = Date.now()
-  assert.ok([before, after].map(transportModule.shiftLocalDateTimeFromMs).includes(unbounded.closedAt),
-    'with no bound stated the prefill is simply now')
-  assert.equal(unbounded.facts.shift_previous_open_close_before, undefined,
-    'and the strip shows no bound cell rather than an empty one')
-  checks += 2
-  console.log('  ok - executed: a null bound prefills the clock and prints no bound')
-
-  // The clamp. A row opened at 23:59:30 local with the next segment 20 s
-  // later: bound - 60 s falls BEFORE this row's own opening, which the Worker
-  // answers 400 "Closing time cannot be before opening time." The field holds
-  // whole minutes, so the clamp has to land on the minute AFTER 23:59:30.
-  const TIGHT_OWN = '2026-08-31T16:59:30.000Z'
-  const TIGHT_BOUND = '2026-08-31T16:59:50.000Z'
-  const clamped = openCarryOverPanel(gate, null, {
-    ...currentShift,
-    previous_open_shift: { ...previousOpenShift, opened_at: TIGHT_OWN },
-    previous_open_close_before: TIGHT_BOUND,
-  })
-  assert.equal(clamped.closedAt, transportModule.shiftLocalDateTimeFromMs(Date.parse('2026-08-31T17:00:00.000Z')),
-    'the prefill is clamped up to the first whole minute at or after the row\'s own opening')
-  assert.ok(Date.parse(transportModule.shiftLocalDateTimeToIso(clamped.closedAt)) >= Date.parse(TIGHT_OWN),
-    'so the round trip through the minute field never lands before that opening')
-  // ...and the same harness on a seed rule that clamps to the RAW opening,
-  // which is what a minute-truncating field turns back into a 400. It is
-  // injected where the real one comes from, because the gate no longer holds
-  // a copy of the rule to rewrite.
-  assert.ok(transport.includes('Math.ceil(ownMs / 60_000) * 60_000'),
-    'the clamp negative control no longer mirrors the real rule')
-  const rawClamp: SeedRule = (closeBefore, ownOpenedAt, nowMs) => {
-    const boundMs = Date.parse(String(closeBefore))
-    const seedMs = Number.isFinite(boundMs) ? Math.min(nowMs, boundMs - 60_000) : nowMs
-    const ownMs = Date.parse(String(ownOpenedAt))
-    return Number.isFinite(ownMs) ? Math.max(seedMs, ownMs) : seedMs
-  }
-  const unclampedSeed = openCarryOverPanel(gate, null, {
-    ...currentShift,
-    previous_open_shift: { ...previousOpenShift, opened_at: TIGHT_OWN },
-    previous_open_close_before: TIGHT_BOUND,
-  }, rawClamp).closedAt
-  assert.ok(Date.parse(transportModule.shiftLocalDateTimeToIso(unclampedSeed)) < Date.parse(TIGHT_OWN),
-    'NOT DISCRIMINATING -- clamping to the raw opening produced an accepted moment too')
+  assert.equal(unbounded.pairs.some((pair) => pair.label === 'shift_late_count_now'), true, 'with no later segment the count is asked as Cash in drawer now')
+  assert.equal(unbounded.facts.shift_previous_open_close_before, undefined, 'and the strip shows no bound cell')
   checks += 4
-  console.log('  ok - executed: the clamp keeps the prefill at or after the row\'s own opening')
+  console.log('  ok - executed: the count follows whether a later segment is open')
 
-  // The submitted body: the explicit closed_at, the revision, the counts.
+  // The write: blocked with no reason; with one, the reason, the default time and the row's revision.
+  fresh.submit()
+  assert.equal(fresh.call(), null, 'no reason: nothing is written')
+  fresh.typeReason('  forgot to close  ')
   fresh.submit()
   assert.equal(fresh.call().id, 60, 'the close is addressed to the EARLIER shift, not today\'s')
   assert.equal(fresh.call().input.expectedRevision, 1, 'and carries that row\'s revision')
-  assert.equal(fresh.call().input.closedAt, new Date(Date.parse(NEXT_STALE_OPENED_AT) - 60_000).toISOString(),
-    'the explicit closed_at is the seeded moment, in UTC')
-  fresh.finish({ shift: { id: 60, closing_counted_usd: 30, closing_counted_khr: 12_000, closed_at: '2026-09-01T01:59:00.000Z' } })
+  assert.equal(fresh.call().input.reason, 'forgot to close', 'with the trimmed reason')
+  assert.equal(fresh.call().input.closedAt, undefined, 'the default 23:59 sends no time; the Worker stamps 23:59:59')
+  fresh.finish({ shift: { id: 60, closing_counted_usd: null, closing_counted_khr: null, closed_at: '2026-08-30T16:59:59.000Z' } })
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
-  assert.ok(String(fresh.notices[0]?.[0]).includes('30|12000'),
-    'and the confirmation names the drawer that was written, not a bare "done"')
-  checks += 4
-  console.log('  ok - executed: the write names the earlier row, its revision and an explicit closing moment')
+  assert.equal(fresh.notices.length > 0, true, 'and the confirmation is shown')
+  checks += 6
+  console.log('  ok - executed: the write names the earlier row, its revision and the reason')
 
   // The replay: an unacknowledged close owns the form until it resolves.
   const replay = openCarryOverPanel(gate, { action: 'close', body: {
-    closed_at: '2026-08-31T05:00:00.000Z', closing_counted_usd: 12, closing_counted_khr: 8_000,
+    closed_at: '2026-08-30T05:00:00.000Z', reason: 'forgot', closing_counted_usd: 12, closing_counted_khr: 8_000,
     additional_cash_usd: null, additional_cash_khr: null, closing_note: 'left open overnight',
-  } })
-  assert.equal(replay.closedAt, transportModule.shiftLocalDateTimeFromMs(Date.parse('2026-08-31T05:00:00.000Z')),
-    'an unacknowledged close shows ITS closing time, never a fresh prefill')
+  } }, { ...currentShift, previous_open_close_before: null })
+  assert.equal(replay.time, '12:00', 'an unacknowledged close shows ITS closing time, never a fresh default')
   assert.equal(replay.label, 'retry', 'and offers Retry rather than a second write')
   assert.ok(replay.pairs.every((pair) => pair.disabled === true), 'its fields are frozen on the body that will be replayed')
-  assert.equal(replay.pairs.find((pair) => pair.label === 'shift_counted_cash')?.usd, '12', 'showing the frozen counted drawer')
+  assert.equal(replay.pairs.find((pair) => pair.label === 'shift_late_count_now')?.usd, '12', 'showing the frozen counted drawer')
   checks += 4
   console.log('  ok - executed: an unacknowledged carry-over close is replayed, not re-typed')
 } finally {

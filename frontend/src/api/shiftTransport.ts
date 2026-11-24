@@ -112,6 +112,7 @@ async function shiftMutationFetch(method: string, path: string, body: ShiftMutat
       const exactTarget = path.endsWith('/reopen')
         ? result?.reopened_from_shift_id === targetId && result?.shift?.parent_shift_id === targetId
         : result?.shift?.id === targetId
+          || (path.endsWith('/close') && result?.replayed === true && result?.status === 'closed' && Number(result?.id) === targetId)
       if (!exactTarget) throw Object.assign(new Error('Could not verify the committed shift'), { outcome: 'unknown' })
       clearExactPending()
       return result
@@ -222,6 +223,8 @@ export type Shift = {
   closing_counted_usd: number | null
   closing_counted_khr: number | null
   closing_note: string | null
+  /** GET /current only: this open earlier-day shift can be closed late (a reason and a day-bounded time). */
+  late_close?: boolean
   closed_by_user_id: number | null
   closed_by_user_name: string | null
   revision: number
@@ -694,6 +697,18 @@ export async function fetchShiftHistory(id: number): Promise<ShiftHistoryResult>
   return result
 }
 
+/** Open shifts left on an earlier day: the Worker answers it only to an administrator or a holder of the late-close grant. */
+export type ForgottenShiftsResult = { shifts: Shift[]; scope: 'forgotten' }
+
+export async function listForgottenShifts(filters: { branchId?: number | null } = {}, options: { fresh?: boolean } = {}): Promise<ForgottenShiftsResult> {
+  const query = queryString({ forgotten: 1, branch_id: filters.branchId })
+  const channel = `shifts:forgotten:${query}`
+  if (options.fresh) cacheInvalidate(channel)
+  const result = await route<ForgottenShiftsResult>(channel, () => apiFetch('GET', `/api/shifts${query}`), null)
+  if (!result) throw new Error('Could not read shifts left open')
+  return result
+}
+
 export type AmendShiftInput = {
   actorId?: number | string
   expectedRevision: number
@@ -762,19 +777,25 @@ export type CloseShiftByIdInput = {
   additionalCashUsd?: number | null
   additionalCashKhr?: number | null
   closingNote?: string | null
+  /** The late-close reason. Left out for a same-day close, so that body is unchanged. */
+  reason?: string | null
 }
 
+/** `shift` is null on a replayed close the caller may no longer read: the Worker then answers only { id, status, closed_at, replayed }. */
 export type CloseShiftByIdResult = {
-  shift: Shift
+  shift: Shift | null
   already_closed: boolean
   is_open: false
+  replayed?: true
 }
+
+type ReplayedCloseBody = { id?: unknown; status?: unknown; replayed?: unknown }
 
 export async function closeShiftById(id: number, input: CloseShiftByIdInput): Promise<CloseShiftByIdResult> {
   if (input.closedAt && shiftTimestampIsFuture(input.closedAt)) throw new Error('Closing time cannot be in the future.')
   const closingCountedUsd = optionalShiftCount(input.closingCountedUsd, 'Closing USD count')
   const closingCountedKhr = optionalShiftCount(input.closingCountedKhr, 'Closing KHR count')
-  const result = await shiftWrite<CloseShiftByIdResult>(
+  const result = await shiftWrite<CloseShiftByIdResult & ReplayedCloseBody>(
     `shifts:close:${id}`,
     () => shiftMutationFetch('POST', `/api/shifts/${id}/close`, {
       expected_revision: input.expectedRevision,
@@ -784,11 +805,13 @@ export async function closeShiftById(id: number, input: CloseShiftByIdInput): Pr
       additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)'),
       additional_cash_khr: optionalShiftCount(input.additionalCashKhr, 'Additional change used (KHR)'),
       closing_note: input.closingNote ?? null,
+      ...(input.reason?.trim() ? { reason: input.reason.trim() } : {}),
     }, input.actorId),
     null,
     true,
     input.actorId,
   )
+  if (result && !result.shift && result.replayed === true && result.status === 'closed') return { shift: null, already_closed: true, is_open: false, replayed: true }
   if (!result?.shift) throw new Error('Could not close shift')
   return result
 }

@@ -160,11 +160,12 @@ ok(/selected \? \(/.test(modal) && /setSelected\(null\)/.test(modal), 'row click
 ok(/max-h-\[min\(65vh,38rem\)\][^"\n]*overflow-y-auto/.test(modal), 'the history list is compact and independently scrollable')
 ok(/orderShiftRows\(result\.shifts\)/.test(modal), 'the popup keeps unresolved historical open shifts ahead of closed rows')
 
-const dateIndex = summary.indexOf('fmtDateOnly(shift.business_date)')
-const idIndex = summary.indexOf('{shift.shift_code}')
+const headerRow = read('src/components/shifts/ShiftHeaderRow.tsx')
+const dateIndex = headerRow.indexOf('fmtDateOnly(shift.business_date)')
+const idIndex = headerRow.indexOf('{shift.shift_code}')
 ok(dateIndex >= 0 && idIndex > dateIndex, 'every row leads with date and appends the compact shift id inline')
-for (const token of ['fmtClock24(shift.opened_at)', "fmtClock24(shift.closed_at)", 'shift.user_name', 'opening_float_usd', 'opening_float_khr', 'closing_counted_usd', 'closing_counted_khr']) {
-  ok(summary.includes(token), `default row renders ${token}`)
+for (const token of ['shiftCellTime(shift.opened_at', 'shiftCellTime(shift.closed_at', 'shift.user_name','opening_float_usd', 'opening_float_khr', 'closing_counted_usd', 'closing_counted_khr']) {
+  ok((summary + headerRow).includes(token), `default row renders ${token}`)
 }
 ok(/<ShiftCashBreakdown/.test(summary) && /shift\.reconciliation/.test(summary), 'detail renders the server reconciliation, never a locally recomputed difference')
 ok(!/shiftCashDifference/.test(summary), 'the summary no longer subtracts the opening float to invent a difference')
@@ -172,7 +173,7 @@ for (const key of ['shift_recon_opening', 'shift_recon_additional_cash', 'shift_
   ok((breakdown + comparisonModel).includes(`'${key}'`), `the breakdown carries the ${key} row`)
 }
 ok(/shift_difference_hint/.test(breakdown) && /shift_recon_review/.test(breakdown), 'the breakdown explains expected and surfaces the server review flag')
-ok(/detail \? \(/.test(summary) && /shift_duration/.test(summary) && /shift_cash_breakdown/.test(summary), 'duration and cash breakdown stay in detail rather than the default row')
+ok(/detail \? \(/.test(summary) && /duration\(shift, t\)/.test(summary) && /shift_cash_breakdown/.test(summary), 'duration and cash breakdown stay in detail rather than the default row')
 
 for (const capability of ['can_edit', 'can_close', 'can_reopen', 'can_cancel']) {
   ok(modal.includes(`selected.capabilities.${capability}`), `detail action visibility comes from ${capability}`)
@@ -201,9 +202,9 @@ ok(/const blankClose = \(shift\?: Shift \| null\): CloseDraft => \(\{/.test(moda
   && /closedAt: shift && !shift\.closed_at\s*\n\s*\? shiftLocalDateTimeFromMs\(carryOverCloseSeedMs\(shift\.close_before, shift\.opened_at, Date\.now\(\)\)\)\s*\n\s*: dateTimeLocal\(new Date\(\)\.toISOString\(\)\),/.test(modal),
   'historic close pre-fills its required timestamp from the server-stated bound, leaving report-only counts blank')
 ok(/const seed = blankClose\(selected\); setCloseBase\(seed\); setClose\(seed\); setAction\('close'\)/.test(modal), 'and the Close action seeds that draft (and the dirty baseline) from the SELECTED row, not from an empty one')
-ok(/\{canChooseShiftTime\(\) && selected\.close_before \? <p[^>]*>[\s\S]{0,200}?t\('shift_previous_open_close_before'\)[\s\S]{0,120}?fmtDateTime24\(selected\.close_before\)\}<\/p> : null\}/.test(modal),
+ok(/\{!closeIsLate && canChooseShiftTime\(\) && selected\.close_before \? <p[^>]*>[\s\S]{0,200}?t\('shift_previous_open_close_before'\)[\s\S]{0,120}?fmtDateTime24\(selected\.close_before\)\}<\/p> : null\}/.test(modal),
   'the close form shows that bound -- only when the server stated one -- with the same key and formatter the POS strip uses')
-ok(/const closeReason = action !== 'close' \? null\s*: !canChooseShiftTime\(\) && selected\?\.close_before \? t\('shift_stale_admin_must_close'\)\s*: canChooseShiftTime\(\) && !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'only a missing/invalid close timestamp blocks the save; drawer counts never gate it')
+ok(/const closeReason = action !== 'close' \? null[\s\S]{0,400}?: !closeIsLate && !canChooseShiftTime\(\) && selected\?\.close_before \? t\('shift_stale_admin_must_close'\)\s*: !closeIsLate && canChooseShiftTime\(\) && !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'only a missing/invalid close timestamp blocks the save; drawer counts never gate it')
 ok(!/type="datetime-local"/.test(modal), 'no shift timestamp may fall back to the native control that rejects a typed 9032026')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
 ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')
@@ -370,7 +371,7 @@ try {
   }) as typeof fetch
   const lostInput = { actorId: 4, expectedRevision: 0, closedAt, closingCountedUsd: null, closingCountedKhr: 0 }
   const reconciledClose = await closeShiftById(18, lostInput)
-  assert.equal(reconciledClose.shift.id, 18)
+  assert.equal(reconciledClose.shift?.id, 18)
   assert.equal(effects, 1)
   assert.deepEqual(lostBodies[0], lostBodies[1], 'automatic reconciliation replays the exact identity and body')
   assert.equal(pendingShiftMutation(4, 18), null, 'proven commit clears the durable retry')

@@ -132,11 +132,16 @@ await runTest('the Worker refusals that lock a reopened pair are shown as the tr
   }
 })
 
-await runTest('both administrator close forms tell the administrator to count the drawer as it was at the closing time', () => {
-  for (const file of ['../src/components/pos/ShiftGate.tsx', '../src/components/shifts/ShiftHistoryModal.tsx']) {
-    assert.ok(readFileSync(new URL(file, import.meta.url), 'utf8').includes("t('shift_close_count_at_closing_time')"), `${file} renders the line`)
-  }
+await runTest('the administrator close form in the Shifts popup tells the administrator to count the drawer as it was at the closing time', () => {
+  assert.ok(readFileSync(new URL('../src/components/shifts/ShiftHistoryModal.tsx', import.meta.url), 'utf8').includes("t('shift_close_count_at_closing_time')"), 'the popup renders the line')
   assert.equal(en.shift_close_count_at_closing_time, 'Count the drawer as it was at the closing time.')
+})
+
+await runTest('the POS late close of an earlier day asks "Cash in drawer now", or says it is not counted while today is open', () => {
+  const gateSource = readFileSync(new URL('../src/components/pos/ShiftGate.tsx', import.meta.url), 'utf8')
+  assert.ok(!gateSource.includes("t('shift_close_count_at_closing_time')"), 'the old line moved: a late close counts the drawer now')
+  assert.ok(gateSource.includes("t('shift_late_count_now')"), 'the count is labelled Cash in drawer now')
+  assert.ok(gateSource.includes("t('shift_late_not_counted')"), 'and hidden with Not counted (closed late) while today is open')
 })
 
 await harness.close()

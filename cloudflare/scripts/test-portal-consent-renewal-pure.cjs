@@ -47,12 +47,15 @@ assert.ok(files.includes(MIGRATION_0262), '0262 exists')
 const sqlOf = (f) => fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8')
 
 // Pre-assertions for 0262 are taken on the chain without it.
-const rawDb = openDb(files.filter((f) => f !== MIGRATION_0262).map(sqlOf))
+const rawDb = openDb(files.filter((f) => f !== MIGRATION_0262 && f < '0321').map(sqlOf))
 const columnCount = () => rawDb.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('portal_accounts') WHERE name = 'age_confirmed_at'").get().n
 assert.strictEqual(columnCount(), 0, 'pre: no age_confirmed_at column yet')
 rawDb.prepare("INSERT INTO portal_accounts (membership_id, name, phone, password_hash, consent_version, consent_at, consent_locale) VALUES ('LC-70001','Early','0127000001','x',?,CURRENT_TIMESTAMP,'en')").run([OLD])
 const rowsBefore = rawDb.prepare('SELECT * FROM portal_accounts ORDER BY id').all().map((r) => ({ ...r }))
 rawDb.exec(sqlOf(MIGRATION_0262))
+const rowsAfter0262 = rawDb.prepare('SELECT * FROM portal_accounts ORDER BY id').all().map((r) => ({ ...r }))
+// 0321 rebuilds portal_accounts and must carry the column 0262 just added, so it runs after it, on the populated table.
+for (const f of files.filter((name) => name >= '0321')) rawDb.exec(sqlOf(f))
 
 const dbModule = { getDb: () => wrap(rawDb) }
 const overrides = new Map()
@@ -128,7 +131,7 @@ async function run() {
     const info = rawDb.prepare("SELECT \"notnull\" AS nn, dflt_value FROM pragma_table_info('portal_accounts') WHERE name = 'age_confirmed_at'").get()
     assert.strictEqual(info.nn, 0)
     assert.strictEqual(info.dflt_value, null)
-    const after = rawDb.prepare('SELECT * FROM portal_accounts ORDER BY id').all().map((r) => ({ ...r }))
+    const after = rowsAfter0262
     assert.deepStrictEqual(after.map(({ age_confirmed_at, ...rest }) => rest), rowsBefore)
     assert.ok(after.every((r) => r.age_confirmed_at === null), 'existing accounts stay NULL, not back-filled')
   })

@@ -98,6 +98,7 @@ function route(sqlite, source, getUser) {
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+    '../lib/shiftLateClose': loadReal('lib/shiftLateClose.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) },
     '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', getUser()); await next() } },
@@ -108,7 +109,7 @@ function route(sqlite, source, getUser) {
     '../lib/telegram': { scheduleTelegramShiftReport: async () => 'unavailable', loadTelegramConfig: async () => ({}), sendTelegramShiftReport: async () => true, sendTelegramStaleShiftAlert: async () => true, scheduleTelegramShiftOverview: async () => true },
     // No sales tables here: the branch rule is under test, not the arithmetic.
     '../lib/shiftReconciliation': {
-      shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null,
+      shiftLastActivityMs: async () => null, readShiftTimeReview: async () => null, SHIFT_REVIEW: { closedLate: 'closed_late' },
       loadShiftReconciliation: async () => null, loadShiftFigures: async () => null,
       loadShiftCloseFigures: async () => null, loadShiftCloseDrift: async () => null,
     },
@@ -223,7 +224,7 @@ async function main() {
     assert.equal(current.body.previous_open_shift?.id, fx.openId, 'the stale retired-branch drawer is the carry-over at LC Store')
     assert.equal(current.body.previous_open_shift.capabilities.can_close, true)
     assert.equal(current.body.previous_open_shift.branch_name, 'Shop')
-    const closeInput = { expected_revision: 0, closing_counted_usd: 9, client_request_id: 'inactive-close-000001' }
+    const closeInput = { expected_revision: 0, closing_counted_usd: 9, client_request_id: 'inactive-close-000001', reason: 'Forgot to close' }
     const closed = await call('POST', `/${fx.openId}/close`, closeInput)
     assert.equal(closed.status, 200, 'closing a drawer on a retired branch is allowed')
     assert.ok(fx.db.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(fx.openId).closed_at)
@@ -248,7 +249,7 @@ async function main() {
     assert.equal(current.body.can_end, true, 'End Shift is offered')
     assert.equal(current.body.needs_registration, false, 'nothing can be registered on a retired branch')
     assert.equal(current.body.previous_open_shift, null, 'the same drawer is not offered twice')
-    const closed = await call('POST', `/${fx.openId}/close`, { expected_revision: 0, closing_counted_usd: 9 })
+    const closed = await call('POST', `/${fx.openId}/close`, { expected_revision: 0, closing_counted_usd: 9, reason: 'Forgot to close' })
     assert.equal(closed.status, 200)
     const after = await call('GET', '/current?branch_id=1')
     assert.equal(after.status, 200)
@@ -317,7 +318,12 @@ async function main() {
   await check('legacy POST /close naming the retired branch still closes', async () => {
     const fx = database()
     const call = route(fx.db, ROUTE_SOURCE, () => CASHIER)
-    const closed = await call('POST', '/close', { shift_id: fx.openId, expected_revision: 0, branch_id: 1, client_request_id: 'legacy-inactive-0001', closing_counted_usd: 1 })
+    const legacyInput = { shift_id: fx.openId, expected_revision: 0, branch_id: 1, client_request_id: 'legacy-inactive-0001', closing_counted_usd: 1 }
+    const stale = await call('POST', '/close', legacyInput)
+    assert.equal(stale.status, 409, 'a drawer from an earlier day is closed with a reason through POST /:id/close, not this route')
+    assert.equal(stale.body.code, 'shift_late_close_needs_reason')
+    fx.db.prepare("UPDATE shift_sessions SET business_date = date('now', '+7 hours'), opened_at = datetime('now', '-1 minutes') WHERE id = ?").run(fx.openId)
+    const closed = await call('POST', '/close', legacyInput)
     assert.equal(closed.status, 200, 'a till that still names the retired branch can end its drawer')
   })
 

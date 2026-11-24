@@ -64,7 +64,7 @@ if (process.argv.includes('--print-migration-patch')) {
 } else if (require.main === module) {
   const run = process.argv.includes('--routes-only')
     ? verifyRealSettlementRoute(fs.readFileSync(path.join(migrations,migrationName),'utf8'))
-    : main()
+    : process.argv.includes('--schema-only') ? verifyWholeChainWithinPatternLimit().then(verifyPortalMembersMigrationOnWorkerd) : main()
   run.catch(e => { console.error(e); process.exitCode = 1 })
 }
 
@@ -128,6 +128,117 @@ async function main() {
   } finally { original.close(); await mf.dispose() }
   await verifyRealSettlementRoute(migration)
   await verifyWranglerMigration(migration)
+  await verifyWholeChainWithinPatternLimit()
+  await verifyPortalMembersMigrationOnWorkerd()
+}
+
+// 0321 (G38) and every migration after 0156: no ACTIVE schema object may carry a LIKE/GLOB literal over 50 bytes.
+// A single long member_code GLOB is accepted by SQLite and refused by native D1 on every INSERT/UPDATE, which would
+// fail every sign-up, sign-in and /auth/me. The control runs that shape and the shipped CHECK on workerd side by side.
+async function verifyWholeChainWithinPatternLimit() {
+  const db = new Database(':memory:')
+  const files = fs.readdirSync(migrations).filter(f => f.endsWith('.sql')).sort()
+  assert.ok(files.includes('0321_portal_members_separation.sql'), '0321 is in the chain')
+  for (const file of files) db.exec(fs.readFileSync(path.join(migrations, file), 'utf8'))
+  const objects = db.prepare('SELECT name,tbl_name,type,sql FROM sqlite_master WHERE sql IS NOT NULL').all()
+  db.close()
+  const tooLong = objects.filter(o => /\b(?:LIKE|GLOB)\s+'[^']{51,}'/i.test(o.sql)).map(o => o.name)
+  assert.deepEqual(tooLong, [], 'every active table/index/trigger pattern must fit native D1 (50 bytes)')
+  const shipped = objects.find(o => o.name === 'portal_accounts').sql
+  const C = '[0-9A-HJKMNP-TV-Z]'
+  const longShape = `CREATE TABLE portal_accounts_long_shape (member_code TEXT CHECK (member_code IS NULL OR member_code GLOB 'W-${C.repeat(4)}-${C.repeat(4)}'))`
+  const mf = new Miniflare({ modules: true, script: '', d1Databases: ['DB'] })
+  try {
+    const d1 = await mf.getD1Database('DB')
+    await d1.batch([d1.prepare(shipped), d1.prepare(longShape)])
+    await assert.rejects(d1.prepare("INSERT INTO portal_accounts_long_shape VALUES ('W-7KQ4-M9XD')").run(), /LIKE or GLOB pattern too complex/)
+    await d1.prepare("INSERT INTO portal_accounts (name, member_code) VALUES ('ok', 'W-7KQ4-M9XD')").run()
+    await d1.prepare("UPDATE portal_accounts SET member_code = 'W-0000-0000' WHERE name = 'ok'").run()
+    for (const bad of ['W-7KQ4-M9XI', 'w-7kq4-m9xd', 'W-7KQ4M9XD', 'W-7KQ4-M9XDD']) {
+      await assert.rejects(d1.prepare("INSERT INTO portal_accounts (name, member_code) VALUES ('bad', ?)").bind(bad).run(), /CHECK constraint/, bad)
+    }
+  } finally { await mf.dispose() }
+  console.log('PASS whole chain (incl. 0321) keeps every active LIKE/GLOB within 50 bytes; on workerd the single long member_code GLOB aborts and the shipped CHECK commits')
+}
+
+// 0321 (G38) and ops/queries/g38-s1-premigration.sql on workerd's own D1 binding, not node:sqlite: the whole chain up to 0320 is applied
+// through the binding the way scripts/harness/real_worker_world.cjs does, three synthetic accounts are seeded (a removed id above MAX(id)
+// leaves sqlite_sequence above it), the pre-migration query runs through the same binding, then 0321 is applied twice on two databases:
+// as one db.batch (what a D1 migration run does) and one statement at a time (the worst case, remote D1 treating each statement alone).
+// Both must end identical, keep the AUTOINCREMENT mark read from sqlite_sequence, and the ops query must still be accepted afterwards.
+async function verifyPortalMembersMigrationOnWorkerd() {
+  const names = fs.readdirSync(migrations).filter(f => f.endsWith('.sql')).sort()
+  const target = '0321_portal_members_separation.sql'
+  assert.ok(names.includes(target))
+  const statementsOf = file => split(fs.readFileSync(path.join(migrations, file), 'utf8')).filter(s => s.trim())
+    .filter(s => !(file === '0098_user_aliases.sql' && /^INSERT OR IGNORE INTO user_aliases/i.test(s.trim())))
+  const applyInChunks = async (db, files) => {
+    const all = files.flatMap(file => statementsOf(file).map(statement => ({ file, statement })))
+    for (let i = 0; i < all.length; i += 100) {
+      const chunk = all.slice(i, i + 100)
+      try { await db.batch(chunk.map(x => db.prepare(x.statement))) } catch (error) { error.message = `${chunk[0].file}+: ${error.message}`; throw error }
+    }
+  }
+  const opsSql = fs.readFileSync(path.join(__dirname, '../../ops/queries/g38-s1-premigration.sql'), 'utf8')
+  const mf = new Miniflare({ modules: true, script: '', d1Databases: ['ONE_BATCH', 'EACH_STATEMENT'] })
+  try {
+    const signatures = {}
+    for (const binding of ['ONE_BATCH', 'EACH_STATEMENT']) {
+      const db = await mf.getD1Database(binding)
+      await applyInChunks(db, names.filter(f => f < target))
+      await db.batch([
+        db.prepare("INSERT INTO portal_accounts (id, membership_id, name, phone, password_hash, consent_version, consent_at, consent_locale, age_confirmed_at) VALUES (1, 'LC-00001', 'Synthetic One', '012000001', 'x', 'portal-legal-2026-10-20', '2026-10-21 08:00:00', 'en', '2026-10-21 08:00:00')"),
+        db.prepare("INSERT INTO portal_accounts (id, membership_id, name, phone, password_hash) VALUES (2, 'LC-00002', 'Synthetic Two', '012000002', 'x')"),
+        db.prepare("INSERT INTO portal_accounts (id, membership_id, name, phone, password_hash, age_confirmed_at) VALUES (5, 'LC-00005', 'Synthetic Five', '012000005', 'x', '2026-10-22 08:00:00')"),
+        db.prepare("INSERT INTO portal_accounts (id, membership_id, name, phone, password_hash) VALUES (6, 'LC-00006', 'Removed', '012000006', 'x')"),
+        db.prepare('DELETE FROM portal_accounts WHERE id = 6'),
+      ])
+      assert.equal((await db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts'").first()).seq, 6, `${binding}: sqlite_sequence is readable through the binding and sits above MAX(id)`)
+      const pre = await db.prepare(opsSql).first()
+      assert.deepEqual({ ...pre }, { age_column_missing: 0, duplicate_contact_links: 0, g38_columns_present: 0, account_rows: 3, max_id: 5, sequence_above_max_id: 1, age_confirmed_rows: 2 }, `${binding}: pre-migration query`)
+
+      const statements = statementsOf(target)
+      if (binding === 'ONE_BATCH') await db.batch(statements.map(s => db.prepare(s)))
+      else for (const statement of statements) await db.prepare(statement).run()
+      await applyInChunks(db, names.filter(f => f > target))
+
+      const post = await db.prepare(opsSql).first()
+      assert.deepEqual({ ...post }, { age_column_missing: 0, duplicate_contact_links: 0, g38_columns_present: 3, account_rows: 3, max_id: 5, sequence_above_max_id: 1, age_confirmed_rows: 2 }, `${binding}: the ops query is accepted after the migration too, and the mark is unchanged`)
+      assert.equal((await db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts'").first()).seq, 6, `${binding}: mark kept`)
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('portal_accounts_0321_new','portal_accounts_0321_old','portal_members_guard_0321')").first()).n, 0)
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('idx_portal_accounts_phone','idx_portal_accounts_membership','idx_portal_accounts_member_code','idx_portal_accounts_contact','idx_portal_accounts_status_seen')").first()).n, 5)
+      assert.doesNotMatch((await db.prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_portal_accounts_membership'").first()).sql, /WHERE/i)
+      assert.equal((await db.prepare("INSERT INTO portal_accounts (name) VALUES ('After')").run()).meta.last_row_id, 7, `${binding}: a removed id is not reissued`)
+      assert.equal((await db.prepare('SELECT COUNT(*) n FROM portal_accounts WHERE age_confirmed_at IS NOT NULL').first()).n, 2)
+      signatures[binding] = JSON.stringify({
+        rows: (await db.prepare('SELECT id, membership_id, name, phone, password_hash, contact_id, consent_version, consent_at, age_confirmed_at, member_code, status, link_version, created_contact_id, closed_at FROM portal_accounts WHERE id <= 5 ORDER BY id').all()).results,
+        objects: (await db.prepare("SELECT name, sql FROM sqlite_master WHERE tbl_name = 'portal_accounts' ORDER BY name").all()).results,
+      })
+    }
+    assert.equal(signatures.ONE_BATCH, signatures.EACH_STATEMENT, 'one batch and one statement at a time end identical')
+  } finally { await mf.dispose() }
+  const empty = new Miniflare({ modules: true, script: '', d1Databases: ['EMPTY_ONE_BATCH', 'EMPTY_EACH_STATEMENT'] })
+  try {
+    const emptySignatures = {}
+    for (const binding of ['EMPTY_ONE_BATCH', 'EMPTY_EACH_STATEMENT']) {
+      const db = await empty.getD1Database(binding)
+      await applyInChunks(db, names.filter(f => f < target))
+      const pre = await db.prepare(opsSql).first()
+      assert.deepEqual({ ...pre }, { age_column_missing: 0, duplicate_contact_links: 0, g38_columns_present: 0, account_rows: 0, max_id: 0, sequence_above_max_id: 0, age_confirmed_rows: 0 }, `${binding}: pre-migration query on an empty table`)
+      const statements = statementsOf(target)
+      if (binding === 'EMPTY_ONE_BATCH') await db.batch(statements.map(s => db.prepare(s)))
+      else for (const statement of statements) await db.prepare(statement).run()
+      await applyInChunks(db, names.filter(f => f > target))
+      const post = await db.prepare(opsSql).first()
+      assert.deepEqual({ ...post }, { age_column_missing: 0, duplicate_contact_links: 0, g38_columns_present: 3, account_rows: 0, max_id: 0, sequence_above_max_id: 0, age_confirmed_rows: 0 }, `${binding}: the ops query is accepted after the migration on an empty table`)
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_sequence WHERE name LIKE 'portal_accounts%' AND seq > 0").first()).n, 0, `${binding}: an empty table leaves no used sequence`)
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('portal_accounts_0321_new','portal_members_guard_0321')").first()).n, 0)
+      assert.equal((await db.prepare("INSERT INTO portal_accounts (name) VALUES ('First')").run()).meta.last_row_id, 1, `${binding}: the first account is id 1`)
+      emptySignatures[binding] = JSON.stringify((await db.prepare("SELECT name, sql FROM sqlite_master WHERE tbl_name = 'portal_accounts' ORDER BY name").all()).results)
+    }
+    assert.equal(emptySignatures.EMPTY_ONE_BATCH, emptySignatures.EMPTY_EACH_STATEMENT, 'empty table: one batch and one statement at a time end identical')
+  } finally { await empty.dispose() }
+  console.log('PASS 0321 and the pre-migration ops query run on workerd D1 (whole chain through the binding): sqlite_sequence is accepted, on a table with rows and on an empty table one batch and statement-by-statement end identical')
 }
 
 async function verifyWranglerMigration(migration) {

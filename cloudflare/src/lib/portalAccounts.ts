@@ -1,6 +1,7 @@
 import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifySignInPassword } from './passwordHash'
 import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from './failedSignInCost'
 import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
+import { isMemberCodeCollision, mintMemberCode } from './memberCode'
 import { getDb } from './db'
 import { bumpVersions } from './cache'
 import { canonicalizePhone } from './phone'
@@ -87,6 +88,56 @@ async function portalAccountsHaveConsentColumns(db: ReturnType<typeof getDb>): P
     consentColumnState = { present: false, checkedAt: now }
     return false
   }
+}
+
+// What a signed-in member sees as their id: the LC number an older account was issued, else the W- code.
+export type PortalMemberView = { membershipId: string; memberCode: string | null; name: string; email: string | null }
+
+export function portalMemberView(row: { membership_id?: string | null; member_code?: string | null; name?: string | null; email?: string | null }): PortalMemberView {
+  const memberCode = row.member_code ? String(row.member_code) : null
+  return {
+    membershipId: String(row.membership_id ?? '').trim() || memberCode || '',
+    memberCode,
+    name: String(row.name ?? ''),
+    email: row.email ? String(row.email) : null,
+  }
+}
+
+const MEMBER_CODE_MINT_ATTEMPTS = 5
+
+// Accounts from before W- codes have none. Mint one on first read, compare-and-set, so calls racing on one account settle on
+// the code the first write stored. One read and one write for an account without a code; callers that already hold the row
+// skip this when member_code is set. Only a duplicate code retries: any other failure (write quota, overload, a D1 error) is
+// logged and answers null, because a code that cannot be minted must never break sign-in, /auth/me or consent renewal; the
+// next call tries again. A stored code moves the customers cache version, since the Contacts list shows it.
+export async function ensurePortalMemberCode(env: Env, accountId: number, mint: () => string = mintMemberCode): Promise<string | null> {
+  const db = getDb(env)
+  for (let attempt = 0; attempt < MEMBER_CODE_MINT_ATTEMPTS; attempt += 1) {
+    try {
+      const row = await db.prepare('SELECT member_code FROM portal_accounts WHERE id = @id LIMIT 1').get<{ member_code: string | null }>({ id: accountId })
+      if (!row) return null
+      if (row.member_code) return row.member_code
+      const code = mint()
+      const result = await db.prepare('UPDATE portal_accounts SET member_code = @code WHERE id = @id AND member_code IS NULL').run({ code, id: accountId })
+      if (Number(result.changes || 0) > 0) {
+        await bumpVersions(env, ['customers']).catch(() => {})
+        return code
+      }
+    } catch (error) {
+      if (isMemberCodeCollision(error)) continue
+      console.warn('portal_member_code_mint_failed', error instanceof Error ? error.message : String(error))
+      return null
+    }
+  }
+  return null
+}
+
+export async function loadPortalMemberView(
+  env: Env,
+  account: { id: number; membership_id?: string | null; member_code?: string | null; name?: string | null; email?: string | null },
+): Promise<PortalMemberView> {
+  const memberCode = account.member_code || await ensurePortalMemberCode(env, account.id)
+  return portalMemberView({ ...account, member_code: memberCode })
 }
 
 export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown; ageConfirmed?: unknown }
@@ -367,7 +418,7 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   // or not the phone has an account.
   const failureFloor = await failedSignInFloor(env, db, 'portal_accounts')
   const account = await db.prepare(`
-    SELECT a.id, a.name, a.membership_id, a.password_hash, a.consent_version,
+    SELECT a.id, a.name, a.membership_id, a.password_hash, a.consent_version, a.status,
            a.contact_id, c.id AS contact_exists, c.is_anonymous
     FROM portal_accounts a
     LEFT JOIN customers c ON c.id = a.contact_id
@@ -376,8 +427,9 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   `).get<{
     id: number
     name: string
-    membership_id: string
-    password_hash: string
+    membership_id: string | null
+    password_hash: string | null
+    status: string
     consent_version: string | null
     contact_id: number | null
     contact_exists: number | null
@@ -394,12 +446,12 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   }
 
   const idLower = identifier.toLowerCase()
-  const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === account.membership_id.trim().toLowerCase()
-  const passwordCheck = await verifySignInPassword(password, account.password_hash, env)
+  const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === String(account.membership_id ?? '').trim().toLowerCase()
+  const passwordCheck = await verifySignInPassword(password, account.password_hash ?? '', env)
   if (passwordCheck.scheme === 'bcrypt') noteLegacyBcryptSeen('portal_accounts')
   const passwordMatches = passwordCheck.ok
   const contactEligible = account.contact_id == null || (account.contact_exists != null && !isAnonymousCustomer(account))
-  if (!identifierMatches || !passwordMatches || !contactEligible) {
+  if (account.status !== 'active' || !identifierMatches || !passwordMatches || !contactEligible) {
     await spendFailedSignInFloor(password, env, passwordCheck.spent, failureFloor)
     return genericFail
   }
@@ -410,6 +462,7 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
         age_confirmed_at = CASE WHEN @age = 1 THEN CURRENT_TIMESTAMP ELSE age_confirmed_at END,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
+      AND status = 'active'
       AND (contact_id IS NULL OR EXISTS (
         SELECT 1 FROM customers WHERE id = portal_accounts.contact_id AND ${customerIsProfileSql()}
       ))
@@ -424,7 +477,7 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   // E6: a successful sign-in on a legacy bcrypt (or other-count) hash rewrites
   // it once in the current format; compare-and-set, never fails the sign-in.
   if (passwordCheck.needsRehash) {
-    const upgraded = await upgradePasswordHash(db, 'portal_accounts', account.id, password, account.password_hash, env)
+    const upgraded = await upgradePasswordHash(db, 'portal_accounts', account.id, password, account.password_hash ?? '', env)
     if (upgraded && passwordCheck.scheme === 'bcrypt') noteLegacyBcryptUpgraded('portal_accounts')
   }
 
@@ -459,10 +512,11 @@ export async function renewPortalConsent(
     SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale,
         age_confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
+      AND status = 'active'
       AND NOT (consent_version = @version AND consent_at IS NOT NULL AND age_confirmed_at IS NOT NULL)
   `).run({ version: PORTAL_CONSENT_VERSION, locale: String(input.consentLocale || 'und').slice(0, 16), id: accountId })
   if (Number(result.changes || 0) > 0) return { ok: true, renewed: true }
-  const current = await db.prepare('SELECT id FROM portal_accounts WHERE id = @id LIMIT 1').get<{ id: number }>({ id: accountId })
+  const current = await db.prepare("SELECT id FROM portal_accounts WHERE id = @id AND status = 'active' LIMIT 1").get<{ id: number }>({ id: accountId })
   if (!current) return { ok: false, status: 404, error: 'Account not found.', code: 'portal_unauthenticated' }
   return { ok: true, renewed: false }
 }

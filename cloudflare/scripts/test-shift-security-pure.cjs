@@ -71,7 +71,7 @@ async function main() {
     '../lib/saleStatusResolution': require('./harness/sale_status_resolution.cjs'), // riel cash rule (owner, 27 Oct 2026)
     '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR: shift open may land at the redirect target
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
-    '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'), '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) }, '../lib/db': { getDb: () => d1(sqlite) },
+    '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'), '../lib/shiftLateClose': loadReal('lib/shiftLateClose.ts'), '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/phoneAccess': { phoneSearchAccessOf: () => ({ fullPhone: true }) }, '../lib/phoneSearchGuard': { searchableColumnSql: (column) => (typeof column === 'string' ? column : column.sql) }, '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } }, '../lib/permissions': permissions,
     '../lib/audit': { audit: async () => { throw new Error('shift writes must use the atomic audit batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
@@ -88,7 +88,7 @@ async function main() {
       shiftLastActivityMs: async () => null,
       readShiftTimeReview: async () => null,
       applyShiftTimeReview: (reconciliation) => reconciliation,
-      SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time', laterOpen: 'opened_at_later_time' },
+      SHIFT_REVIEW: { earlierClose: 'closed_at_earlier_time', laterOpen: 'opened_at_later_time', closedLate: 'closed_late' },
       loadShiftReconciliation: async () => { throw new Error('no sales tables in this fixture') },
     },
   })
@@ -115,7 +115,7 @@ async function main() {
 
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('S-FOREIGN','per_account',8,'Other cashier',1,'Canonical Shop',date(datetime('now','-1 hour'),'+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
+    VALUES ('S-FOREIGN','per_account',8,'Other cashier',1,'Canonical Shop',date(max(datetime('now','-1 hour'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')),'+7 hours'),max(datetime('now','-1 hour'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')),5,1000)`).run()
   const foreignId = sqlite.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-FOREIGN'").get().id
   // O8 -- under the default per_account policy a cashier sees ONLY their own
   // shifts. Each row carries the opening float and the counted drawer, so
@@ -155,7 +155,7 @@ async function main() {
   // test-shift-inactive-branch-pure.cjs covers the reads, close and cancel.
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('S-OFFBRANCH','per_account',7,'Cashier',2,'Inactive',date(datetime('now','-1 hour'),'+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
+    VALUES ('S-OFFBRANCH','per_account',7,'Cashier',2,'Inactive',date(max(datetime('now','-1 hour'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')),'+7 hours'),max(datetime('now','-1 hour'), datetime(date('now','+7 hours'),'-7 hours','+1 seconds')),5,1000)`).run()
   const offBranchId = sqlite.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-OFFBRANCH'").get().id
   const offBranchAmend = await call('PATCH', `/${offBranchId}`, { expected_revision: 0, reason: 'out of scope', opening_float_usd: 6 })
   assert.equal(offBranchAmend.status, 409, 'a shift on an inactive branch cannot be amended')
@@ -250,7 +250,7 @@ async function main() {
   sqlite.prepare("UPDATE settings SET value='shop_wide' WHERE key='shift_scope_mode'").run()
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
-    VALUES ('S-SHOP','shop_wide',8,'Shop opener',1,'Canonical Shop',date(datetime('now','-2 hours'),'+7 hours'),datetime('now','-2 hours'),9,9000)`).run()
+    VALUES ('S-SHOP','shop_wide',8,'Shop opener',1,'Canonical Shop',date(datetime('now','-1 minutes'),'+7 hours'),datetime('now','-1 minutes'),9,9000)`).run()
   // shift_scope_mode=shop_wide is honoured on the READ side too: the shift
   // belongs to the branch, so the branch's staff may see it.
   const shopWideList = await call('GET', '/?branch_id=1')

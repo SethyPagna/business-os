@@ -12,5 +12,15 @@
    "c94edded340f",
    "WITH matched AS ( SELECT id, business_date, opened_at, CASE WHEN closed_at IS NULL AND cancelled_at IS NULL TH"
   ]
+ ],
+ "shifts-forgotten": [
+  [
+   "88c34ec15c17",
+   "SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active, u.avatar_path, u.up"
+  ],
+  [
+   "9f3aa4d6d215",
+   "SELECT id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date, opened_at, CASE "
+  ]
  ]
 }

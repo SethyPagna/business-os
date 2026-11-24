@@ -732,7 +732,7 @@ async function main() {
       // data_epoch (0288): the row survives a reset, and a reset moves it (the check after the reset).
       // dashboard_staff_roles_0310_* (0310): informational census flags recorded by the Dashboard role migration.
       // sales_daily_coverage (0308): the stored daily totals' coverage row names the data epoch it covers; it survives a reset, and the new epoch makes the cron re-seed and re-cover.
-      'cost_zero_watermark', 'dashboard_staff_roles_0310_changed', 'dashboard_staff_roles_0310_users_with_own_keys', 'data_epoch', 'loyalty_points_reset', 'multilot_revert_watermark', 'sales_daily_coverage', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
+      'cost_zero_watermark', 'dashboard_staff_roles_0310_changed', 'dashboard_staff_roles_0310_users_with_own_keys', 'data_epoch', 'loyalty_points_reset', 'multilot_revert_watermark', 'sales_daily_coverage', 'shift_close_forgotten_0323_changed', 'stock_schema_epoch', 'stock_schema_receipt_boundary',
     ])
     assert.strictEqual(durableFlagsBefore.find(flag => flag.key === 'stock_schema_epoch').value, 'legacy-separate-pool-v1')
 

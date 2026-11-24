@@ -78,6 +78,7 @@ const accounts = loadReal('lib/portalAccounts.ts', {
   './anonymousCustomer': anonymousCustomer,
   './passwordHash': loadRealPasswordHash(),
   './failedSignInCost': loadRealFailedSignInCost(),
+  './memberCode': loadReal('lib/memberCode.ts'),
 })
 
 const jar = { value: null }

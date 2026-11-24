@@ -203,6 +203,7 @@ const LABELS = {
   reopenedBy: { en: 'Reopened by', km: 'បើកឡើងវិញដោយ' },
   closedEarlierBy: { en: 'Closed at an earlier time by', km: 'បិទនៅម៉ោងមុនដោយ' },
   openedLaterBy: { en: 'Opened at a later time by', km: 'បើកនៅម៉ោងក្រោយដោយ' },
+  closedLateBy: { en: 'Closed late by', km: 'បិទយឺតដោយ' },
   from: { en: 'From', km: 'ពី' },
   to: { en: 'To', km: 'ទៅ' },
   totalMoved: { en: 'Total moved', km: 'បានផ្ទេរសរុប', localizeValue: true },
@@ -324,7 +325,8 @@ const LABELS = {
   reviewEarlierClose: { en: 'Closed at an earlier time', km: 'បិទនៅម៉ោងមុន' },
   reviewLaterOpen: { en: 'Opened at a later time', km: 'បើកនៅម៉ោងក្រោយ' },
   reviewReopenedAfterEarlierClose: { en: 'Reopened after an earlier-time close', km: 'បើកឡើងវិញពីការបិទដែលមានម៉ោងមុន' },
-  staleShiftNeedsAdmin: { en: 'An earlier shift is still open: an administrator must close it', km: 'វេនមុនមួយនៅបើក៖ អ្នកគ្រប់គ្រងត្រូវមកបិទ' },
+  reviewClosedLate: { en: 'Closed late', km: 'បិទយឺត' },
+  staleShiftNeedsAdmin: { en: 'An earlier shift is still open. Close it in the POS with a reason.', km: 'វេនមុនមួយនៅបើក។ សូមបិទវានៅក្នុង POS ជាមួយមូលហេតុ។' },
   // What Not Paid sales still owe (owner, 21 Oct 2026), a positive memo -- see
   // formatShiftReport and formatDaySummary. Deliberately separate from supplier
   // and store credit, which are different financial concepts.

@@ -30,7 +30,7 @@ const closedShift: FixtureShift = {
   cancelled_by_user_name: null, cancel_reason: null, parent_shift_id: null, close_before: null, reopen_reason: null,
   reopened_by_user_id: null, reopened_by_user_name: null, additional_cash_usd: 0, additional_cash_khr: 0, branch_active: true,
 }
-const openShift = { ...closedShift, id: 42, shift_code: 'S-20261014-1100-sokha', closed_at: null, closing_counted_usd: null, closing_counted_khr: null, revision: 0 }
+const openShift = { ...closedShift, business_date: new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10), id: 42, shift_code: 'S-20261014-1100-sokha', closed_at: null, closing_counted_usd: null, closing_counted_khr: null, revision: 0 }
 
 const harness = await createHarness({ localStorage: { businessos_user: JSON.stringify(ADMIN), businessos_read_session: 'read-session-of-owner' } })
 

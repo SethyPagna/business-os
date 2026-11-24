@@ -26,8 +26,8 @@ import { limitSearchTermGroups, normalizeSearchText, SEARCH_MAX_GROUPS, SEARCH_M
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { loadActivePromotionRules, productPromotedSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
-import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount, renewPortalConsent } from '../lib/portalAccounts'
-import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState } from '../lib/portalSession'
+import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount, renewPortalConsent, loadPortalMemberView } from '../lib/portalAccounts'
+import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState, portalActorLabel } from '../lib/portalSession'
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
@@ -2420,10 +2420,10 @@ function sanitizePortalBucketItems(raw: unknown, max: number, withQty: boolean):
   return out
 }
 
-async function loadAccountProfile(env: Env, accountId: number): Promise<{ membershipId: string; name: string; email: string | null } | null> {
-  const row = await getDb(env).prepare('SELECT membership_id, name, email FROM portal_accounts WHERE id = ? LIMIT 1')
-    .get<{ membership_id: string; name: string; email: string | null }>([accountId])
-  return row ? { membershipId: row.membership_id, name: row.name, email: row.email ?? null } : null
+async function loadAccountProfile(env: Env, accountId: number) {
+  const row = await getDb(env).prepare('SELECT id, membership_id, member_code, name, email FROM portal_accounts WHERE id = ? LIMIT 1')
+    .get<{ id: number; membership_id: string | null; member_code: string | null; name: string; email: string | null }>([accountId])
+  return row ? loadPortalMemberView(env, row) : null
 }
 
 // G38 E5 (login CSRF): every storefront write that rides the bos_portal
@@ -2540,7 +2540,7 @@ app.get('/auth/me', async (c) => {
     return c.json({ account: null, error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
   }
   if (!state.account) return c.json({ account: null })
-  return c.json({ account: { membershipId: state.account.membership_id, name: state.account.name, email: state.account.email } })
+  return c.json({ account: await loadPortalMemberView(c.env, state.account) })
 })
 
 // An account signed in before the current wording agrees again (owner, 20 Oct
@@ -2558,7 +2558,7 @@ app.post('/account/consent/renew', async (c) => {
   const state = await getPortalAccountState(c)
   if (state.status === 'unauthenticated') return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
   const accountId = state.status === 'reconsent_required' ? state.accountId : state.account.id
-  const membershipId = state.status === 'reconsent_required' ? state.membershipId : state.account.membership_id
+  const membershipId = state.status === 'reconsent_required' ? state.membershipId : portalActorLabel(state.account)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const result = await renewPortalConsent(c.env, accountId, { consent: body.consent, ageConfirmed: body.ageConfirmed, consentLocale: body.consentLocale })
   if (!result.ok) return c.json({ error: result.error, code: result.code }, result.status)
@@ -2655,7 +2655,7 @@ async function portalSubmissionConsentSchemaReady(env: Env): Promise<boolean> {
 // is the account row itself -- contact_id when the signup folded a contact,
 // otherwise the membership id the account was issued -- so the caller never
 // gets to name a customer.
-async function resolveSubmissionCustomer(env: Env, account: { contact_id: number | null; membership_id: string }) {
+async function resolveSubmissionCustomer(env: Env, account: { contact_id: number | null; membership_id: string | null }) {
   if (account.contact_id) {
     const row = await getDb(env).prepare(
       `SELECT id, name, membership_number FROM customers WHERE id = @id AND ${customerIsProfileSql()} LIMIT 1`,
@@ -2767,7 +2767,7 @@ app.post('/submissions', async (c) => {
       )
     `).run({
       customerId: customer.id,
-      membershipNumber: customer.membership_number || account.membership_id,
+      membershipNumber: customer.membership_number || account.membership_id || '',
       customerName: customer.name || '',
       platform: platform || null,
       note: note || null,
