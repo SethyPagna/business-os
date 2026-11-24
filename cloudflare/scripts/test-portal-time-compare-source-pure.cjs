@@ -151,6 +151,115 @@ function rawHits(sql) {
     if (m[1] === '=' && assignment(m.index)) continue
     hits.push(`raw comparison against substr(${m[3]})`)
   }
+  // R2-4 (review F6): the operand of a comparison, found by walking out from the operator, whose outermost form is not
+  // datetime() / julianday(): a bracketed column, coalesce(), ifnull(), trim(), CAST(), a `||` chain, a nested substr().
+  // A bare column and the plain substr(col, ...) form are the passes above and are not counted twice.
+  const SAFE_CALL = /^(?:datetime|julianday|date|strftime|unixepoch)\s*\(/i
+  const CALL_KEYWORD = /^(?:AND|OR|NOT|WHERE|ON|WHEN|THEN|ELSE|IN|BETWEEN|SELECT|HAVING|EXISTS|CASE|END)$/i
+  const closeOf = (s, open) => {
+    for (let d = 0, i = open; i < s.length; i += 1) {
+      if (s[i] === '(') d += 1
+      else if (s[i] === ')' && (d -= 1) === 0) return i
+    }
+    return -1
+  }
+  const openOf = (s, close) => {
+    for (let d = 0, i = close; i >= 0; i -= 1) {
+      if (s[i] === ')') d += 1
+      else if (s[i] === '(' && (d -= 1) === 0) return i
+    }
+    return -1
+  }
+  const nameBefore = (s, open) => {
+    let m = open
+    while (m > 0 && /\w/.test(s[m - 1])) m -= 1
+    const name = s.slice(m, open)
+    return name && !CALL_KEYWORD.test(name) ? m : open
+  }
+  // Terms of the operand to the left of index `at` (a `||` chain gives several), each { text, start }.
+  function operandLeft(at) {
+    const terms = []
+    let i = at - 1
+    for (;;) {
+      while (i >= 0 && /\s/.test(sql[i])) i -= 1
+      let start
+      if (sql[i] === ')') {
+        const open = openOf(sql, i)
+        if (open < 0) break
+        start = nameBefore(sql, open)
+        terms.push({ text: sql.slice(start, i + 1), start })
+      } else if (sql[i] === "'") {
+        start = sql.lastIndexOf("'", i - 1)
+        if (start < 0) break
+        terms.push({ text: sql.slice(start, i + 1), start })
+      } else if (i >= 0 && /[\w.@:?]/.test(sql[i])) {
+        const end = i
+        while (i >= 0 && /[\w.@:?]/.test(sql[i])) i -= 1
+        start = i + 1
+        terms.push({ text: sql.slice(start, end + 1), start })
+      } else break
+      i = start - 1
+      while (i >= 0 && /\s/.test(sql[i])) i -= 1
+      if (sql.slice(i - 1, i + 1) !== '||') break
+      i -= 2
+    }
+    return terms
+  }
+  function operandRight(at) {
+    const terms = []
+    let i = at
+    for (;;) {
+      while (i < sql.length && /\s/.test(sql[i])) i += 1
+      const start = i
+      let end
+      if (sql[i] === '(') {
+        end = closeOf(sql, i)
+        if (end < 0) break
+      } else if (sql[i] === "'") {
+        end = sql.indexOf("'", i + 1)
+        if (end < 0) break
+      } else if (/[\w.@:?]/.test(sql[i] || '')) {
+        end = i
+        while (end + 1 < sql.length && /[\w.@:?]/.test(sql[end + 1])) end += 1
+        if (sql[end + 1] === '(' && !CALL_KEYWORD.test(sql.slice(start, end + 1))) end = closeOf(sql, end + 1)
+        if (end < 0) break
+      } else break
+      terms.push({ text: sql.slice(start, end + 1), start })
+      i = end + 1
+      while (i < sql.length && /\s/.test(sql[i])) i += 1
+      if (sql.slice(i, i + 2) !== '||') break
+      i += 2
+    }
+    return terms
+  }
+  const bareColumn = new RegExp(`^(?:(\\w+)\\.)?(${COL})$`, 'i')
+  const plainSubstr = new RegExp(`^(?:substr|substring)\\(\\s*(?:(\\w+)\\.)?(${COL})\\s*,[^()]*\\)$`, 'i')
+  const columnIn = new RegExp(`(?<![\\w.])(?:(\\w+)\\.)?(${COL})\\b(?!\\s*\\()`, 'i')
+  function wrappedColumnHit(term, chained) {
+    let text = term.text.trim()
+    let wrapped = false
+    for (;;) {
+      if (text.startsWith('(') && closeOf(text, 0) === text.length - 1) { text = text.slice(1, -1).trim(); wrapped = true } else break
+    }
+    if (/^SELECT\b/i.test(text)) return null
+    if (SAFE_CALL.test(text) && closeOf(text, text.indexOf('(')) === text.length - 1) return null
+    const bare = bareColumn.exec(text)
+    if (bare) return wrapped || chained ? { alias: bare[1], column: bare[2] } : null
+    if (plainSubstr.test(text)) return null
+    const found = columnIn.exec(text)
+    return found ? { alias: found[1], column: found[2] } : null
+  }
+  const anyOp = /<=|>=|<>|!=|<|>|=/g
+  while ((m = anyOp.exec(sql))) {
+    if (m[0] === '=' && assignment(m.index)) continue
+    const sides = [operandLeft(m.index), operandRight(m.index + m[0].length)]
+    for (const terms of sides) {
+      for (const term of terms) {
+        const hit = wrappedColumnHit(term, terms.length > 1)
+        if (hit && owns(hit.alias, term.start)) hits.push(`raw comparison of wrapped ${hit.column}`)
+      }
+    }
+  }
   const orderBy = /\bORDER\s+BY\b([^;]*?)(?=\bLIMIT\b|\bOFFSET\b|\)|$)/gi
   while ((m = orderBy.exec(sql))) {
     for (const term of m[1].split(',')) {
@@ -227,7 +336,18 @@ check('positive control: the scanner reports one of every forbidden pattern', ()
     "SELECT COUNT(*) FROM portal_sessions WHERE account_id = @a AND (last_seen_at > datetime(created_at, '+60 seconds') OR 1)",
     "SELECT 1 FROM portal_sessions s WHERE s.token_hash = @h AND substr(s.expires_at, 1, 19) > @now",
     "SELECT 1 FROM portal_sessions WHERE @now < substr(expires_at, 1, 19)",
-    "SELECT 1 FROM portal_sessions WHERE substring(expires_at, 1, 19) <= datetime(@now)",
+    "SELECT 1 FROM portal_sessions WHERE substring(expires_at, 1, 19) <= datetime(@now)",    // R2-4: a column wrapped in a bracket, coalesce(), ifnull(), trim(), CAST(), a || chain or a nested substr() is still raw text
+    "SELECT 1 FROM portal_sessions WHERE (expires_at) < @now",
+    "SELECT 1 FROM portal_sessions WHERE @now > (expires_at)",
+    "SELECT 1 FROM portal_sessions WHERE coalesce(expires_at, '') < @now",
+    "SELECT 1 FROM portal_sessions s WHERE ifnull(s.expires_at, @x) > @now",
+    "SELECT 1 FROM portal_sessions WHERE trim(expires_at) < @now",
+    "SELECT 1 FROM portal_sessions WHERE CAST(expires_at AS TEXT) < @now",
+    "SELECT 1 FROM portal_sessions WHERE expires_at || '' < @now",
+    "SELECT 1 FROM portal_sessions WHERE @now > '' || expires_at",
+    "SELECT 1 FROM portal_sessions WHERE substr(expires_at, 1, length(@now)) < @now",
+    "SELECT 1 FROM portal_sessions WHERE @now >= coalesce(last_seen_at, created_at)",
+    "SELECT 1 FROM portal_sessions WHERE revoked_at IS NULL AND ((expires_at)) <= datetime(@now)",
   ]
   for (const sql of forbidden) assert.ok(hitsOf(sql).length >= 1, `not reported: ${sql}`)
 })
@@ -260,7 +380,14 @@ check('positive control: look-alikes report nothing', () => {
     "SELECT 1 FROM portal_sessions WHERE (datetime(last_seen_at) > datetime(created_at, '+60 seconds') OR 1)",
     "SELECT 1 FROM portal_sessions WHERE substr(token_hash, 1, 4) <> 'tg1:' AND (revoked_at IS NULL OR id > 0)",
     "SELECT substr(expires_at, 1, 10) AS day FROM portal_sessions WHERE id = @id",
-    "SELECT 1 FROM portal_accounts WHERE id IN (SELECT account_id FROM portal_sessions WHERE datetime(expires_at) > datetime(@now))",
+    "SELECT 1 FROM portal_accounts WHERE id IN (SELECT account_id FROM portal_sessions WHERE datetime(expires_at) > datetime(@now))",    // R2-4 look-alikes: the outermost call is datetime() or julianday(); another table's column; no column at all
+    "SELECT 1 FROM portal_sessions WHERE datetime(coalesce(expires_at, '')) < datetime(@now)",
+    "SELECT 1 FROM portal_sessions WHERE datetime(ifnull(expires_at, @x)) > datetime(@now)",
+    "SELECT 1 FROM portal_sessions WHERE julianday(trim(expires_at)) < julianday(@now)",
+    "SELECT 1 FROM portal_sessions WHERE (datetime(expires_at)) < (datetime(@now))",
+    "SELECT 1 FROM portal_sessions WHERE datetime(substr(expires_at, 1, 19)) < datetime(@now)",
+    "SELECT 1 FROM portal_accounts a JOIN customers c ON c.id = a.contact_id WHERE coalesce(c.created_at, '') < @x",
+    "SELECT 1 FROM portal_sessions WHERE length(@now) < 5 AND trim(token_hash) = @h",
   ]
   for (const sql of clean) assert.deepEqual(hitsOf(sql), [], `wrongly reported: ${sql}`)
 })

@@ -256,10 +256,30 @@ const srcPath = (file) => path.relative(SRC, file).split(path.sep).join('/')
 const allowedStatement = (file, stmt) => stmt.exportedConst !== null
   && Object.hasOwn(OWNERS, stmt.exportedConst) && OWNERS[stmt.exportedConst].includes(srcPath(file))
 const SQLISH = /\b(SELECT|UPDATE|INSERT|DELETE)\b/i
-// A comparison of token_hash (`x.token_hash = @v`, IN, LIKE) needs the ticket predicate on the SAME alias in the same text.
-const LOOKUP = /(\b\w+\.)?token_hash\s*(?:==?|\bIN\b|\bLIKE\b)/gi
-const predicateFor = (prefix) => new RegExp(`substr\\(\\s*${prefix.replace('.', '\\.')}token_hash\\s*,\\s*1\\s*,\\s*4\\s*\\)\\s*<>\\s*'tg1:'`)
-const lookupsCarryPredicate = (text) => [...new Set([...text.matchAll(LOOKUP)].map((m) => m[1] || ''))].every((prefix) => predicateFor(prefix).test(text))
+// R2-4 (review F5): every mention of token_hash outside the predicate itself, whatever the operator or function around it
+// (=, IS, IN, LIKE, GLOB, BETWEEN, instr(), the column on either side), needs the ticket predicate on the SAME alias in
+// the same SELECT scope: the predicate must sit in the mention's own parenthesis group or in a group that encloses it.
+// A predicate in a nested sub-select, even one that reuses the alias, does not cover a mention outside that sub-select.
+const PREDICATE_ANY = /substr\(\s*((?:\w+\.)?)token_hash\s*,\s*1\s*,\s*4\s*\)\s*<>\s*'tg1:'/gi
+const TOKEN_MENTION = /(?<![@:\w])((?:\w+\.)?)token_hash\b/gi // a bound parameter (@token_hash) is a value, not the column
+function groupPaths(text) {
+  const paths = []
+  const stack = []
+  let next = 0
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === ')' && stack.length) stack.pop()
+    paths.push(stack.join('/'))
+    if (text[i] === '(') stack.push(++next)
+  }
+  return paths
+}
+const encloses = (outer, inner) => outer === '' || inner === outer || inner.startsWith(`${outer}/`)
+function lookupsCarryPredicate(text) {
+  const paths = groupPaths(text)
+  const predicates = [...text.matchAll(PREDICATE_ANY)].map((m) => ({ alias: m[1].toLowerCase(), start: m.index, end: m.index + m[0].length }))
+  const mentions = [...text.matchAll(TOKEN_MENTION)].filter((m) => !predicates.some((p) => m.index >= p.start && m.index < p.end))
+  return mentions.every((m) => predicates.some((p) => p.alias === m[1].toLowerCase() && encloses(paths[p.start], paths[m.index])))
+}
 
 function listSourceFiles(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -421,6 +441,30 @@ async function main() {
     assert.equal(at('routes/portal.ts', `const q = \`${reader}\``), 1, 'control: the same reader under a neutral name')
     assert.equal(at('routes/portal.ts', `const q = \`${reader} AND substr(s.token_hash, 1, 4) <> 'tg1:'\``), 0, 'the predicate on the alias that is compared passes')
     assert.equal(at('routes/portal.ts', "const q = 'UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h ' + \"AND substr(token_hash, 1, 4) <> 'tg1:'\""), 0, 'a concatenation that carries the predicate passes')
+    // R2-4: whatever the operator, the column on either side, a function around it, or an alias reused in a nested sub-select
+    const wrapSql = (body) => 'const q = `' + body + '`'
+    const head = 'SELECT a.id FROM portal_sessions s JOIN portal_accounts a ON a.id = s.account_id WHERE '
+    const unrelated = " AND EXISTS (SELECT 1 FROM portal_sessions x WHERE substr(x.token_hash, 1, 4) <> 'tg1:')"
+    const own = " AND substr(s.token_hash, 1, 4) <> 'tg1:'"
+    const forms = {
+      'IS': 's.token_hash IS @h',
+      'reversed operands': '@h = s.token_hash',
+      'GLOB': 's.token_hash GLOB @h',
+      'BETWEEN': 's.token_hash BETWEEN @h AND @h',
+      'instr()': 'instr(s.token_hash, @h) > 0',
+      'IN': 's.token_hash IN (@h)',
+      'LIKE': 's.token_hash LIKE @h',
+    }
+    for (const [label, cond] of Object.entries(forms)) {
+      assert.equal(at('routes/portal.ts', wrapSql(head + cond + unrelated)), 1, `${label}, predicate on an unrelated sub-select`)
+      assert.equal(at('routes/portal.ts', wrapSql(head + cond + own)), 0, `${label}, predicate on its own alias`)
+      assert.equal(at('routes/portal.ts', wrapSql(`${head}(${cond})${own}`)), 0, `${label}, in a bracket group, predicate in the enclosing scope`)
+      assert.equal(at('routes/portal.ts', wrapSql(head + cond)), 1, `${label}, no predicate at all`)
+    }
+    const nestedOwn = " AND a.id IN (SELECT account_id FROM portal_sessions s2 WHERE s2.token_hash = @h AND substr(s2.token_hash, 1, 4) <> 'tg1:')"
+    assert.equal(at('routes/portal.ts', wrapSql(head + "s.token_hash = @h AND EXISTS (SELECT 1 FROM portal_sessions s WHERE substr(s.token_hash, 1, 4) <> 'tg1:')")), 1, 'a nested sub-select that reuses the alias for the predicate')
+    assert.equal(at('routes/portal.ts', wrapSql(head + 's.token_hash = @h' + nestedOwn)), 1, 'the outer lookup of a mixed statement has no predicate of its own')
+    assert.equal(at('routes/portal.ts', wrapSql(head + 's.token_hash = @h' + own + nestedOwn)), 0, 'each scope carries its own predicate')
     // the INSERT ... VALUES exemption refuses ON CONFLICT and any SELECT
     assert.equal(at('lib/anyNewFile.ts', 'const q = `INSERT INTO portal_sessions (account_id, token_hash) VALUES (@a, @h) ON CONFLICT(id) DO UPDATE SET revoked_at = NULL WHERE token_hash = @h`'), 1, 'ON CONFLICT is not a plain insert')
     assert.equal(at('lib/anyNewFile.ts', 'const q = `INSERT INTO portal_sessions (account_id, token_hash) VALUES (@a, (SELECT token_hash FROM portal_sessions LIMIT 1))`'), 1, 'a SELECT inside the VALUES is not a plain insert')
