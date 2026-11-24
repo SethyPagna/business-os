@@ -193,9 +193,12 @@ const PAID = {
   inventoryMarksSnapshotCacheSeconds: 3600,
   inventoryMarksChangesPageEvents: 1000,
   inventoryMarksTouchedMax: 1000,
-  inventoryMarksCatchUpMaxEvents: 4000,
+  inventoryMarksCatchUpMaxEvents: 10000,
   inventoryMarksPendingPageApprovals: 100,
   inventoryMarksPollSeconds: 120,
+  inventoryMarksChangesCacheSeconds: 900,
+  inventoryMarksBroadcastJitterMinMs: 2000,
+  inventoryMarksBroadcastJitterMaxMs: 5000,
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogVocabularyCacheSeconds: 300,
@@ -281,9 +284,12 @@ const FREE = {
   inventoryMarksSnapshotCacheSeconds: 86400,
   inventoryMarksChangesPageEvents: 500,
   inventoryMarksTouchedMax: 500,
-  inventoryMarksCatchUpMaxEvents: 2000,
+  inventoryMarksCatchUpMaxEvents: 10000,
   inventoryMarksPendingPageApprovals: 50,
   inventoryMarksPollSeconds: 300,
+  inventoryMarksChangesCacheSeconds: 900,
+  inventoryMarksBroadcastJitterMinMs: 2000,
+  inventoryMarksBroadcastJitterMaxMs: 5000,
   productListCacheSeconds: 3600,
   possibleDuplicatesCacheSeconds: 3600,
   catalogVocabularyCacheSeconds: 300,
@@ -344,7 +350,7 @@ const FREE_IS_LONGER_ALL = [...FREE_IS_LONGER, ...FREE_IS_LONGER_PAGE_SIZES, ...
 // only how many days a visit works through (recompute, older reconcile slice, rebuild range) and the CPU, wall and payload budgets are sized by the tier and differ;
 // the per-row CPU estimate, the fixed day cost, the queries a day costs and the reserve are facts of the code, the same on both tiers.
 // 20 Nov: the bell section lifetime is 245 s on both tiers (the follow-up read adds 25 s slack, up to 20 s jitter and an 8 s read) (owner 11 Nov: up to 5 minutes), and the three catalogue lifetimes that were literals keep today's single value on both.
-const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter', 'inventoryMarksPageIds']
+const SAME_ON_BOTH_TIERS = ['notificationSectionCacheSeconds', 'catalogVocabularyCacheSeconds', 'productListLegacyCacheSeconds', 'productSearchIndexCacheSeconds', 'expenseExportPageRows', 'dashboardOverviewMaxAgeSeconds', 'coreInvariantsReverifySeconds', 'sessionTouchIntervalSeconds', 'maxApprovedDevicesPerUser', 'scheduledBackupAfterHourLocal', 'scheduledBackupKeep', 'scheduledBackupMaxAttemptsPerDay', 'scheduledBackupCopyPollGapMinutes', 'scheduledBackupStaleHours', 'backupPoolGraceHours', 'driveStaleMirrorHours', 'salesDailyReconcileRecentDays', 'salesDailyReconcileMinIntervalSeconds', 'salesDailyAlertListedDays', 'salesDailyCpuMsPerSourceRow', 'salesDailyCpuMsPerDayFixed', 'salesDailyKernelQueriesPerDay', 'salesDailyQueryReserve', 'salesDailyFailBackoffSeconds', 'salesDailyFailBackoffMaxSeconds', 'salesDailyPoisonAlertAfter', 'inventoryMarksPageIds', 'inventoryMarksCatchUpMaxEvents', 'inventoryMarksChangesCacheSeconds', 'inventoryMarksBroadcastJitterMinMs', 'inventoryMarksBroadcastJitterMaxMs']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
@@ -376,6 +382,19 @@ check('POSITIVE CONTROL: free actually differs from paid; ceilings are smaller, 
   const fakeFree = { ...paid, tier: 'free' }
   const detected = Object.keys(paid).filter((k) => k !== 'tier' && fakeFree[k] === paid[k])
   assert.ok(detected.length > 0, 'the comparison itself must be able to see a copied table')
+})
+
+// The shared changes answer (amendment 1.1 B.4, B.5, C.4): a device falls back to the pages only past K = 10,000 events on both plans, the colo keeps a changes answer 900 s, and a device that did not write waits 2,000 to 5,000 ms
+// after a broadcast so the writer's answer is stored first. The window must have a width, so a minimum equal to the maximum (every device at once) is refused.
+check('the shared changes answer limits: K, the cache lifetime and a jitter window with a width, in both profiles', async () => {
+  for (const tier of ['free', 'paid']) {
+    const t = PLAN_LIMITS_BY_TIER[tier]
+    assert.equal(t.inventoryMarksCatchUpMaxEvents, 10000, `${tier} K`)
+    assert.equal(t.inventoryMarksChangesCacheSeconds, 900, `${tier} changes cache seconds`)
+    assert.equal(t.inventoryMarksBroadcastJitterMinMs, 2000, `${tier} jitter min`)
+    assert.equal(t.inventoryMarksBroadcastJitterMaxMs, 5000, `${tier} jitter max`)
+    assert.ok(t.inventoryMarksBroadcastJitterMaxMs > t.inventoryMarksBroadcastJitterMinMs, `${tier} jitter max must exceed min`)
+  }
 })
 
 check('a free deployment stays inside the platform ceilings it is sized against', async () => {

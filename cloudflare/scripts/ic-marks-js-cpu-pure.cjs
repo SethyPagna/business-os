@@ -52,9 +52,9 @@ const childMain = async (spec, light, firstOnly) => {
   } else if (name === 'c') {
     run = async () => JSON.stringify(await lib.readChanges(stubOf(fx.changes.batches), scope, fx.changes.since, fx.changes.tag, limits)).length
   } else if (name === 'd') {
-    // The route's withoutWaiting (routes/inventoryChecks.ts) is replicated here: the shared cached answer (serveCachedChanges) arrives with slice A3, which moves the strip into the library.
+    // The strip the route runs at serve time, on a fresh answer and on a cache hit alike (withoutWaiting in the marks library, shared with the route): the stored answer is parsed back from its text, as a hit parses it.
     const text = JSON.stringify(await lib.readChanges(stubOf(fx.changes.batches), scope, fx.changes.since, fx.changes.tag, limits))
-    run = async () => { const answer = JSON.parse(text); return JSON.stringify('waiting' in answer ? Object.fromEntries(Object.entries(answer).filter(([k]) => k !== 'waiting')) : answer).length }
+    run = async () => JSON.stringify(lib.withoutWaiting(JSON.parse(text))).length
   } else if (name === 'e') {
     run = async () => JSON.stringify(await lib.readPendingPage(stubOf(fx.pending.batches), scope, null, fx.limits.pageApprovals)).length
   } else throw new Error('unknown measure ' + name)

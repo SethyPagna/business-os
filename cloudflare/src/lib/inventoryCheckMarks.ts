@@ -188,3 +188,28 @@ export async function readPendingPage(db: Db, scope: MarksScope, after: { afterA
   const page = order.slice(0, pageApprovals)
   return { cursor: event?.id ?? 0, tag: event ? eventTag(event) : '', sessions: page.map((o): WaitingEntry => [o.id, bySession.get(o.id)!]), next: order.length > pageApprovals ? { afterAt: page[page.length - 1].at, afterId: page[page.length - 1].id } : null }
 }
+
+// ---- The shared changes answer (amendment 1.1 B.5; contract docs/contracts/inventory-check-marks-20261121.md) -------------------------------------------------------------------------------------------------
+// The colo keeps ONE answer per (organisation, branch, since, tag, format). Only an exact answer that fetched at least one event is stored, so a stored answer is the exact state at its compute time and every later change has an id past its cursor.
+export type StoredChanges = Extract<ChangesAnswer, { cursor: number }>
+export const storableChanges = (answer: ChangesAnswer, since: number): answer is StoredChanges => 'cursor' in answer && answer.exact && answer.cursor > since
+// Waiting is computed for every viewer, stored with it, and removed at serve time (a hit and a fresh answer alike) from the signed-in actor of THIS request, for one who may not see it.
+export const withoutWaiting = (answer: ChangesAnswer): ChangesAnswer => 'waiting' in answer ? Object.fromEntries(Object.entries(answer).filter(([k]) => k !== 'waiting')) as ChangesAnswer : answer
+const isStored = (x: unknown): x is StoredChanges => {
+  const s = x as Record<string, unknown> | null
+  return !!s && typeof s === 'object' && Number.isSafeInteger(s.cursor) && typeof s.tag === 'string' && typeof s.more === 'boolean' && Array.isArray(s.marks) && Array.isArray(s.waiting)
+}
+/**
+ * A stored answer served after ONE validation call against the log: the newest event, the event at the request's `since`, the event at the stored cursor.
+ * `{rebuild: true}` when `since` is past the newest event or its event has another tag (the same checks as readChanges); null when the stored cursor is past the newest event or its event has another tag (a restore removed the states the answer holds): the caller computes a fresh answer.
+ * Served with the fresh `top` and `more = stored.more OR stored.cursor < top`, so a device that hits an answer older than a newer write continues at once and publishes only at the end of its chain.
+ */
+export async function serveCachedChanges(db: Db, stored: unknown, since: number, tag: string): Promise<ChangesAnswer | null> {
+  if (!isStored(stored)) return null
+  const [top, atSince, atCursor] = await db.batch([{ sql: TOP_SQL }, { sql: AT_SQL, params: { since } }, { sql: AT_SQL, params: { since: stored.cursor } }])
+  const topId = eventOf(rowsOf(top))?.id ?? 0
+  const sinceEvent = eventOf(rowsOf(atSince)), cursorEvent = eventOf(rowsOf(atCursor))
+  if (since > topId || (since > 0 && (!sinceEvent || eventTag(sinceEvent) !== tag))) return { rebuild: true, top: topId }
+  if (stored.cursor > topId || !cursorEvent || eventTag(cursorEvent) !== stored.tag) return null
+  return { ...stored, top: topId, exact: true, more: stored.more || stored.cursor < topId }
+}

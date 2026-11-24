@@ -448,6 +448,11 @@ export type PlanLimits = {
   inventoryMarksCatchUpMaxEvents: number
   inventoryMarksPendingPageApprovals: number
   inventoryMarksPollSeconds: number
+  // The shared changes answer (B.5): the colo keeps one answer per (organisation, branch, since, tag, format) this long (validated against the log on every hit, so the TTL is not a correctness bound); a device that did not write waits a random time
+  // between the two jitter bounds after a broadcast so the writer's answer is stored first. Both bounds are sent to the device in capabilities.marks.
+  inventoryMarksChangesCacheSeconds: number
+  inventoryMarksBroadcastJitterMinMs: number
+  inventoryMarksBroadcastJitterMaxMs: number
 
   // ---- The shared ranked scope of the Products list (INV-A S7; behind the read switch `catalog_ranked_scope`) ----
   //
@@ -615,9 +620,12 @@ const PAID_LIMITS: PlanLimits = deepFreeze({
   inventoryMarksSnapshotCacheSeconds: 3_600,
   inventoryMarksChangesPageEvents: 1_000,
   inventoryMarksTouchedMax: 1_000,
-  inventoryMarksCatchUpMaxEvents: 4_000,
+  inventoryMarksCatchUpMaxEvents: 10_000,
   inventoryMarksPendingPageApprovals: 100,
   inventoryMarksPollSeconds: 120,
+  inventoryMarksChangesCacheSeconds: 900,
+  inventoryMarksBroadcastJitterMinMs: 2_000,
+  inventoryMarksBroadcastJitterMaxMs: 5_000,
   productListCacheSeconds: 60,
   possibleDuplicatesCacheSeconds: 300,
   catalogVocabularyCacheSeconds: 300,
@@ -704,9 +712,12 @@ const FREE_LIMITS: PlanLimits = deepFreeze({
   inventoryMarksSnapshotCacheSeconds: 86_400,
   inventoryMarksChangesPageEvents: 500,
   inventoryMarksTouchedMax: 500,
-  inventoryMarksCatchUpMaxEvents: 2_000,
+  inventoryMarksCatchUpMaxEvents: 10_000,
   inventoryMarksPendingPageApprovals: 50,
   inventoryMarksPollSeconds: 300,
+  inventoryMarksChangesCacheSeconds: 900,
+  inventoryMarksBroadcastJitterMinMs: 2_000,
+  inventoryMarksBroadcastJitterMaxMs: 5_000,
   productListCacheSeconds: 3_600,
   possibleDuplicatesCacheSeconds: 3_600,
   catalogVocabularyCacheSeconds: 300,

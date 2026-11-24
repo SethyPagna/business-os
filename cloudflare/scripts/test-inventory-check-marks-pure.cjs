@@ -86,7 +86,8 @@ function suite(libText, routeText) {
     assert.ok(/if \(!start\.permitted\) throw new InventoryCheckQueryError\(403/.test(routes), '/marks/pending refuses an unpermitted viewer')
     const changesRoute = fn(routes, "app.get('/marks/changes'", "app.get('/marks/pending'")
     assert.ok(/start\.permitted \? answer : withoutWaiting\(answer\)/.test(changesRoute), 'the changes route strips waiting for a viewer who is not permitted, at serve time')
-    assert.ok(/const withoutWaiting = /.test(routes) && /k !== 'waiting'/.test(routes), 'the strip removes the waiting key')
+    assert.ok(/start\.permitted \? served : withoutWaiting\(served\)/.test(changesRoute), 'and strips it on a cache hit too (the stored answer holds Waiting for every viewer)')
+    assert.ok(/export const withoutWaiting = /.test(libText) && /k !== 'waiting'/.test(libText), 'the strip (in the library, shared by the probe) removes the waiting key')
     assert.ok(!/permitted/.test(fn(libText, 'export async function readChanges', 'export type PendingAnswer')), 'readChanges does not depend on the permitted flag')
     assert.ok(!/SCOPE_WAITING_SQL|LEGACY_WAITING_SQL|PENDING_PAGE_SQL|waitingLineSql/.test(fn(libText, 'export const SNAPSHOT_PAGE_SQL', 'export const MARKS_BY_IDS_SQL')), 'the snapshot never holds Waiting')
   })
@@ -189,6 +190,77 @@ function suite(libText, routeText) {
     assert.deepEqual(answer.sessions, [['A', [1, 2]], ['B', []]])
     assert.deepEqual(answer.next, { afterAt: 't1', afterId: 'B' })
   })
+  // ---- A3: the shared changes answer (amendment 1.1 B.5) ----
+  const changesRoute = () => fn(marksRoutes(routeText), "app.get('/marks/changes'", "app.get('/marks/pending'")
+  t('A3: the cache key names org, branch, since, tag and the format, never w, through cacheKeyRequest with the constant version marks', () => {
+    const body = changesRoute()
+    const m = /cacheKeyRequest\(`([^`]*)`, 'marks', cacheIdentity\(c\)\)/.exec(body)
+    assert.ok(m, 'the changes route builds its key with cacheKeyRequest(`...`, \'marks\', cacheIdentity(c))')
+    const url = m[1], names = [...url.matchAll(/[?&]([A-Za-z_]+)=/g)].map((x) => x[1])
+    assert.deepEqual(names, ['org', 'branch', 'since', 'tag', 'f'], 'the key parameters: ' + names)
+    assert.ok(url.includes('since=${since}') && url.includes('tag=${tag}') && url.includes('f=${MARKS_FORMAT}'), 'since, tag and MARKS_FORMAT are in the key')
+    assert.ok(!names.includes('w') && !/waiting|permitted/.test(url), 'no viewer and no w in the key: ONE entry for every viewer')
+  })
+  t('A3: only an exact answer with at least one event is put, for the plan lifetime; a hit is validated before it is served', () => {
+    const body = changesRoute()
+    assert.ok(/if \(key && storableChanges\(answer, since\)\) c\.executionCtx\.waitUntil\(caches\.default\.put\(key,/.test(body), 'the put is guarded by storableChanges')
+    assert.ok(body.includes('`public, max-age=${limits.inventoryMarksChangesCacheSeconds}`'), 'the lifetime is the plan limit')
+    assert.ok(/serveCachedChanges\(db, cached, since, tag\)/.test(body), 'a hit goes through serveCachedChanges')
+    assert.ok(body.indexOf('serveCachedChanges') < body.indexOf('readChanges('), 'the hit is tried before the read')
+  })
+  t('A3: capabilities.marks carries the jitter window from the plan', () => {
+    const cap = fn(marksRoutes(routeText), 'const marksCapability', 'const nonNegative')
+    assert.ok(/jitterMinMs: limits\.inventoryMarksBroadcastJitterMinMs/.test(cap) && /jitterMaxMs: limits\.inventoryMarksBroadcastJitterMaxMs/.test(cap))
+  })
+  const stubCheck = (lib, events, topId) => {
+    const batches = []
+    const db = { async batch(statements) {
+      batches.push(statements.map((s) => ({ sql: s.sql, params: s.params })))
+      return statements.map((s) => ({ results: s.sql === lib.TOP_SQL ? topRow(topId) : s.sql === lib.AT_SQL ? (events.has(s.params.since) ? topRow(events.get(s.params.since)) : []) : (() => { throw new Error('unexpected statement') })() }))
+    } }
+    return { db, batches }
+  }
+  const storedAt = (lib, over = {}) => ({ cursor: 8, tag: lib.eventTag(topRow(8)[0]), top: 8, more: false, exact: true, marks: [[7, 1, 1]], waiting: [['S1', [7]]], ...over })
+  t('A3: serveCachedChanges validates in ONE batch of TOP_SQL, AT_SQL for since and AT_SQL for the stored cursor', async () => {
+    const lib = loadLib(libText), r = stubCheck(lib, new Map([[3, 3], [8, 8]]), 8)
+    const served = await lib.serveCachedChanges(r.db, storedAt(lib), 3, lib.eventTag(topRow(3)[0]))
+    assert.equal(r.batches.length, 1, 'one call')
+    assert.deepEqual(r.batches[0].map((s) => s.sql), [lib.TOP_SQL, lib.AT_SQL, lib.AT_SQL])
+    assert.deepEqual(r.batches[0].map((s) => s.params && s.params.since), [undefined, 3, 8])
+    assert.deepEqual(served, { cursor: 8, tag: lib.eventTag(topRow(8)[0]), top: 8, more: false, exact: true, marks: [[7, 1, 1]], waiting: [['S1', [7]]] })
+  })
+  t('A3: a hit is served with the fresh top, and more = stored.more OR stored.cursor < top', async () => {
+    const lib = loadLib(libText), tagOf = (id) => lib.eventTag(topRow(id)[0])
+    const events = new Map([[3, 3], [8, 8], [12, 12]])
+    const newer = await lib.serveCachedChanges(stubCheck(lib, events, 12).db, storedAt(lib), 3, tagOf(3))
+    assert.equal(newer.top, 12); assert.equal(newer.more, true, 'a write landed after the stored cursor: the device continues at once')
+    const same = await lib.serveCachedChanges(stubCheck(lib, events, 8).db, storedAt(lib), 3, tagOf(3))
+    assert.equal(same.more, false, 'nothing newer: the chain may end')
+    const paged = await lib.serveCachedChanges(stubCheck(lib, events, 8).db, storedAt(lib, { more: true }), 3, tagOf(3))
+    assert.equal(paged.more, true, 'a stored answer that said more still says more')
+  })
+  t('A3: a since past the newest event, or whose event has another tag, answers rebuild; a stored cursor that is past the newest event or has another tag is not served', async () => {
+    const lib = loadLib(libText), tagOf = (id) => lib.eventTag(topRow(id)[0])
+    const events = new Map([[3, 3], [8, 8]])
+    assert.deepEqual(await lib.serveCachedChanges(stubCheck(lib, events, 8).db, storedAt(lib), 9, tagOf(3)), { rebuild: true, top: 8 }, 'since past top')
+    assert.deepEqual(await lib.serveCachedChanges(stubCheck(lib, events, 8).db, storedAt(lib), 3, 'deadbeef'), { rebuild: true, top: 8 }, 'since tag differs (ids reused)')
+    assert.deepEqual(await lib.serveCachedChanges(stubCheck(lib, new Map([[8, 8]]), 8).db, storedAt(lib), 3, tagOf(3)), { rebuild: true, top: 8 }, 'event since is gone')
+    assert.equal(await lib.serveCachedChanges(stubCheck(lib, events, 8).db, storedAt(lib, { tag: 'deadbeef' }), 3, tagOf(3)), null, 'stored cursor tag differs (restore)')
+    assert.equal(await lib.serveCachedChanges(stubCheck(lib, events, 5).db, storedAt(lib), 3, tagOf(3)), null, 'stored cursor past top (restore)')
+    assert.equal(await lib.serveCachedChanges(stubCheck(lib, new Map([[3, 3]]), 8).db, storedAt(lib), 3, tagOf(3)), null, 'stored cursor event is gone')
+    const zero = await lib.serveCachedChanges(stubCheck(lib, new Map([[8, 8]]), 8).db, storedAt(lib), 0, '')
+    assert.equal(zero && zero.cursor, 8, 'since 0 has no event to compare and is served')
+    assert.equal(await lib.serveCachedChanges(stubCheck(lib, events, 8).db, { cursor: 'x' }, 3, tagOf(3)), null, 'a malformed entry is not served')
+  })
+  t('A3: only an exact answer that fetched an event is storable, and the strip drops the waiting key and nothing else', () => {
+    const lib = loadLib(libText), a = { cursor: 5, tag: 'aaaaaaaa', top: 5, more: false, exact: true, marks: [], waiting: [] }
+    assert.equal(lib.storableChanges(a, 3), true)
+    assert.equal(lib.storableChanges({ ...a, exact: false }, 3), false, 'an inexact answer is never shared')
+    assert.equal(lib.storableChanges({ ...a, cursor: 3 }, 3), false, 'an idle answer (no event) is not stored')
+    assert.equal(lib.storableChanges({ rebuild: true, top: 5 }, 3), false, 'a rebuild answer is not stored')
+    assert.deepEqual(lib.withoutWaiting({ ...a, waiting: [['S', [1]]] }), { cursor: 5, tag: 'aaaaaaaa', top: 5, more: false, exact: true, marks: [] })
+    assert.deepEqual(lib.withoutWaiting({ rebuild: true, top: 5 }), { rebuild: true, top: 5 })
+  })
   return Promise.all(pending).then(() => results)
 }
 
@@ -223,6 +295,12 @@ function suite(libText, routeText) {
   await mutate('the waiting walk is not gated', 'lib', ' AND w.key < @walk THEN', ' THEN', 'A1d: the scope read')
   await mutate('a legacy session is charged without a deciding event', 'lib', 'Number(known.legacy) === 1 && changing.has(sid) && !charged.has(sid)', 'Number(known.legacy) === 1 && !charged.has(sid)', 'A1d: a legacy session')
   await mutate('legacy sessions cost nothing in the walk', 'lib', 'const items = freshSession ?', 'const items = false ?', 'A.3: a legacy session')
+  await mutate('a cache hit skips the tag check of since (mw4)', 'lib', '(since > 0 && (!sinceEvent || eventTag(sinceEvent) !== tag))', 'false', 'A3: a since past')
+  await mutate('a cache hit is served with its stored more (mw5)', 'lib', 'more: stored.more || stored.cursor < topId', 'more: stored.more', 'A3: a hit is served')
+  await mutate('a cache hit skips the stored cursor check (mw13)', 'lib', 'stored.cursor > topId || !cursorEvent || eventTag(cursorEvent) !== stored.tag', 'false', 'A3: a since past')
+  await mutate('a cache hit is not stripped of waiting (mw15)', 'route', 'start.permitted ? served : withoutWaiting(served)', 'served', 'I9')
+  await mutate('an inexact or idle answer is put', 'route', 'storableChanges(answer, since)', 'true', 'A3: only an exact answer with at least one event is put')
+  await mutate('the cache key names the viewer', 'route', '&since=${since}&tag=${tag}', '&w=${start.permitted}&since=${since}&tag=${tag}', 'A3: the cache key')
 
   // A1d: decides, evaluated by SQLite on the real text of EVENTS_SQL: approval present 1, malformed or missing json 1 (over-walks), other json 0.
   check('A1d: decides is 1 for an after_json with approval and for malformed or missing json, 0 otherwise', () => {

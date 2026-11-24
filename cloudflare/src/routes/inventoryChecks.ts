@@ -24,7 +24,7 @@ import { readInventoryCheckLots } from '../lib/inventoryCheckLots'
 import { getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { cacheKeyRequest } from '../lib/cacheKey'
-import { MARKS_FORMAT, buildPageAnswer, pageBody, readChanges, readPendingPage, readSnapshotPage, readTopAndAt, type ChangesAnswer, type MarksPage } from '../lib/inventoryCheckMarks'
+import { MARKS_FORMAT, buildPageAnswer, pageBody, readChanges, readPendingPage, readSnapshotPage, readTopAndAt, serveCachedChanges, storableChanges, withoutWaiting, type MarksPage } from '../lib/inventoryCheckMarks'
 import { attachLotRows, readProductSearchList } from './products'
 import { approvalsAvailable, createInventoryCheckLotSubmission, createInventoryCheckSession, createInventoryCheckSubmission, lotLinesAvailable, getInventoryCheckSession, inventoryCheckDigest, inventoryCheckSessionHistory,
   canSeeStaffIdentity, InventoryCheckSessionError, listInventoryCheckSessions, patchInventoryCheckObservation, patchInventoryCheckSession, pickupInventoryCheckTask, releaseInventoryCheckTask, REPLACED_NOTE,
@@ -280,10 +280,10 @@ app.get('/lots', async c => {
 })
 // ---- ic_marks: the count marks a device holds (lib/inventoryCheckMarks.ts, contract docs/contracts/inventory-check-marks-20261121.md) ----------------------------------------------------
 // Three GET routes; all answer 404 while ic_marks is OFF. The marks are the LATEST count of each product at the branch (state, time); no quantity, stock or person is in them.
-const marksCapability = async (c: IcContext): Promise<{ marks?: { pollSeconds: number; catchUpMaxEvents: number; pageIds: number } }> => {
+const marksCapability = async (c: IcContext): Promise<{ marks?: { pollSeconds: number; catchUpMaxEvents: number; pageIds: number; jitterMinMs: number; jitterMaxMs: number } }> => {
   if (!await readSwitch(c.env, 'ic_marks')) return {}
   const limits = getPlanLimits(c.env)
-  return { marks: { pollSeconds: limits.inventoryMarksPollSeconds, catchUpMaxEvents: limits.inventoryMarksCatchUpMaxEvents, pageIds: limits.inventoryMarksPageIds } }
+  return { marks: { pollSeconds: limits.inventoryMarksPollSeconds, catchUpMaxEvents: limits.inventoryMarksCatchUpMaxEvents, pageIds: limits.inventoryMarksPageIds, jitterMinMs: limits.inventoryMarksBroadcastJitterMinMs, jitterMaxMs: limits.inventoryMarksBroadcastJitterMaxMs } }
 }
 const nonNegative = (word: string | undefined, parameter: string): number => {
   if (word === undefined || !/^[0-9]{1,15}$/.test(word) || !Number.isSafeInteger(Number(word))) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', parameter)
@@ -298,8 +298,6 @@ async function marksStart(c: IcContext): Promise<{ scope: { organization: number
   const branchId = positiveWord(c.req.query('branchId'), 'branchId')
   return { scope: { organization: user.organization_id ?? null, branchId }, permitted: access.fields.stock && await fixStockOn(c), limits: getPlanLimits(c.env) }
 }
-// Waiting is computed for every viewer and removed here, from the signed-in actor of THIS request, for one who may not see it.
-const withoutWaiting = (answer: ChangesAnswer): ChangesAnswer => 'waiting' in answer ? Object.fromEntries(Object.entries(answer).filter(([k]) => k !== 'waiting')) as ChangesAnswer : answer
 app.get('/marks', async c => {
   const start = await marksStart(c)
   if (!start) return notWired(c)
@@ -328,7 +326,15 @@ app.get('/marks/changes', async c => {
   if (!start) return notWired(c)
   const since = nonNegative(c.req.query('since'), 'since'), tag = c.req.query('tag') ?? ''
   if (!/^([0-9a-f]{8})?$/.test(tag) || (since > 0 && tag === '')) throw new InventoryCheckQueryError(400, 'inventory_check_invalid_query', 'tag')
-  const answer = await readChanges(getDb(c.env), start.scope, since, tag, { pageEvents: start.limits.inventoryMarksChangesPageEvents, touchedMax: start.limits.inventoryMarksTouchedMax })
+  const { scope, limits } = start, db = getDb(c.env)
+  // The answer is shared by every device of the colo that asks the same (since, tag): ONE entry, computed with Waiting for every viewer (no viewer in the key), validated against the log on every hit (serveCachedChanges) and stripped at serve time below.
+  // The version argument is the constant 'marks': the log's own validation, not a namespace version, guards the body (contract: the CACHE-LIFECYCLE R1 exception).
+  const key = await cacheKeyRequest(`https://ic.invalid/__bos/ic-marks-changes?org=${scope.organization ?? ''}&branch=${scope.branchId}&since=${since}&tag=${tag}&f=${MARKS_FORMAT}`, 'marks', cacheIdentity(c))
+  const cached = key ? await caches.default.match(key).then((hit) => hit ? hit.json<unknown>() : null).catch(() => null) : null
+  const served = cached ? await serveCachedChanges(db, cached, since, tag) : null
+  if (served) return c.json(start.permitted ? served : withoutWaiting(served))
+  const answer = await readChanges(db, scope, since, tag, { pageEvents: limits.inventoryMarksChangesPageEvents, touchedMax: limits.inventoryMarksTouchedMax })
+  if (key && storableChanges(answer, since)) c.executionCtx.waitUntil(caches.default.put(key, new Response(JSON.stringify(answer), { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${limits.inventoryMarksChangesCacheSeconds}` } })))
   return c.json(start.permitted ? answer : withoutWaiting(answer))
 })
 app.get('/marks/pending', async c => {
