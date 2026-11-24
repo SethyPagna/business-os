@@ -212,9 +212,33 @@ async function untouchedRules() {
   passed += 1
 }
 
+// A close that committed stays answerable to the account that made it: its retry replays the receipt (200), and a second closer meets
+// the closed row (409), never the permission wall (403). The permission check runs before the replay lookup, so it must not depend on the row still being open.
+async function retryAfterCommit() {
+  const w = world('shop_wide', 'shop_wide', 'today', 'open'); live.user = ACTORS.otherPos
+  const input = { expected_revision: 0, client_request_id: 'req-retry-abcdefghijklmnop' }
+  const first = await call('POST', `/${w.shift.id}/close`, input)
+  assert.equal(first.status, 200, `a non-opener closes today's shop-wide shift: ${JSON.stringify(first.body)}`)
+  const replay = await call('POST', `/${w.shift.id}/close`, input)
+  assert.equal(replay.status, 200, `the closer's retry after commit is the receipt, not 403: ${JSON.stringify(replay.body)}`)
+  assert.equal(replay.body.already_closed, true)
+  assert.equal(w.sqlite.prepare('SELECT COUNT(*) AS n FROM shift_session_amendments WHERE shift_session_id=?').get(w.shift.id).n, 1, 'the replay writes nothing')
+  for (const second of [ACTORS.otherSales, ACTORS.otherPos]) {
+    live.user = second
+    const plain = await call('POST', `/${w.shift.id}/close`, { expected_revision: 1 })
+    assert.equal(plain.status, 409, `a second closer meets the closed row: ${second.name} ${plain.status} ${JSON.stringify(plain.body)}`)
+    const keyed = await call('POST', `/${w.shift.id}/close`, { expected_revision: 1, client_request_id: 'req-second-abcdefghijklmnop' })
+    assert.equal(keyed.status, 409, `a second keyed closer meets the closed row: ${second.name} ${keyed.status} ${JSON.stringify(keyed.body)}`)
+  }
+  live.user = ACTORS.noShifts
+  assert.equal((await call('POST', `/${w.shift.id}/close`, { expected_revision: 1 })).status, 403, 'an account that may not use shifts still gets 403')
+  passed += 1
+}
+
 async function main() {
   await matrix(); console.log(`PASS matrix, ${passed} close cases`)
   await untouchedRules(); console.log('PASS reopen and cancel unchanged')
+  await retryAfterCommit(); console.log('PASS retry after commit replays, a second closer gets 409')
   console.log('\nALL CHECKS PASSED')
 }
 main().catch((error) => { console.error(error); process.exit(1) })
