@@ -227,3 +227,18 @@ test('mutant: a picker row built without ShiftHeaderRow fails the picker test', 
   const mutant = mutate(mutate(REPORT, '<ShiftHeaderRow shift={row}>', '<span>'), '</ShiftHeaderRow>', '</span>')
   await assert.rejects(() => pickerRows(mutant), /the picker row is the one shift header row/)
 })
+
+// F1 (shiftf3): the administrator's later time edit carries the closed_late entry forward; "when" is the late close itself.
+test('the Closed late "when" is the late close, not a later administrator time edit', () => {
+  const model = loadModel(MODEL) as any
+  const entry = { code: 'closed_late', by: 'sokha', reason: 'Forgot' }
+  const closeRow = { ...lateRow, id: 7, created_at: '2026-11-23T03:30:00.000Z', after_json: JSON.stringify({ time_review: [entry] }) }
+  const editRow = { ...lateRow, id: 9, created_at: '2026-11-25T08:00:00.000Z', after_json: JSON.stringify({ time_review: [entry] }) }
+  assert.deepEqual(model.lateCloseReview([closeRow, editRow]), { by: 'sokha', reason: 'Forgot', at: '2026-11-23T03:30:00.000Z' })
+  assert.deepEqual(model.lateCloseReview([editRow, closeRow]), { by: 'sokha', reason: 'Forgot', at: '2026-11-23T03:30:00.000Z' }, 'row order does not matter')
+  assert.equal(model.lateCloseReview([closeRow])?.at, '2026-11-23T03:30:00.000Z', 'the close row alone')
+  const own = { ...entry, at: '2026-11-23T03:31:00.000Z' }
+  assert.equal(model.lateCloseReview([{ ...closeRow, after_json: JSON.stringify({ time_review: [own] }) }, editRow])?.at, '2026-11-23T03:31:00.000Z', 'an entry that carries its own time wins')
+  const cleared = { ...editRow, id: 11, after_json: JSON.stringify({ time_review: [] }) }
+  assert.equal(model.lateCloseReview([closeRow, editRow, cleared]), null, 'a newest row without the entry is no standing review')
+})

@@ -9,14 +9,25 @@ function jsonRecord(raw: string): Record<string, unknown> {
 
 /**
  * The standing "closed late" review of one shift, from the history rows the screen already holds: the newest journal
- * row that evaluated the times names who closed it late and why, and `at` is when that row was written. The ONE
- * reader of the closed_late entry: the shift card, the Shifts popup and the Reports shift report all go through it.
+ * row that evaluated the times names who closed it late and why. `at` is when the late close itself happened: the
+ * entry's own time when it carries one, else the first row of the unbroken run of rows that carry the entry (the
+ * Worker copies the entry into every later administrator time edit, so the newest row would show the edit's time).
+ * The ONE reader of the closed_late entry: the shift card, the Shifts popup and the Reports shift report all go through it.
  */
 export function lateCloseReview(rows: ShiftAmendment[]): { by: string; reason: string; at: string } | null {
-  const newest = rows.filter((row) => Array.isArray(jsonRecord(row.after_json).time_review)).sort((a, b) => b.id - a.id)[0]
-  const entries = newest ? jsonRecord(newest.after_json).time_review as Array<{ code?: unknown; by?: unknown; reason?: unknown }> : []
-  const entry = entries.find((item) => item?.code === 'closed_late')
-  return entry ? { by: typeof entry.by === 'string' ? entry.by : '', reason: typeof entry.reason === 'string' ? entry.reason : '', at: newest.created_at || '' } : null
+  type Entry = { code?: unknown; by?: unknown; reason?: unknown; at?: unknown }
+  const reviewed = rows.filter((row) => Array.isArray(jsonRecord(row.after_json).time_review)).sort((a, b) => b.id - a.id)
+  const lateEntry = (row: ShiftAmendment) => (jsonRecord(row.after_json).time_review as Entry[]).find((item) => item?.code === 'closed_late')
+  const entry = reviewed[0] ? lateEntry(reviewed[0]) : undefined
+  if (!entry) return null
+  let first = reviewed[0]
+  for (const row of reviewed) { if (!lateEntry(row)) break; first = row }
+  const own = lateEntry(first) ?? entry
+  return {
+    by: typeof entry.by === 'string' ? entry.by : '',
+    reason: typeof entry.reason === 'string' ? entry.reason : '',
+    at: typeof own.at === 'string' && own.at ? own.at : first.created_at || '',
+  }
 }
 
 /** Is this registered row the END row of a shift closed late with no count? The one test every surface asks. */
