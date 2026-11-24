@@ -7,6 +7,9 @@ type PaintEmbedDocument = { getElementById: (id: string) => { textContent: strin
 export const PAINT_EMBED_ELEMENT_ID = 'business-os-portal-paint'
 export const PAINT_EMBED_MAX_BYTES = 6 * 1024
 export const RETIRED_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
+// The click-to-load map wrote this on a visitor's device; the map no longer asks, so nothing reads it and first paint removes it.
+const RETIRED_PORTAL_MAP_CONSENT_KEY = 'business-os-portal-map-consent-v1'
+export const RETIRED_PORTAL_STORAGE_KEYS: readonly string[] = [RETIRED_PORTAL_CACHE_KEY, RETIRED_PORTAL_MAP_CONSENT_KEY]
 export const PUBLIC_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15_000
 export const PUBLIC_PORTAL_CONFIG_TIMEOUT_MS = 8_000
 
@@ -109,7 +112,8 @@ export function readPaintEmbed(doc: PaintEmbedDocument | undefined = globalThis.
 
 function removeRetiredCacheFrom(storageName: 'localStorage' | 'sessionStorage'): void {
   try {
-    globalThis.window?.[storageName]?.removeItem(RETIRED_PORTAL_CACHE_KEY)
+    const storage = globalThis.window?.[storageName]
+    for (const key of RETIRED_PORTAL_STORAGE_KEYS) storage?.removeItem(key)
   } catch {
     // Blocked site data (Safari private mode) throws on the storage getter itself.
   }

@@ -145,10 +145,15 @@ assert.match(PORTAL_LEGAL_EN[rowByName.get('business-os-portal-list-images-v1')!
 // 3. Every storage key the storefront names in code has a row, and every row names a key that exists.
 const KEY_SHAPE = /^(business-os-portal-[a-z-]+-v1|business-os:portal-[a-z-]+)$/
 const keysInCode = new Map<string, string>()
+const RETIRED_KEYS_REMOVED_AT_FIRST_PAINT = new Set(['business-os-portal-map-consent-v1'])
 for (const file of storefrontModules()) {
   const source = parseSource(file)
   const visit = (node: ts.Node) => {
-    if (ts.isStringLiteral(node) && KEY_SHAPE.test(node.text)) keysInCode.set(node.text, file)
+    // A retired key named only in first paint's removal list is the opposite of storing: nothing writes it, so it gets no row. Exempt by exact key AND file.
+    if (ts.isStringLiteral(node) && KEY_SHAPE.test(node.text)) {
+      const removedOnly = RETIRED_KEYS_REMOVED_AT_FIRST_PAINT.has(node.text) && /publicFirstPaint\.ts$/.test(file)
+      if (!removedOnly) keysInCode.set(node.text, file)
+    }
     ts.forEachChild(node, visit)
   }
   visit(source)

@@ -46,6 +46,7 @@ const publicRoot = () => code(read('../src/PublicCatalogRoot.tsx'))
 const embedFixture = JSON.parse(read('../e2e/fixtures/portal-paint-embed.json')) as { kind: string; v: number; config: Record<string, unknown> }
 const embedText = (value: unknown): string => JSON.stringify(value)
 const RETIRED_CACHE_KEY = 'business-os-catalog-portal-cache'
+const RETIRED_MAP_CONSENT_KEY = 'business-os-portal-map-consent-v1'
 const SHOPPER_LIST_KEY = 'business-os-portal-bucket-v1'
 const OLD_DEFAULT_GRADIENT = ['#0f172a', '#14532d', '#ea580c']
 
@@ -63,7 +64,8 @@ await runTest('no code path reads or writes the retired storefront cache; the pa
   const keyUses = module.split(RETIRED_CACHE_KEY).length - 1
   assert.equal(keyUses, 1, 'the retired key is declared exactly once')
   assert.doesNotMatch(module, /getItem\(RETIRED_PORTAL_CACHE_KEY|setItem\(RETIRED_PORTAL_CACHE_KEY/, 'the retired key is never read or written')
-  assert.match(module, /removeItem\(RETIRED_PORTAL_CACHE_KEY\)/)
+  assert.match(module, /RETIRED_PORTAL_STORAGE_KEYS[^=]*= \[RETIRED_PORTAL_CACHE_KEY[,\]]/, 'the removal list names the retired cache key')
+  assert.match(module, /for \(const key of RETIRED_PORTAL_STORAGE_KEYS\) storage\?\.removeItem\(key\)/, 'every listed key is removed')
 })
 
 await runTest('clearRetiredPortalCache empties both storages, keeps the shopper list, and survives blocked site data', () => {
@@ -96,6 +98,30 @@ await runTest('clearRetiredPortalCache empties both storages, keeps the shopper 
     host.window = localBlocked
     clearRetiredPortalCache()
     assert.equal(onlySession.entries.has(RETIRED_CACHE_KEY), false, 'one blocked storage does not stop the other from being cleared')
+  } finally {
+    if (previousWindow === undefined) Reflect.deleteProperty(host, 'window')
+    else host.window = previousWindow
+  }
+})
+
+await runTest('the retired map-consent entry is removed at first paint, from both storages, and the removal list names it', () => {
+  const { clearRetiredPortalCache, RETIRED_PORTAL_STORAGE_KEYS } = need()
+  assert.deepEqual([...RETIRED_PORTAL_STORAGE_KEYS].sort(), [RETIRED_CACHE_KEY, RETIRED_MAP_CONSENT_KEY].sort(), 'the removal list names both retired keys')
+  assert.match(code(read('../src/components/catalog/PublicCatalogPage.tsx')), /clearRetiredPortalCache()/, 'the first-paint path runs the removal')
+  const makeStore = () => {
+    const entries = new Map<string, string>([[RETIRED_MAP_CONSENT_KEY, 'granted'], [SHOPPER_LIST_KEY, '[{"id":7,"qty":2}]']])
+    return { entries, store: { getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => { entries.set(key, value) }, removeItem: (key: string) => { entries.delete(key) } } }
+  }
+  const local = makeStore()
+  const session = makeStore()
+  const host = globalThis as Record<string, unknown>
+  const previousWindow = host.window
+  try {
+    host.window = { localStorage: local.store, sessionStorage: session.store }
+    clearRetiredPortalCache()
+    assert.equal(local.entries.has(RETIRED_MAP_CONSENT_KEY), false, 'localStorage map-consent entry removed')
+    assert.equal(session.entries.has(RETIRED_MAP_CONSENT_KEY), false, 'sessionStorage map-consent entry removed')
+    assert.equal(local.entries.get(SHOPPER_LIST_KEY), '[{"id":7,"qty":2}]', 'the shopper list is untouched')
   } finally {
     if (previousWindow === undefined) Reflect.deleteProperty(host, 'window')
     else host.window = previousWindow
