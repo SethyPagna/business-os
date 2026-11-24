@@ -95,6 +95,14 @@ runTest('every changed key has Khmer that is Khmer and is not the English', () =
   }
 })
 
+runTest('Khmer check of 24 Nov 2026: the law and the consent language are said exactly', () => {
+  // "Cambodian consumer protection law" by the law's own Khmer name, not "a law protecting Cambodian consumers".
+  assert.ok(PORTAL_LEGAL_KM.portal_legal_terms_liability_b.includes('ក្រោមច្បាប់កម្ពុជាស្ដីពីកិច្ចការពារអ្នកប្រើប្រាស់ទេ។'))
+  assert.doesNotMatch(PORTAL_LEGAL_KM.portal_legal_terms_liability_b, /គាំពារ/)
+  // "in which language" you agreed, not "the language you use".
+  assert.ok(PORTAL_LEGAL_KM.portal_legal_privacy_collect_list.includes('ពេលវេលាដែលអ្នកយល់ព្រម និងភាសាដែលអ្នកប្រើពេលយល់ព្រម។'))
+})
+
 runTest('control: the drift check names a key whose wording changed by one word, and a key that went missing', () => {
   const changed = { ...PORTAL_LEGAL_EN, portal_legal_terms_returns_b: PORTAL_LEGAL_EN.portal_legal_terms_returns_b.replace('7 days', '14 days') }
   assert.deepEqual(drifted(changed), ['portal_legal_terms_returns_b'])
