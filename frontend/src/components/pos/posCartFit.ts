@@ -1,6 +1,13 @@
 export const CART_FIT_DIVIDER_PX = 8
-export const CART_FIT_PRODUCTS_MIN_PX = 280
+export const CART_FIT_PRODUCTS_MIN_MD_PX = 288
+export const CART_FIT_PRODUCTS_MIN_LG_PX = 352
+export const CART_FIT_LG_BREAKPOINT_PX = 1024
 export const CART_FIT_FLOOR_PX = 240
+
+/** The products column's own CSS minimum (POS.tsx: md:min-w-[18rem] lg:min-w-[22rem]) for the current viewport. */
+export function cartProductsMinPx(viewportIsLg: boolean): number {
+  return viewportIsLg ? CART_FIT_PRODUCTS_MIN_LG_PX : CART_FIT_PRODUCTS_MIN_MD_PX
+}
 
 /**
  * The cart width to render beside the products column. The cashier's stored width wins whenever it fits; otherwise the cart gives up
@@ -10,7 +17,7 @@ export const CART_FIT_FLOOR_PX = 240
 export function fitCartWidth(
   rowWidthPx: number,
   storedPx: number,
-  productsMinPx: number = CART_FIT_PRODUCTS_MIN_PX,
+  productsMinPx: number = CART_FIT_PRODUCTS_MIN_MD_PX,
 ): number {
   if (!Number.isFinite(rowWidthPx) || rowWidthPx <= 0) return storedPx
   const room = rowWidthPx - CART_FIT_DIVIDER_PX - productsMinPx
