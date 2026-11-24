@@ -61,6 +61,19 @@ function check(name, fn) {
   return Promise.resolve().then(fn).then(() => { checks += 1 }, (e) => { console.error(`FAIL ${name}\n  ${e.message}`); process.exitCode = 1 })
 }
 
+// A5 ruling (b): while an ic-marks-off* exemption stands, the marks routes have no measured shape, so ic_marks may not be ON by default in a plan profile
+// nor listed in a read-budget pass. Returns the problems found.
+function marksOnWithoutShapes(budgets, sources) {
+  const problems = []
+  const exempt = budgets.exemptions.some((e) => /^ic-marks-off/.test(e.reason))
+  if (!exempt) return problems
+  const sw = (pass) => (pass && pass.switches) || {}
+  for (const [name, pass] of Object.entries(budgets.passes || {})) if (sw(pass).ic_marks) problems.push(`ic_marks is listed in the ${name} pass switches`)
+  // A plan profile or the switch reader giving ic_marks a default of ON: a stored 'ic_marks': 'on' / ic_marks: true / a default list naming it.
+  for (const file of sources) if (/ic_marks['"]?\s*[:=]\s*(?:['"]on['"]|true\b)/.test(file.text)) problems.push(`ic_marks defaults ON in ${file.name}`)
+  return problems.length ? [...problems, 'turning ic_marks on needs the marks shapes (A5a) first'] : problems
+}
+
 async function main() {
   const routes = (await registeredRoutes()).filter((r) => r.method !== 'HEAD')
   const shapes = budgets.shapes
@@ -186,6 +199,24 @@ async function main() {
     assert.deepStrictEqual(run({ ...ok, ...rose, raised: notes.slice(0, 3) }, ok), [`a: rows_written_max rose from 5 to 9 with no "raised" note for it`])
     assert.strictEqual(run({ ...ok, ...rose, raised: notes.map((n) => ({ ...n, from: n.from + 1 })) }, ok).length, 4, 'a note must name the previous value')
     assert.deepStrictEqual(run({ ...ok, ...rose, raised: { ...notes[1] } }, { ...ok, cold_calls_max: 15, rows_max_analyze: 20, rows_written_max: 9 }), [], 'a single note object still works')
+  })
+
+  await check('ic_marks stays out of every pass and every default while its routes are exempt (A5a first); the mutant is caught', () => {
+    const sources = ['planTier.ts', 'readSwitches.ts'].map((name) => ({ name, text: fs.readFileSync(path.join(ROOT, 'cloudflare', 'src', 'lib', name), 'utf8') }))
+    assert.ok(budgets.exemptions.some((e) => /^ic-marks-off/.test(e.reason)), 'the exemptions exist (this guard is only for them)')
+    assert.deepStrictEqual(marksOnWithoutShapes(budgets, sources), [], 'ic_marks is ON by default or in a pass while its routes are exempt: turning ic_marks on needs the marks shapes (A5a) first')
+    const clone = JSON.parse(JSON.stringify(budgets))
+    clone.passes.free.switches.ic_marks = 'on'
+    const found = marksOnWithoutShapes(clone, sources)
+    assert.ok(found.some((p) => /turning ic_marks on needs the marks shapes \(A5a\) first/.test(p)) && found.some((p) => /free pass/.test(p)), 'mutant: ic_marks in passes.free.switches with the exemptions present must be red')
+    const live = JSON.parse(JSON.stringify(budgets))
+    live.passes.live.switches.ic_marks = 'on'
+    assert.ok(marksOnWithoutShapes(live, sources).length > 0, 'mutant: ic_marks in passes.live.switches must be red')
+    const dflt = [{ name: 'planTier.ts', text: "free: { ic_marks: 'on' }" }]
+    assert.ok(marksOnWithoutShapes(budgets, dflt).length > 0, 'mutant: a default of ON in a plan profile must be red')
+    const noExempt = JSON.parse(JSON.stringify(clone))
+    noExempt.exemptions = noExempt.exemptions.filter((e) => !/^ic-marks-off/.test(e.reason))
+    assert.deepStrictEqual(marksOnWithoutShapes(noExempt, sources), [], 'with the marks shapes in place the guard stands down')
   })
 
   if (process.exitCode) console.error(`test-read-budget-coverage-pure: FAILED (${checks} passed)`)
