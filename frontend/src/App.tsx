@@ -1295,7 +1295,7 @@ function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProp
   const canViewDetails = canAccessPage('server')
 
   return (
-    <div className="fixed left-0 right-0 top-16 z-[200] bg-red-600 text-white px-4 py-2.5 flex items-start gap-3 shadow-lg md:top-14">
+    <div className="relative z-[200] flex shrink-0 items-start gap-3 bg-red-600 px-4 py-2.5 text-white shadow-lg">
       <span className="text-lg flex-shrink-0">!</span>
       <div className="flex-1 min-w-0">
         <span className="font-semibold text-sm">{presentation.title}</span>
@@ -2153,6 +2153,14 @@ export default function App() {
           >
             <D1LimitBanner />
             <ReadBudgetBanner />
+            <SyncErrorBanner
+              error={syncError}
+              onDismiss={clearSyncError}
+              onGoToServer={() => {
+                clearSyncError()
+                navigateTo('server')
+              }}
+            />
             <PullToRefreshIndicator pullDistance={pullDistance} refreshing={pullRefreshing} />
             <div className="flex min-w-0 items-center gap-3">
             </div>
@@ -2261,14 +2269,6 @@ export default function App() {
           </div>
         </div>
       ) : null}
-      <SyncErrorBanner
-        error={syncError}
-        onDismiss={clearSyncError}
-        onGoToServer={() => {
-          clearSyncError()
-          navigateTo('server')
-        }}
-      />
     </div>
   )
 }
