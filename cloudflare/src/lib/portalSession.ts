@@ -78,22 +78,57 @@ export async function createPortalSession(
   env: Env,
   accountId: number,
 ): Promise<{ token: string; expiresAt: string }> {
+  return insertPortalSession(env, accountId, null)
+}
+
+// presentedTokenHash: the session the browser presented, if any, revoked in the same batch as the new one (R2-2).
+async function insertPortalSession(
+  env: Env,
+  accountId: number,
+  presentedTokenHash: string | null,
+): Promise<{ token: string; expiresAt: string }> {
   const token = randomToken()
   const tokenHash = await hashToken(token)
   const nowMs = Date.now()
   const nowIso = portalNowIso(nowMs)
   const expiresAt = portalNowIso(nowMs + PORTAL_SESSION_MS)
   // S-S6. Every time is written in the one ISO form (design 1.3), never the column default.
-  await getDb(env).prepare(`
+  const insert = {
+    sql: `
     INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at)
     VALUES (@account_id, @token_hash, @expires_at, @now, @now)
-  `).run({
-    account_id: accountId,
-    token_hash: tokenHash,
-    expires_at: expiresAt,
-    now: nowIso,
-  })
+  `,
+    params: { account_id: accountId, token_hash: tokenHash, expires_at: expiresAt, now: nowIso },
+  }
+  if (presentedTokenHash && presentedTokenHash !== tokenHash) {
+    // S-S4 for the presented session, atomic with the insert: a late response carrying the old cookie can never restore
+    // an earlier shopper, because that session is no longer live.
+    await getDb(env).batch([
+      insert,
+      {
+        sql: `
+    UPDATE portal_sessions SET revoked_at = @now
+    WHERE token_hash = @presented_hash
+      AND substr(token_hash, 1, 4) <> 'tg1:'
+      AND revoked_at IS NULL
+  `,
+        params: { now: nowIso, presented_hash: presentedTokenHash },
+      },
+    ])
+  } else {
+    await getDb(env).prepare(insert.sql).run(insert.params)
+  }
   return { token, expiresAt }
+}
+
+// Every portal sign-in path (password sign-in, sign-up and the Telegram claim) mints its session here: the session the
+// browser presented, if any, is revoked in the same batch (R2-2).
+export async function createPortalSessionReplacingPresented<E extends { Bindings: Env } = { Bindings: Env }>(
+  c: Context<E>,
+  accountId: number,
+): Promise<{ token: string; expiresAt: string }> {
+  const presented = getCookie(c, PORTAL_COOKIE_NAME)
+  return insertPortalSession(c.env, accountId, presented ? await hashToken(presented) : null)
 }
 
 export function setPortalCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, token: string, expiresAt: string): void {

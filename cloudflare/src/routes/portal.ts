@@ -27,7 +27,7 @@ import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/pr
 import { loadActivePromotionRules, productPromotedSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount, renewPortalConsent, loadPortalMemberView } from '../lib/portalAccounts'
-import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState, portalActorLabel } from '../lib/portalSession'
+import { createPortalSessionReplacingPresented, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState, portalActorLabel } from '../lib/portalSession'
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
@@ -2472,7 +2472,7 @@ app.post('/auth/signup', async (c) => {
     return c.json({ error: result.error, code: result.code }, result.status as 400 | 409 | 503)
   }
   await clearPortalLockout(c.env, 'signup', ipKey)
-  const session = await createPortalSession(c.env, result.accountId)
+  const session = await createPortalSessionReplacingPresented(c, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
   return c.json({ ok: true, account: { membershipId: result.membershipId, name: result.name, email: null } })
 })
@@ -2522,7 +2522,7 @@ app.post('/auth/signin', async (c) => {
     return c.json({ error: result.error, code: result.code }, result.status as 401 | 428 | 503)
   }
   await clearPortalLockout(c.env, 'signin', lockKey)
-  const session = await createPortalSession(c.env, result.accountId)
+  const session = await createPortalSessionReplacingPresented(c, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
   const profile = await loadAccountProfile(c.env, result.accountId)
   return c.json({ ok: true, account: profile })
