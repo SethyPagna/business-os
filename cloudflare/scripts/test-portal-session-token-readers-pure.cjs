@@ -10,6 +10,7 @@
 //   T-F2  every SQL text in cloudflare/src that names portal_sessions and token_hash carries the predicate, or is one
 //         of the allowed statements by exported name (S-C1, S-C2, S-K2, S-C3, S-C4, S-J2, S-J3, S-D2), which the
 //         pieces that own them export under those names (S_C1 ... S_D2; PORTAL_ prefix and _SQL suffix tolerated).
+//         S3d names S-J2 and S-J3 MEMBER_INSERT_SQL and TICKET_INSERT_SQL; those two names count in its file only.
 //         mutants: a reader without the predicate; a statement outside the list that names token_hash.
 //
 // Run (from cloudflare/): node scripts/test-portal-session-token-readers-pure.cjs
@@ -239,6 +240,11 @@ const dropPredicate = (followedBy) => new RegExp(`\\n\\s+AND substr\\((?:s\\.)?t
 // ---- T-F2 -------------------------------------------------------------------------------
 const PREDICATE = /substr\(\s*(?:\w+\.)?token_hash\s*,\s*1\s*,\s*4\s*\)\s*<>\s*'tg1:'/
 const ALLOWED_NAME = /^(?:PORTAL_)?S_(?:C1|C2|K2|C3|C4|J2|J3|D2)(?:_SQL)?$/
+// S3d (lib/portalTelegramJoin.ts) names S-J2 and S-J3 by what they do, the design id in the comment above each. Those two
+// exact names are accepted in that one file only, so a statement in any other file cannot borrow them.
+const ALLOWED_IN_FILE = [{ file: 'lib/portalTelegramJoin.ts', names: ['MEMBER_INSERT_SQL', 'TICKET_INSERT_SQL'] }]
+const srcPath = (file) => path.relative(SRC, file).split(path.sep).join('/')
+const allowedName = (file, name) => ALLOWED_NAME.test(name) || ALLOWED_IN_FILE.some((a) => a.file === srcPath(file) && a.names.includes(name))
 const SQLISH = /\b(SELECT|UPDATE|INSERT|DELETE)\b/i
 
 function listSourceFiles(dir, out = []) {
@@ -276,7 +282,7 @@ function violations(files) {
       // A plain INSERT ... VALUES (S-S6, createPortalSession) binds a new row's value; it neither reads nor compares
       // a stored token_hash, so it cannot authenticate anything. An INSERT ... SELECT (the ticket inserts) does read.
       if (/^\W*INSERT\b/i.test(stmt.text) && !/\bSELECT\b/i.test(stmt.text)) continue
-      if (stmt.names.some((n) => ALLOWED_NAME.test(n))) continue
+      if (stmt.names.some((n) => allowedName(stmt.file, n))) continue
       out.push(`${path.relative(SRC, stmt.file)}: ${stmt.text.replace(/\s+/g, ' ').slice(0, 110)}`)
     }
   }
@@ -341,6 +347,13 @@ async function main() {
     assert.equal(violations([fixture("UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h AND substr(token_hash, 1, 4) <> 'tg1:'")]).length, 0)
     for (const name of ['S_C1', 'S_C2', 'S_K2', 'S_C3', 'S_C4', 'S_J2', 'S_J3', 'S_D2']) {
       assert.equal(violations([{ file: path.join(SRC, 'fixture.ts'), text: `export const ${name} = \`UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h\`` }]).length, 0, name)
+    }
+    // S3d's two names count in lib/portalTelegramJoin.ts only; the same statement under them anywhere else is reported
+    for (const name of ['MEMBER_INSERT_SQL', 'TICKET_INSERT_SQL']) {
+      const text = `const ${name} = \`UPDATE portal_sessions SET revoked_at = @n WHERE token_hash = @h\``
+      assert.equal(violations([{ file: path.join(SRC, 'lib', 'portalTelegramJoin.ts'), text }]).length, 0, name)
+      assert.equal(violations([{ file: path.join(SRC, 'lib', 'portalTelegramSignIn.ts'), text }]).length, 1, `${name} outside S3d's file`)
+      assert.equal(violations([{ file: path.join(SRC, 'routes', 'portalTelegramJoin.ts'), text }]).length, 1, `${name} in a routes file of the same name`)
     }
     // a plain INSERT ... VALUES reads nothing; an INSERT ... SELECT does and must be listed by name
     assert.equal(violations([fixture('INSERT INTO portal_sessions (account_id, token_hash) VALUES (@a, @h)')]).length, 0)
