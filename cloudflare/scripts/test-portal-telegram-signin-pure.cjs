@@ -416,15 +416,20 @@ check('A2 the stamp goes in the batch that inserts the ticket of that same membe
 })
 
 check('A4 a 0-row ticket insert after a clean read answers R-LATER (the batch is one transaction)', async () => {
-  const db = makeDb()
   const text = await freshToken()
   const { right } = await choiceFor(text)
+  // R2-7 (review F9): the second assertion looks at the stub the confirm actually talks to (the old one read a database the
+  // confirm never saw). One batch, the three statements in order, nothing else sent, and the scripted insert wrote 0 rows.
   const stub = {
+    batches: [],
     prepare: () => { throw new Error('no single reads on confirm') },
-    batch: async () => [{ results: [{ account_id: 1, status: 'active', ticket_exists: 0, recent_sessions: 0 }], meta: { changes: 0 } }, { results: [], meta: { changes: 0 } }, { results: [], meta: { changes: 0 } }],
+    batch: async (statements) => {
+      stub.batches.push(statements.map((s) => s.sql))
+      return [{ results: [{ account_id: 1, status: 'active', ticket_exists: 0, recent_sessions: 0 }], meta: { changes: 0 } }, { results: [], meta: { changes: 0 } }, { results: [], meta: { changes: 0 } }]
+    },
   }
   assert.equal((await tap(stub, text, right)).id, 'R-LATER')
-  assert.equal(db.changes, 0)
+  assert.deepEqual(stub.batches, [[signIn.S_K2, signIn.S_C3, signIn.S_C4]])
 })
 
 // ---------------------------------------------------------------- T-C8

@@ -166,8 +166,9 @@ const asUtc = (value) => {
 // ---- T-F7 helpers: the real sweep (lib/ephemeralRetention.ts) on its own database -------------------------
 // A recursive loader of the real files under src/, with the database module replaced, so the sweep runs unchanged.
 const SRC_ROOT = path.join(__dirname, '..', 'src')
-function loadSweep(sweepDb, sweepSourceText, target = 'lib/ephemeralRetention.ts') {
+function loadSweep(sweepDb, sweepSourceText, target = 'lib/ephemeralRetention.ts', overrides = {}) {
   const cache = new Map()
+  const overrideKeys = new Map(Object.entries(overrides).map(([rel, exports]) => [path.normalize(path.join(SRC_ROOT, rel)), exports]))
   const dbKey = path.normalize(path.join(SRC_ROOT, 'lib/db.ts'))
   const sweepKey = path.normalize(path.join(SRC_ROOT, 'lib/ephemeralRetention.ts'))
   const targetKey = path.normalize(path.join(SRC_ROOT, target))
@@ -178,6 +179,7 @@ function loadSweep(sweepDb, sweepSourceText, target = 'lib/ephemeralRetention.ts
   function load(file) {
     const key = path.normalize(file)
     if (key === dbKey) return { getDb: () => sweepDb }
+    if (overrideKeys.has(key)) return overrideKeys.get(key)
     if (cache.has(key)) return cache.get(key)
     const text = key === sweepKey && sweepSourceText ? sweepSourceText : fs.readFileSync(key, 'utf8')
     const { outputText } = ts.transpileModule(text, {
@@ -445,6 +447,32 @@ async function run() {
     const out = await capSurvivesSweepScenario()
     assert.equal(out.later, 'R-CAP')
     assert.equal(out.rows, out.capMax, 'the expired tickets are still there: they leave only when created more than one cap window ago')
+  })
+
+  await check('R2-7 a failure computing the portal_sessions cap window fails that one step only: the rest of the auth slice still sweeps', async () => {
+    const raw = openDb(allMigrationSql())
+    const realPlan = loadReal('lib/planTier.ts')
+    const brokenPlan = {
+      ...realPlan,
+      getPlanLimits: (env) => {
+        const limits = { ...realPlan.getPlanLimits(env) }
+        Object.defineProperty(limits, 'portalTelegramSessionsPerMemberWindowSeconds', { get() { throw new Error('plan limit unreadable') } })
+        return limits
+      },
+    }
+    const retention = loadSweep(wrap(raw), undefined, 'lib/ephemeralRetention.ts', { 'lib/planTier.ts': brokenPlan })
+    const now = Date.now()
+    const ticket = 'tg1:' + '7'.repeat(64)
+    raw.prepare('INSERT INTO portal_telegram_pending (id, ticket_hash, flags, attempts, window_started_at, created_at, expires_at) VALUES (21, @t, 0, 1, @w, @w, @e)')
+      .run({ t: ticket, w: iso(now - 3 * 86400000), e: iso(now - 2 * 86400000) })
+    const seen = []
+    const realError = console.error
+    console.error = (...args) => { seen.push(args.join(' ')) }
+    let result
+    try { result = await retention.maybeRunScheduledEphemeralRetention({}, 'auth') } finally { console.error = realError }
+    assert.equal(result.skipped, false)
+    assert.equal(Number(raw.prepare('SELECT COUNT(*) AS n FROM portal_telegram_pending').get({}).n), 0, 'the expired pending row after the failed step is still swept')
+    assert.ok(seen.some((line) => /portal_sessions failed/.test(line)), 'the failed step is logged under its own name')
   })
 
   await check('R2-3 B2 revoked tickets count too: ten confirms, every ticket revoked, the sweep, then a confirm inside the window is R-CAP', async () => {

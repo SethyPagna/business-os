@@ -354,8 +354,8 @@ export async function maybeRunScheduledEphemeralRetention(env: Env, group?: Ephe
     // The per-member sign-in cap counts these rows by created_at, so a row is kept until it has also left the cap window:
     // sweeping an expired or revoked ticket earlier would let a member start over inside the window. Costs at most a
     // day of extra retention and no writes.
-    const sessionCapWindow = secondsAgoModifier(getPlanLimits(env).portalTelegramSessionsPerMemberWindowSeconds)
-    await step('portal_sessions', (b) => batchDeleteById(env, db, 'portal_sessions', '(revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND datetime(expires_at) < datetime(@now))) AND (created_at IS NULL OR datetime(created_at) <= datetime(@now, @cap_window))', { now: portalNowIso(), cap_window: sessionCapWindow }, b), shared)
+    // The cap window is computed inside the step, so a failure reading it fails this one step and not the rest of the slice.
+    await step('portal_sessions', (b) => batchDeleteById(env, db, 'portal_sessions', '(revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND datetime(expires_at) < datetime(@now))) AND (created_at IS NULL OR datetime(created_at) <= datetime(@now, @cap_window))', { now: portalNowIso(), cap_window: secondsAgoModifier(getPlanLimits(env).portalTelegramSessionsPerMemberWindowSeconds) }, b), shared)
     // S-R2. Open or stale Telegram join starts; a rowid table holding only those, so the scan is small.
     await step('portal_telegram_pending', (b) => batchDeleteById(env, db, 'portal_telegram_pending', 'datetime(expires_at) < datetime(@now)', { now: portalNowIso() }, b), shared)
     const verificationNow = Date.now()
