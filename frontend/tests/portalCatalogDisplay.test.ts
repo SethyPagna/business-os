@@ -155,7 +155,7 @@ runTest('public portal mobile contact actions stay compact', () => {
   assert.match(catalogSecondaryTabsSource, /data-portal-about-hero="true"/, 'public about hero should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /flex items-start gap-3 pt-4 sm:gap-4/, 'the name sits below the photo or banner (never over it); only the round logo overlaps the gradient banner')
-  assert.match(catalogSecondaryTabsSource, /const hasFacts = Boolean\(addressText\) \|\| Boolean\(aboutEmail\) \|\| detailRows\.length > 0/, 'address, e-mail, chat and account rows share one compact tray')
+  assert.match(catalogSecondaryTabsSource, /const hasFacts = Boolean\(addressText\) \|\| Boolean\(aboutEmailHref\(aboutEmail\)\) \|\| detailRows\.length > 0/, 'address, e-mail, chat and account rows share one compact tray')
   assert.doesNotMatch(catalogSecondaryTabsSource, /PortalSocialText|PORTAL_SOCIAL_ICONS/, 'About shows no social chips; the one Contact button opens the contact menu')
   assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
   assert.doesNotMatch(catalogPageSource, /<SectionShell title=\{copy\('loadingPortal', 'Loading customer portal\.\.\.'\)\}>\s*<div className="text-sm text-slate-500">Loading\.\.\.<\/div>\s*<\/SectionShell>\s*}\)/, 'public secondary tab fallback should not show the large generic loading card')
