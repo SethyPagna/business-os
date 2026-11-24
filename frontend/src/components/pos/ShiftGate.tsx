@@ -544,8 +544,10 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
   )
 }
 
-export default function ShiftGate({ children, branchId = null, branchName = null, onSwitchBranch }: {
+export default function ShiftGate({ children, branchId = null, branchName = null, onSwitchBranch, active = true }: {
   children?: React.ReactNode; branchId?: number | null; branchName?: string | null
+  /** False while POS is mounted but not the page on screen: its portal modals must not cover other pages. */
+  active?: boolean
   /** N7: move the till to another branch (the retired branch's successor). */
   onSwitchBranch?: (branchId: number) => void
 }) {
@@ -638,6 +640,8 @@ export default function ShiftGate({ children, branchId = null, branchName = null
   return (
     <>
       {children}
+      {active ? (
+      <>
       {retired && (
         <Modal
           title={t('shift_branch_closed_title')}
@@ -747,6 +751,8 @@ export default function ShiftGate({ children, branchId = null, branchName = null
           )}
         </Modal>
       )}
+      </>
+      ) : null}
     </>
   )
 }

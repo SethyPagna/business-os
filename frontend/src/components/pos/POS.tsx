@@ -4582,7 +4582,7 @@ export default function POS() {
       {/* Opening-cash prompt (S4R4-5). Mounted last so it overlays the till,
           and non-dismissible: the owner's rule is that the first use of POS
           each day keeps prompting until the drawer float is registered. */}
-      <ShiftGate branchId={primaryBranchFilterId} branchName={primaryBranchName}
+      <ShiftGate branchId={primaryBranchFilterId} branchName={primaryBranchName} active={isActive}
         // N7: the retired-branch notice's "Switch to <successor>" -- the same
         // persisted till branch the filter writes, set exactly (not toggled).
         onSwitchBranch={(id) => { const next = String(id); writePosStorage('session', 'pos_branch', next); setBranchFilter(next); window.dispatchEvent(new Event(SHIFT_BRANCH_CHANGED_EVENT)) }} />
