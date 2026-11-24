@@ -328,9 +328,14 @@ function AboutAddressRow({ item }: { item: BusinessFact }) {
   )
 }
 
+// The one check for the e-mail row: the row is drawn, and the details card is counted, only when this gives a link.
+function aboutEmailHref(email: string): string {
+  return contactHref('mailto', email)
+}
+
 function AboutEmailRow({ email, copy }: { email: string; copy: CopyFn }) {
   const label = copy('email', 'Email')
-  const href = contactHref('mailto', email)
+  const href = aboutEmailHref(email)
   if (!href) return null
   return (
     <a href={href} className={PORTAL_CONTACT_ROW_INLINE} data-portal-about-email="" aria-label={`${label}: ${email}`}>
@@ -391,7 +396,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const detailRows = [...contactEntries, ...portalAccountsNotShown(accountEntries, contactEntries)]
   const addressText = String(addressFact?.value || '').trim()
   const aboutEmail = String(emailText || '').trim()
-  const hasFacts = Boolean(addressText) || Boolean(aboutEmail) || detailRows.length > 0
+  const hasFacts = Boolean(addressText) || Boolean(aboutEmailHref(aboutEmail)) || detailRows.length > 0
   const hasMap = Boolean(mapEmbedUrl)
   const mapOpenHref = portalMapOpenHref(addressFact?.href, addressText)
   const storyInColumns = storyText.length > ABOUT_STORY_TWO_COLUMN_FROM

@@ -96,6 +96,13 @@ for (const language of ['en', 'km'] as const) {
     assert.match(card, /<a href="mailto:hello@leang\.example"[^>]*data-portal-about-email=""/)
     assert.match(card, /<span translate="no" class="notranslate[^"]*">hello@leang\.example<\/span>/, 'the address is never translated')
     assert.equal(aboutHtml(language).includes('data-portal-about-email'), false, 'control: no e-mail, no row')
+    // a malformed e-mail has no row, so on its own it must not draw an empty card
+    const bare = { contactEntries: [], accountEntries: [], addressFact: null, mapEmbedUrl: '' }
+    const malformed = aboutHtml(language, { ...bare, emailText: 'not-an-email' })
+    assert.equal(malformed.includes('data-portal-contact-tray'), false, 'no empty details card')
+    assert.equal(malformed.includes('data-portal-about-details'), false, 'no empty details wrapper')
+    assert.equal(malformed.includes('data-portal-about-email'), false)
+    assert.ok(aboutHtml(language, { ...bare, emailText: 'hello@leang.example' }).includes('data-portal-contact-tray'), 'control: a good e-mail still draws the card')
     // the e-mail alone is enough to draw the card
     assert.ok(aboutHtml(language, { contactEntries: [], accountEntries: [], addressFact: null, mapEmbedUrl: '', emailText: 'hello@leang.example' }).includes('data-portal-about-email'))
   })
