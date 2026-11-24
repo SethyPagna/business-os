@@ -163,6 +163,68 @@ const asUtc = (value) => {
   return Date.parse(normalized)
 }
 
+// ---- T-F7 helpers: the real sweep (lib/ephemeralRetention.ts) on its own database -------------------------
+// A recursive loader of the real files under src/, with the database module replaced, so the sweep runs unchanged.
+const SRC_ROOT = path.join(__dirname, '..', 'src')
+function loadSweep(sweepDb, sweepSourceText) {
+  const cache = new Map()
+  const dbKey = path.normalize(path.join(SRC_ROOT, 'lib/db.ts'))
+  const sweepKey = path.normalize(path.join(SRC_ROOT, 'lib/ephemeralRetention.ts'))
+  const resolveTs = (base) => {
+    for (const c of [base, `${base}.ts`, path.join(base, 'index.ts')]) if (fs.existsSync(c) && fs.statSync(c).isFile()) return c
+    return base
+  }
+  function load(file) {
+    const key = path.normalize(file)
+    if (key === dbKey) return { getDb: () => sweepDb }
+    if (cache.has(key)) return cache.get(key)
+    const text = key === sweepKey && sweepSourceText ? sweepSourceText : fs.readFileSync(key, 'utf8')
+    const { outputText } = ts.transpileModule(text, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true }, fileName: key,
+    })
+    const mod = { exports: {} }
+    cache.set(key, mod.exports)
+    const req = Module.createRequire(key)
+    new Function('exports', 'require', 'module', outputText)(mod.exports,
+      (r) => (r.startsWith('.') ? load(resolveTs(path.resolve(path.dirname(key), r))) : req(r)), mod)
+    cache.set(key, mod.exports)
+    return mod.exports
+  }
+  return load(sweepKey)
+}
+const dflt = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
+const iso = (ms) => new Date(ms).toISOString()
+
+async function sweepScenario(sweepSourceText) {
+  const raw = openDb(allMigrationSql())
+  const sweepDb = wrap(raw)
+  const retention = loadSweep(sweepDb, sweepSourceText)
+  const accountId = Number(raw.prepare(
+    `INSERT INTO portal_accounts (membership_id, name, phone, password_hash, consent_version, consent_at, consent_locale, age_confirmed_at)
+     VALUES ('LC-95001', 'Sweep Test', '070999501', 'x', 'portal-legal-2026-10-20', CURRENT_TIMESTAMP, 'en', CURRENT_TIMESTAMP)`,
+  ).run({}).meta?.last_row_id ?? 0)
+  const now = Date.now()
+  // earlier the same UTC day: five seconds ago (a run within five seconds of midnight is the one flake, by design)
+  const gone = now - 5000
+  const ticket = (n) => `tg1:${String(n).repeat(64).slice(0, 64)}`
+  const ins = (hash, expires, revoked = null) => raw.prepare(
+    'INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at, revoked_at) VALUES (@a, @h, @e, @c, @c, @r)',
+  ).run({ a: accountId, h: hash, e: expires, c: iso(now - 86400000), r: revoked })
+  ins(ticket(1), iso(gone)); ins(ticket(2), dflt(gone))              // expired tickets, ISO and DEFAULT
+  ins('s-iso-expired', iso(gone)); ins('s-default-expired', dflt(gone)) // expired sessions, ISO and DEFAULT
+  ins('s-iso-fresh', iso(now + 3600000)); ins('s-default-fresh', dflt(now + 3600000))
+  ins(ticket(3), iso(now + 600000))                                   // an open ticket
+  ins('s-revoked', iso(now + 3600000), iso(now))                      // revoked rows go whatever their expiry
+  const pend = (id, expires) => raw.prepare(
+    'INSERT INTO portal_telegram_pending (id, ticket_hash, flags, attempts, window_started_at, created_at, expires_at) VALUES (@id, @t, 0, 1, @w, @w, @e)',
+  ).run({ id, t: ticket(id), w: iso(now - 600000), e: expires })
+  pend(11, iso(gone)); pend(12, iso(now + 600000)); pend(13, iso(now - 3 * 86400000))
+  const result = await retention.maybeRunScheduledEphemeralRetention({}, 'auth')
+  assert.equal(result.skipped, false)
+  const left = (table, column) => raw.prepare(`SELECT ${column} AS v FROM ${table} ORDER BY id`).all([]).map((r) => r.v)
+  return { sessions: left('portal_sessions', 'token_hash'), pending: left('portal_telegram_pending', 'id'), ticket }
+}
+
 let passed = 0
 async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${name}`) }
 
@@ -234,8 +296,8 @@ async function run() {
     // The sweep's predicate, verbatim from lib/ephemeralRetention.ts.
     rawDb.prepare("UPDATE portal_sessions SET expires_at = datetime('now', '-1 day') WHERE token_hash = ?").run([tokenHash])
     const collectable = rawDb.prepare(
-      "SELECT COUNT(*) AS n FROM portal_sessions WHERE revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)",
-    ).get({}).n
+      "SELECT COUNT(*) AS n FROM portal_sessions WHERE revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND datetime(expires_at) < datetime(@now))",
+    ).get({ now: new Date().toISOString() }).n
     assert.ok(collectable >= 1, 'an expired session must be visible to the sweep that deletes it')
   })
 
@@ -312,10 +374,32 @@ async function run() {
     assert.equal(sessionRow(tokenHash).expires_at, before, 'a brand-new session has nothing to slide')
   })
 
+  await check('T-F7 the sweep deletes an expired ticket and an expired session, in DEFAULT and ISO format, from earlier the same day, and an expired pending row; a fresh one stays', async () => {
+    const out = await sweepScenario()
+    assert.deepEqual(out.sessions.sort(), ['s-default-fresh', 's-iso-fresh', out.ticket(3)].sort(), 'only the unexpired, unrevoked rows are left')
+    assert.deepEqual(out.pending, [12], 'the expired pending rows (this hour and 3 days old) go, the open one stays')
+  })
+
+  await check('T-F7 mutant: the raw expires_at < CURRENT_TIMESTAMP predicate leaves the same-day ISO rows', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ephemeralRetention.ts'), 'utf8')
+    const mutated = source.replace(/datetime\(expires_at\) < datetime\(@now\)\)', \{ now: portalNowIso\(\) \}/, "expires_at < CURRENT_TIMESTAMP)', { now: portalNowIso() }")
+    assert.notEqual(mutated, source, 'mutant applied')
+    const out = await sweepScenario(mutated)
+    assert.ok(out.sessions.includes('s-iso-expired') && out.sessions.includes(out.ticket(1)), 'the raw comparison keeps an ISO row of the same day, so the real test above would be red')
+  })
+
+  await check('T-F7 mutant: no pending-row step leaves the expired pending rows', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ephemeralRetention.ts'), 'utf8')
+    const mutated = source.replace("'portal_telegram_pending', 'datetime(expires_at) < datetime(@now)'", "'portal_telegram_pending', '0'")
+    assert.notEqual(mutated, source, 'mutant applied')
+    const out = await sweepScenario(mutated)
+    assert.deepEqual(out.pending, [11, 12, 13], 'without S-R2 nothing is swept')
+  })
+
   await check('the sweep predicate and the session TTL are read from the shipped sources', () => {
     const retention = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'ephemeralRetention.ts'), 'utf8')
     assert.match(retention, /portal_sessions/, 'portal sessions must still be swept')
-    assert.match(retention, /expires_at < CURRENT_TIMESTAMP/, 'the sweep predicate this test relies on must still exist')
+    assert.match(retention, /datetime\(expires_at\) < datetime\(@now\)/, 'the datetime() sweep predicate this test relies on must still exist')
     const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalSession.ts'), 'utf8')
     assert.match(source, /const PORTAL_SESSION_MS = MAX_COOKIE_AGE_MS/, 'the row TTL and the cookie ceiling must stay the same number')
     assert.doesNotMatch(source, /10 \* 365 \* 24/, 'the ten-year TTL must not come back')
