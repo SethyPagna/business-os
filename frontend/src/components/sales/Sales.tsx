@@ -949,7 +949,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     const isCurrentRequest = () => aliveRef.current && requestSecurity === statusSecurityRef.current
       && requestScope === salesStatsScopeRef.current && isTrackedRequestCurrent(salesStatsRequestRef, requestId)
     try {
-      const result = await fetchSalesStats(salesStatsParams, { signal: controller.signal })
+      const result = await fetchSalesStats(salesStatsParams, { signal: controller.signal, timeoutMs: SALES_LIST_REQUEST_TIMEOUT_MS })
       if (!isCurrentRequest()) return
       assertActorReadScope(readScope, false) // same actor is enough: a revision bump mid-read only means the cache was cleared, not that the answer is another account's
       const value = requireSalesStatsResult(result)

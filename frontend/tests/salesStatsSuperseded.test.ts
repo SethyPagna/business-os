@@ -6,7 +6,7 @@ import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent 
 import { requireSalesStatsResult } from '../src/api/salesStatsContract.ts'
 import * as scopes from '../src/api/actorReadScope.ts'
 import * as http from '../src/api/http.ts'
-import { getSalesStats } from '../src/api/salesTransport.ts'
+import { getSalesStats, SALES_LIST_REQUEST_TIMEOUT_MS } from '../src/api/salesTransport.ts'
 import { buildQueryString } from '../src/api/query.ts'
 import { clampPageNumber } from '../src/utils/pagerState.ts'
 import { isProductSearchTooShort } from '../src/api/productSearchIndex.ts'
@@ -221,6 +221,19 @@ try {
     const h = harness(getSalesStats); realTransport(); const calls = stubFetch(() => json({ error: 'nope' }, status))
     await bounded(h.view.loadSalesStats(), `totals ${status}`); await h.flush()
     assert.ok(calls.length >= 1); assert.equal(h.view.salesStatsRead.status, 'error'); assert.ok(h.view.salesStatsError); unknown(h.view)
+  })
+  await test('defect 3: the totals read gets the list budget and a real timeout still shows the box without a reread', async () => {
+    let budget: unknown, n = 0
+    const h = harness((params, options) => { budget = options.timeoutMs; n++; return getSalesStats(params, { ...options, timeoutMs: 30 }) })
+    realTransport(); const calls = stubFetch()
+    await bounded(h.view.loadSalesStats(), 'timeout'); await h.flush()
+    assert.equal(budget, 8000, 'the harness injects SALES_LIST_REQUEST_TIMEOUT_MS = 8000; totals must pass exactly that value')
+    assert.equal(n, 1, 'a request_timeout is not an AbortError: no page-level reread'); assert.ok(calls.length >= 1)
+    assert.equal(h.view.salesStatsRead.status, 'error'); assert.ok(h.view.salesStatsError)
+  })
+  await test('defect 3: the real list budget the totals must share is 20 s, longer than the 12 s default', () => {
+    assert.equal(SALES_LIST_REQUEST_TIMEOUT_MS, 20_000)
+    assert.ok(SALES_LIST_REQUEST_TIMEOUT_MS > 12_000)
   })
   await test('a different actor\'s answer is never shown', async () => {
     const h = harness(getSalesStats); realTransport(); const calls = stubFetch()
