@@ -111,9 +111,14 @@ function rawHits(sql) {
     const scope = scopeTables(sql, index)
     return [...scope].some((t) => TABLES.includes(t))
   }
-  // A "=" in a SET list is an assignment, not a comparison: the nearest clause keyword before it is SET.
+  // A "=" in a SET list is an assignment, not a comparison: the nearest clause keyword before it is SET. A CASE ... END
+  // that closes before it is one value, so its WHEN / THEN / ELSE do not count (S3d's S-P1 assigns
+  // "attempts = CASE ... END, window_started_at = CASE ..."); a CASE still open keeps its WHEN as the nearest keyword.
+  const closedCase = /\bCASE\b(?:(?!\bCASE\b|\bEND\b)[\s\S])*\bEND\b/gi
   const assignment = (index) => {
-    const kw = [...sql.slice(0, index).matchAll(/\b(SET|WHERE|AND|OR|ON|HAVING|WHEN|VALUES|SELECT|THEN|ELSE)\b/gi)].pop()
+    let before = sql.slice(0, index)
+    for (let prev = null; prev !== before;) { prev = before; before = before.replace(closedCase, ' ') }
+    const kw = [...before.matchAll(/\b(SET|WHERE|AND|OR|ON|HAVING|WHEN|VALUES|SELECT|THEN|ELSE)\b/gi)].pop()
     return Boolean(kw) && kw[1].toUpperCase() === 'SET'
   }
   const OPS = '<=|>=|<>|!=|<|>|='
@@ -195,6 +200,10 @@ check('positive control: the scanner reports one of every forbidden pattern', ()
     "SELECT id FROM portal_accounts ORDER BY status, last_seen_at DESC",
     "SELECT MAX(last_seen_at) FROM portal_accounts",
     "SELECT MIN(a.created_at) FROM portal_accounts a",
+    // a closed CASE in a SET list must not hide a raw "=" inside an open CASE after it, or in the WHERE after it
+    "UPDATE portal_telegram_pending SET attempts = CASE WHEN window_started_at = @x THEN 1 END WHERE id = @id",
+    "UPDATE portal_telegram_pending SET attempts = CASE WHEN 1 THEN 1 END, flags = CASE WHEN window_started_at = @x THEN 1 END WHERE id = @id",
+    "UPDATE portal_telegram_pending SET attempts = CASE WHEN 1 THEN 1 END WHERE window_started_at = @x",
   ]
   for (const sql of forbidden) assert.ok(hitsOf(sql).length >= 1, `not reported: ${sql}`)
 })
@@ -208,6 +217,9 @@ check('positive control: look-alikes report nothing', () => {
     "UPDATE portal_sessions SET last_seen_at = @now, expires_at = @e WHERE id = @id",
     "UPDATE portal_accounts SET updated_at = @now, last_seen_at = @now WHERE id = @id",
     "INSERT INTO portal_telegram_pending (id, window_started_at, created_at, expires_at) VALUES (@id, @now, @now, @e) ON CONFLICT(id) DO UPDATE SET window_started_at = excluded.window_started_at, expires_at = excluded.expires_at",
+    // S3d's S-P1 shape: a time column assigned after a closed CASE in the SET list
+    "INSERT INTO portal_telegram_pending (id, attempts, window_started_at) VALUES (@id, 1, @now) ON CONFLICT(id) DO UPDATE SET attempts = CASE WHEN datetime(portal_telegram_pending.window_started_at) <= datetime(@now, @w) THEN 1 ELSE portal_telegram_pending.attempts + 1 END, window_started_at = CASE WHEN datetime(portal_telegram_pending.window_started_at) <= datetime(@now, @w) THEN @now ELSE portal_telegram_pending.window_started_at END WHERE datetime(portal_telegram_pending.window_started_at) <= datetime(@now, @w)",
+    "UPDATE portal_telegram_pending SET attempts = CASE WHEN 1 THEN CASE WHEN 2 THEN 1 END ELSE 0 END, window_started_at = @now WHERE id = @id",
     "SELECT 1 FROM portal_sessions WHERE revoked_at IS NULL AND expires_at IS NOT NULL",
     "SELECT id FROM portal_sessions ORDER BY id DESC LIMIT 5",
     "SELECT id FROM portal_accounts ORDER BY datetime(last_seen_at) DESC",
@@ -235,6 +247,17 @@ check('mutant: the retention sweep with the raw predicate it had before S-R1 is 
   assert.notEqual(mutated, retention, 'mutant applied: the sweep holds the datetime() form')
   const files = realFiles().map((f) => (/ephemeralRetention\.ts$/.test(f.file) ? { ...f, text: mutated } : f))
   assert.ok(scanFiles(files).length >= 1, 'the raw sweep predicate goes red')
+})
+
+check('mutant: a raw "=" inside the window CASE of S3d\'s S-P1, after its closed attempts CASE, is reported', () => {
+  const join = fs.readFileSync(path.join(SRC, 'lib', 'portalTelegramJoin.ts'), 'utf8')
+  const mutated = join.replace(
+    'WHEN datetime(portal_telegram_pending.window_started_at) <= datetime(@now, @attempt_window) THEN @now',
+    'WHEN portal_telegram_pending.window_started_at = @now THEN @now',
+  )
+  assert.notEqual(mutated, join, 'mutant applied: S-P1 holds the datetime() form')
+  const files = realFiles().map((f) => (/lib[\\/]portalTelegramJoin\.ts$/.test(f.file) ? { ...f, text: mutated } : f))
+  assert.ok(scanFiles(files).some((h) => /portalTelegramJoin\.ts: raw comparison of window_started_at/.test(h)), 'the raw window comparison goes red')
 })
 
 console.log(`\n${passed} passed${failures.length ? `, ${failures.length} FAILED: ${failures.join(' | ')}` : ''}`)
