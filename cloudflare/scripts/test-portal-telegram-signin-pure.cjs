@@ -216,11 +216,15 @@ check('A1/N2 the R-CONFIRM template is filled in one pass: a name holding {hm}, 
 check('A5 the reply text cleans names like the join: hidden characters out, a cut of 60 code points, an emoji at the cut', async () => {
   const text = (memberName, shopName) => texts.portalTelegramReplyText('R-CONFIRM', 'en', { startedHm: '14:05', shopName, memberName })
   assert.match(text('ab\u202Ecd'), /^Sign in to the website as abcd\? /, 'a bidi override is removed')
-  for (const hidden of ['\u200B', '\u200D', '\u200F', '\u202A', '\u2060', '\u2069', '\uFEFF', '\u0085']) {
+  for (const hidden of ['\u200B', '\u200F', '\u202A', '\u2060', '\u2069', '\uFEFF', '\u0085', '\u061C', '\u00AD', '\u180E', '\u3164', '\u{E0041}']) {
     assert.match(text(`a${hidden}b`), /^Sign in to the website as ab\? /, `U+${hidden.codePointAt(0).toString(16).toUpperCase()}`)
     assert.match(text(hidden), /^Sign in to the website\? /, `only U+${hidden.codePointAt(0).toString(16).toUpperCase()} is no name`)
   }
   assert.match(text('A\nB\u0000C'), /^Sign in to the website as ABC\? /)
+  // R2-5: U+200D stays inside an emoji sequence; joiners alone are no name
+  const family = '\u{1F468}‍\u{1F469}‍\u{1F467}'
+  assert.ok(text(family).includes(`as ${family}? `), 'the zero width joiner keeps an emoji sequence whole')
+  assert.match(text('‍‍'), /^Sign in to the website\? /, 'joiners alone are no name')
   assert.match(text('x'.repeat(80)), new RegExp(`as ${'x'.repeat(60)}\\? `), 'cut at 60')
   assert.match(text('x'.repeat(59) + '\u{1F600}\u{1F600}'), new RegExp(`as ${'x'.repeat(59)}\u{1F600}\\? `), 'an emoji at the cut is kept whole or dropped whole')
   assert.match(text('x'.repeat(60) + '\u{1F600}'), new RegExp(`as ${'x'.repeat(60)}\\? `))
