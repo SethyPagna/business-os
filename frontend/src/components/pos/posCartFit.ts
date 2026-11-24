@@ -23,3 +23,19 @@ export function fitCartWidth(
   const room = rowWidthPx - CART_FIT_DIVIDER_PX - productsMinPx
   return Math.min(storedPx, Math.max(CART_FIT_FLOOR_PX, Math.floor(room)))
 }
+
+/**
+ * The width a drag of the divider may apply and save: the pointer's wish, held to the cart's own min/max and then to the same fit the
+ * render uses, so the saved width is what the cashier saw. Null when the fit is below the smallest storable width (the row is too
+ * narrow for the cart's usual minimum): the divider does not move and nothing is saved.
+ */
+export function dragCartWidth(
+  rowWidthPx: number,
+  wantedPx: number,
+  productsMinPx: number,
+  minPx: number,
+  maxPx: number,
+): number | null {
+  const fitted = fitCartWidth(rowWidthPx, Math.min(maxPx, Math.max(minPx, wantedPx)), productsMinPx)
+  return fitted < minPx ? null : fitted
+}

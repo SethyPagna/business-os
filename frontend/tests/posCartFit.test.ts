@@ -12,6 +12,7 @@ import {
   CART_FIT_PRODUCTS_MIN_LG_PX,
   CART_FIT_PRODUCTS_MIN_MD_PX,
   cartProductsMinPx,
+  dragCartWidth,
   fitCartWidth,
 } from '../src/components/pos/posCartFit.ts'
 
@@ -85,5 +86,28 @@ assert.match(posSource.slice(groupStart, groupPos), /shrink-0/, 'shift group nev
 const rowStart = posSource.lastIndexOf('<div className="flex-shrink-0 flex w-full min-w-0 items-center border-b', groupStart)
 assert.ok(rowStart > 0, 'top row must be found')
 assert.match(posSource.slice(rowStart, groupStart), /flex min-w-0 flex-1 items-center gap-1 px-2 py-1\.5 overflow-x-auto/, 'order tabs keep min-w-0 flex-1 and scroll so they give way first')
+
+// Dragging uses the SAME fit as the render, so the divider follows the pointer and the saved width is the one shown.
+assert.equal(dragCartWidth(1146, 700, 352, 300, 860), 700, 'a wide row follows the pointer')
+assert.equal(dragCartWidth(1146, 900, 352, 300, 860), 786, 'held at row - divider - lg products minimum')
+assert.equal(dragCartWidth(700, 900, 288, 300, 860), 404, 'md: held at row - divider - md products minimum')
+assert.equal(dragCartWidth(700, 100, 288, 300, 860), 300, 'dragging left stops at the cart minimum')
+assert.equal(dragCartWidth(580, 400, 288, 300, 860), null, 'row too narrow for 300: the divider does not move and nothing is saved')
+assert.equal(dragCartWidth(596, 400, 288, 300, 860), 300, 'a row that holds exactly 300 + divider + minimum')
+assert.equal(dragCartWidth(595, 400, 288, 300, 860), null, 'one pixel less and it does not')
+assert.equal(dragCartWidth(0, 500, 288, 300, 860), 500, 'unmeasured row keeps the pointer width')
+assert.equal(dragCartWidth(3000, 5000, 352, 300, 860), 860, 'a drag never passes the cart maximum')
+
+const clampStart = posSource.indexOf('const clampCartWidth')
+const clampBody = posSource.slice(clampStart, posSource.indexOf('const startCartResize', clampStart))
+assert.match(clampBody, /dragCartWidth\(/, 'the drag clamp is the shared fit')
+assert.match(clampBody, /cartProductsMinPx\(/, 'the drag clamp uses the shared products minimum')
+assert.match(clampBody, /dragCartWidth\(mainPanelsRef\.current\.getBoundingClientRect\(\)\.width, px, productsMinPx, CART_WIDTH_MIN_PX, CART_WIDTH_MAX_PX\)/, 'the clamp passes the shared products minimum and the cart limits')
+assert.doesNotMatch(clampBody, /PRODUCTS_MIN_PX|- 280/, 'the drag clamp carries no private minimum')
+const dragStart = posSource.indexOf('const startCartResize')
+const drag = posSource.slice(dragStart, posSource.indexOf('const resetCartWidth', dragStart))
+assert.match(drag, /if \(next === null\) return/, 'a drag the fit refuses does not move the divider')
+assert.match(drag, /if \(!applied\) return/, 'a click that moved nothing saves nothing')
+assert.match(drag, /let applied = false/, 'a drag remembers whether it moved the divider')
 
 console.log('posCartFit tests passed')
