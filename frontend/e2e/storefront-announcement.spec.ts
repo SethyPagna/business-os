@@ -201,8 +201,8 @@ test.describe('Announcement bar', () => {
     })
   }
 
-  test('the bar scrolls away with the page and does not hide the sticky section tabs', async ({ page }) => {
-    // CATCHES: a fixed bar that stays on screen and covers the tabs, or tabs that stick underneath it.
+  test('the bar and the section tabs both scroll away with the page (nothing is sticky)', async ({ page }) => {
+    // CATCHES: a fixed bar that stays on screen, or tabs that stick at the top (owner: "Let them scroll away").
     await openStorefront(page, BAR, { width: 1280 })
     await page.evaluate(() => window.scrollTo(0, 600))
     const report = await page.evaluate(() => {
@@ -211,6 +211,6 @@ test.describe('Announcement bar', () => {
       return { stripBottom: strip.bottom, tabsTop: tabs.top }
     })
     expect(report.stripBottom).toBeLessThanOrEqual(0)
-    expect(report.tabsTop).toBeGreaterThanOrEqual(0)
+    expect(report.tabsTop, 'the tabs scrolled off the top too').toBeLessThan(0)
   })
 })

@@ -7,15 +7,14 @@ import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Minus from 'lucide-react/dist/esm/icons/minus.js'
 import PlusIcon from 'lucide-react/dist/esm/icons/plus.js'
-import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import CatalogProductImage from './catalogImages'
-import PortalContactMenu from './PortalContactMenu.tsx'
-import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
+import { PortalContactRows } from './PortalSocialRow.tsx'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
+import { PRODUCT_BAND_CLASS, PRODUCT_INSET_CLASS } from './portalProductSurfaces.ts'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -140,7 +139,7 @@ export default function PortalListPage({
           {/* arrow-right turned round: arrow-left is pinned to the sign-in icon chunk, which the storefront must not load (chunk cycle). */}
           <ArrowRight className="h-5 w-5 rotate-180" />
         </button>
-        <div role="group" className="grid min-w-0 flex-1 grid-cols-2 rounded-xl bg-stone-200 p-1 text-sm dark:bg-neutral-800">
+        <div role="group" className={`grid min-w-0 flex-1 grid-cols-2 rounded-xl p-1 text-sm ${PRODUCT_INSET_CLASS}`}>
           {segments.map(([key, label, count]) => (
             <button
               key={key}
@@ -148,7 +147,7 @@ export default function PortalListPage({
               aria-pressed={segment === key}
               data-portal-list-segment={key}
               onClick={() => onSegment(key)}
-              className={`min-h-11 rounded-lg px-4 sm:min-h-9 text-center font-semibold transition ${segment === key ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
+              className={`min-h-11 rounded-lg px-4 sm:min-h-9 text-center font-semibold transition ${segment === key ? `${PRODUCT_BAND_CLASS} shadow-sm` : 'border border-transparent text-stone-600 dark:text-neutral-300'}`}
             >
               <span>{label}</span>{count > 0 ? <span translate="no" className="notranslate ml-1.5 text-xs font-medium text-stone-600 dark:text-neutral-300">{count}</span> : null}
             </button>
@@ -159,6 +158,12 @@ export default function PortalListPage({
       {segment === 'list' ? (
         <>
           <PortalNoPaymentNotice copy={copy} className="text-center" />
+          {/* Where the Contact button was: the chat rows themselves (Phone, Messenger, Telegram, WhatsApp), tappable, under the payment line. */}
+          {listItems.length > 0 && contactEntries.length > 0 ? (
+            <div data-portal-list-contact="">
+              <PortalContactRows inline entries={contactEntries} copy={copy} className="grid gap-2 sm:grid-cols-2" />
+            </div>
+          ) : null}
           {listItems.length === 0 ? emptyLine(copy('listEmptyLine', 'Your list is empty.', 'បញ្ជីរបស់អ្នកនៅទទេ។')) : (
             <ul className={`${SURFACE} divide-y divide-stone-200 dark:divide-neutral-700`}>
               {listItems.map((item) => (
@@ -183,19 +188,6 @@ export default function PortalListPage({
           )}
           {listItems.length > 0 ? (
             <div className="flex items-center gap-1">
-              {contactEntries.length > 0 ? (
-                <PortalContactMenu
-                  entries={contactEntries}
-                  copy={copy}
-                  align="left"
-                  trigger={(
-                    <button type="button" data-portal-list-contact="" className={`${PORTAL_PRIMARY_BUTTON} min-h-10 px-4`}>
-                      <MessageCircle className="h-[18px] w-[18px]" />
-                      <span translate="no" className="notranslate">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
-                    </button>
-                  )}
-                />
-              ) : null}
               <button type="button" className={ICON_BUTTON} onClick={onCopy} aria-label={copy('copyList', 'Copy the list')} title={copy('copyList', 'Copy the list')}>
                 {copyState === 'copied' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </button>

@@ -970,6 +970,8 @@ function manualChunks(id: string): string | undefined {
       // The Contact menu, the account sheet, the Saved/List page and its picture memory are imported by the storefront page and its surface;
       // left to the catch-all they land in 'catalog' and make the same catalog -> catalog-public -> catalog cycle.
       || normalized.includes('/src/components/catalog/PortalContactMenu.tsx')
+      // The bottom-right dock (Language, Theme, Account, Shop, Contact; one menu button on a phone) is mounted by the storefront surface only.
+      || normalized.includes('/src/components/catalog/PortalDock.tsx')
       || normalized.includes('/src/components/catalog/PortalSheet.tsx')
       || normalized.includes('/src/components/catalog/PortalListPage.tsx')
       || normalized.includes('/src/components/catalog/portalListImages.ts')

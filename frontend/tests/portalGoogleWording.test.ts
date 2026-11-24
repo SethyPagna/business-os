@@ -1,8 +1,8 @@
 // Storefront wording for shoppers on Google-translated pages (21 Nov 2026). Measured with Google Translate's real
 // script: the old no-payment line came out as "online payment only" in French; one-word labels were translated
 // without context (Back as the body part, Clear as the adjective, A-Z as Arizona); a number React rewrote after Google
-// translated its neighbourhood stayed stale. The wording table is the result of real-script runs kept under
-// Records/Design/2026-11-21/real-google/wording/. This test keeps the measured-bad strings out and pins the markup.
+// translated its neighbourhood stayed stale. The wording table is the result of those real-script runs. This test keeps
+// the measured-bad strings out and pins the markup.
 //
 // Run: node tests/portalGoogleWording.test.ts
 import assert from 'node:assert/strict'
@@ -262,8 +262,8 @@ const classIdentifier = (name: string) => (node: ts.JsxElement | ts.JsxSelfClosi
 check('the count next to a word is its own notranslate element: list segment, header badge, filter badge, Add quantity', () => {
   const segment = unmarkedCountElements('components/catalog/PortalListPage.tsx', childIdentifier(['count']))
   assert.equal(segment.found.length, 1, 'one list-segment count')
-  const header = unmarkedCountElements('components/catalog/CatalogPreviewSurface.tsx', classIdentifier('HEADER_COUNT_CLASS'))
-  assert.equal(header.found.length, 2, 'saved and list header counts')
+  const header = unmarkedCountElements('components/catalog/PortalDock.tsx', classIdentifier('COUNT_BADGE'))
+  assert.equal(header.found.length, 2, 'the dock list badge on the wide stack and on the phone menu button')
   const filters = unmarkedCountElements('components/catalog/CatalogProductsSection.tsx', childIdentifier(['portalActiveFilterCount']))
   assert.equal(filters.found.length, 2, 'phone and desktop Filters counts')
   const addQty = unmarkedCountElements('components/catalog/CatalogProductsSection.tsx', childIdentifier(['qty']))
@@ -309,7 +309,7 @@ check('every visible contactButton text sits in an element with translate="no" a
     total += result.found.length
     unmarked.push(...result.unmarked.map((entry) => `${path.relative(SRC, file)} ${entry}`))
   }
-  assert.ok(total >= 3, `found the header, assistant and list Contact buttons (${total})`)
+  assert.ok(total >= 1, `found the dock Contact button (${total})`)
   assert.deepEqual(unmarked, [])
   assert.deepEqual(entriesFor('contactButton').map((entry) => shopperEnglish(entry)).filter((text) => text !== 'Contact'), [], 'the visible word stays Contact')
 })

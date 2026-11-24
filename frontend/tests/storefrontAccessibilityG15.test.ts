@@ -38,8 +38,6 @@ const CHARCOAL_HOVER = '#3a352c'
 const IVORY_DARK = '#f5f1e8'
 const IVORY_DARK_HOVER = '#d9d4c7'
 const NEUTRAL_900 = '#171717'
-const STONE_600 = '#57534e'
-const NEUTRAL_300 = '#d4d4d4'
 const WHITE = '#ffffff'
 const AA_TEXT = 4.5
 const AA_UI = 3
@@ -49,10 +47,7 @@ const ratio = (a: string, b: string) => Number(contrastRatio(a, b).toFixed(2))
 // Contrast (WCAG 1.4.3 text, 1.4.11 component boundary)
 // ---------------------------------------------------------------------------
 
-runTest('the map Load and consent Agree buttons use the one storefront primary recipe, >= 4.5:1 in light and dark', () => {
-  const source = read('components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')
-  assert.match(source, /const LOAD_BUTTON = PORTAL_PRIMARY_BUTTON\n/, 'the Load button is the shared primary button, not a local class string')
-  assert.match(source, /<button type="button" onClick=\{accept\} className=\{LOAD_BUTTON\}>/, 'the Load button must still be the accept button')
+runTest('the consent Agree button uses the one storefront primary recipe, >= 4.5:1 in light and dark', () => {
   const renewal = read('components', 'catalog', 'legal', 'ConsentRenewalPrompt.tsx')
   assert.match(renewal, /className=\{`\$\{PORTAL_PRIMARY_BUTTON\} disabled:opacity-60`\}/, 'the Agree button is the shared primary button')
   assert.doesNotMatch(renewal, /bg-slate-900|dark:bg-white/, 'no slate/white fill that main.css remaps in dark mode')
@@ -76,17 +71,6 @@ runTest('the map Load and consent Agree buttons use the one storefront primary r
   assert.ok(darkHover >= AA_TEXT, `dark hover text contrast ${darkHover}`)
   assert.ok(ratio(CHARCOAL, PORTAL_LIGHT_SURFACE) >= AA_UI, 'the button edge is visible on a light surface')
   assert.ok(ratio(IVORY_DARK, NEUTRAL_900) >= AA_UI && ratio(IVORY_DARK, PORTAL_DARK_SURFACE) >= AA_UI, 'and on the dark card and dark page')
-})
-
-runTest('the open-in-Google-Maps icon keeps 4.5:1 in light and dark and is an icon-only link with a name', () => {
-  const source = read('components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')
-  const icon = /const ICON_LINK = '([^']+)'/.exec(source)?.[1] ?? ''
-  assert.match(icon, /\btext-stone-600\b/)
-  assert.match(icon, /dark:text-neutral-300/)
-  assert.match(icon, /\bh-11 w-11\b/, 'a 44 px target')
-  assert.match(source, /aria-label=\{openLabel\}\s+title=\{openLabel\}/, 'the icon link has an accessible name and a tooltip')
-  assert.ok(ratio(STONE_600, WHITE) >= AA_TEXT, 'light card')
-  assert.ok(ratio(NEUTRAL_300, NEUTRAL_900) >= AA_TEXT, 'dark card')
 })
 
 runTest('the storefront .btn-primary is white on a brass of >= 4.5:1 in light and dark; the admin rule is untouched', () => {
@@ -120,8 +104,6 @@ runTest('the map iframe is named by a translated sentence, not a code name', () 
   const identity = (key: string) => key
   assert.equal(resolveStorefrontCopy('en', identity, 'portal_a11y_map_title', call[1], call[2]), call[1])
   assert.equal(resolveStorefrontCopy('km', identity, 'portal_a11y_map_title', call[1], call[2]), call[2])
-  const embed = read('components', 'catalog', 'legal', 'PortalEmbedConsent.tsx')
-  assert.match(embed, /<iframe\s+title=\{title\}/, 'the title reaches the iframe')
 })
 
 // ---------------------------------------------------------------------------

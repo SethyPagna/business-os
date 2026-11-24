@@ -17,10 +17,12 @@ const phone44 = (classes: string, label: string) => {
   assert.doesNotMatch(classes, /(^|\s)(h-10|w-10|w-9)(\s|$)/, `${label}: no bare 40 / 36 px size left for phones`)
 }
 
-const surface = read('CatalogPreviewSurface.tsx')
-phone44(classOf(surface, 'HEADER_ICON_CLASS'), 'header icon')
-phone44(classOf(surface, 'HEADER_CONTACT_CLASS'), 'header contact')
-assert.match(surface, /data-portal-header-icons="" className="[^"]*\bgap-0\b/, 'the header icons close their gap so 44 px icons fit one row at 360 px')
+// The dock is 48 px on a wide screen and 56 px on a phone, above the 44 px floor everywhere (the header no longer holds buttons).
+const dock = read('PortalDock.tsx')
+assert.match(classOf(dock, 'ROUND_WIDE'), /\bh-12 w-12\b/, 'dock buttons: 48 px')
+assert.match(classOf(dock, 'ROUND_SMALL'), /\bh-14 w-14\b/, 'dock menu button: 56 px')
+assert.match(classOf(dock, 'CONTACT_BUTTON'), /\bh-12\b/, 'dock Contact: 48 px tall')
+assert.doesNotMatch(read('CatalogPreviewSurface.tsx'), /HEADER_ICON_CLASS|HEADER_CONTACT_CLASS|data-portal-header-icons/, 'the header icon classes are gone')
 
 const list = read('PortalListPage.tsx')
 phone44(classOf(list, 'ICON_BUTTON'), 'list icon button (minus, plus, copy, download)')

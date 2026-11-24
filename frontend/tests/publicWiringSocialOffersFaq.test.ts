@@ -37,8 +37,11 @@ runCase('the header has no chip row and the page has no floating chat buttons: C
     assert.doesNotMatch(read(file), /PortalSocialRow|PortalContactFloat|contactFab|contactPopover|data-portal-social|data-portal-contact-float/, `${file} still mounts a chip row or a float`)
   }
   const surface = read('CatalogPreviewSurface.tsx')
-  assert.match(surface, /<PortalContactMenu[\s\S]*?entries=\{contactEntries\}/, 'the header Contact button opens the menu')
-  assert.match(surface, /data-portal-contact-trigger=""/)
+  const dock = read('PortalDock.tsx')
+  assert.match(surface, /<PortalDock[\s\S]*?contactEntries=\{contactEntries\}/, 'the surface hands the entries to the dock')
+  assert.match(dock, /<PortalContactMenu[\s\S]*?entries=\{contactEntries\}/, 'the dock Contact button opens the menu')
+  assert.match(dock, /data-portal-contact-trigger=""/)
+  assert.doesNotMatch(surface, /data-portal-contact-trigger=""|<PortalContactMenu/, 'the header holds no Contact button')
 })
 
 runCase('every page and sheet builds its contact data through the one builder', () => {
@@ -46,7 +49,7 @@ runCase('every page and sheet builds its contact data through the one builder', 
     const source = read(file)
     assert.match(source, /buildPortalSocialFromConfig\(/, file)
     assert.match(source, /buildPortalContactEntries\(/, `${file} builds the Contact entries`)
-    assert.match(source, /const socialLinks = portalContactFooterLinks\(contactEntries\)/, `${file}: the footer takes its names from the same entries`)
+    assert.match(source, /const socialLinks = portalContactFooterLinks\(portalFooterAccounts\(accountEntries, contactEntries, /, `${file}: the footer takes its names from the same account entries`)
     assert.doesNotMatch(source, /socialIconByKey|contactIconByKey|socialAccentByKey|const headerLinks/, `${file} still builds its own icon/header lists`)
     assert.doesNotMatch(source, /deriveMessengerLink|deriveWhatsappLink|resolveMessengerLink/, `${file} still normalises contact links itself`)
     assert.match(source, /contactEntries=\{contactEntries\}/, `${file} hands the entries to the surface`)
@@ -58,9 +61,9 @@ runCase('every page and sheet builds its contact data through the one builder', 
 
 runCase('the footer and About list the same account names as the menu, with an accessible platform name', () => {
   const built = buildPortalSocialFromConfig(BASE_CONFIG, 'en')
-  const entries = buildPortalContactEntries({ social: built.social, contact: built.contact, shopName: 'Leang Cosmetics', language: 'en' })
-  const footer = portalContactFooterLinks(entries)
-  assert.deepEqual(footer.map((link) => link.label), entries.map((entry) => entry.label), 'one name per account on every surface')
+  const { accounts } = buildPortalContactEntries({ social: built.social, contact: built.contact, shopName: 'Leang Cosmetics', language: 'en' })
+  const footer = portalContactFooterLinks(accounts)
+  assert.deepEqual(footer.map((link) => link.label), accounts.map((entry) => entry.label), 'one name per account on every surface')
   assert.ok(footer.every((link) => !link.label.includes('@')), 'no "@" anywhere')
   assert.deepEqual(footer.map((link) => link.label).sort(), ['leang.cosmetics', 'leangcosmetics', 'leangshop'])
   const legal = read('legal/LegalPages.tsx')
@@ -71,7 +74,7 @@ runCase('the footer and About list the same account names as the menu, with an a
 
 runCase('the footer states the independent-retailer line', () => {
   const legal = read('legal/LegalPages.tsx')
-  assert.match(legal, /data-portal-footer-independent="true">\{text\('portal_legal_footer_independent'\)\}/)
+  assert.match(legal, /data-portal-footer-independent="true"><ProtectedText text=\{text\('portal_legal_footer_independent'\)\}/)
   const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
   assert.equal(en.portal_legal_footer_independent, 'Leang Cosmetics is an independent beauty retailer in Cambodia.')
 })
@@ -98,12 +101,11 @@ runCase('the stale contrast pair names the real colour of the promotions link', 
 
 runCase('FAQ and AI props are wired from the storefront page, and the dead values are gone', () => {
   const page = read('PublicCatalogPage.tsx')
-  // The FAQ and About buttons keep calling the same prop (openContactSheet); it now opens the Contact menu beside the button pressed.
-  assert.match(page, /onOpenContact=\{contactEntries\.length > 0 \? openContactSheet : undefined\}/)
+  // The FAQ shows the chat rows itself (no Contact button, no anchored menu).
+  assert.match(page, /<CatalogSecondaryTabs[\s\S]*?contactEntries=\{contactEntries\}/)
+  assert.doesNotMatch(page, /openContactSheet|contactAnchor|PortalContactMenu/, 'the page opens no contact menu of its own: the dock does')
   assert.match(page, /faqLoading=\{!realConfigInHand\}/)
   assert.match(page, /<CatalogSecondaryTabs[\s\S]*?openProductById=\{openProductById\}/)
-  assert.match(page, /const openContactSheet = \(\) => \{[\s\S]*?setContactAnchor\(/, 'openContactSheet opens the menu')
-  assert.match(page, /<PortalContactMenu entries=\{contactEntries\} copy=\{copy\} anchor=\{contactAnchor\} onClose=\{closeContactSheet\} \/>/)
   assert.doesNotMatch(page, /aiUsageSummary|assistantRequestPolicy|assistantExpandedProductId|AssistantExpandedProductId/)
   const tabs = read('CatalogSecondaryTabs.tsx')
   for (const prop of ['aiUsageSummary', 'assistantRequestPolicy', 'assistantExpandedProductId']) assert.ok(!tabs.includes(prop), `${prop} is read by the tabs after all`)

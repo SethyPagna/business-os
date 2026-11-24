@@ -1,0 +1,229 @@
+// Storefront dock (owner asks A58, A59, A60, A65, 21 Nov 2026, spec D1). Pins:
+//   - wide screens: a vertical stack, top to bottom Language, Theme, Account, Shop, Contact; Contact is the only filled button and the
+//     only one with a visible word (translate="no"); the others are icon-only with an accessible name and no title tooltip;
+//   - phones: ONE round button (aria-label Menu) carrying the List count; its menu has the rows Contact, My List, Saved, Account,
+//     Language, Theme, each with its value (counts, name, language, Light/Dark) in a no-translate element;
+//   - the Language menu: six options, the Google tag, and ONE note line at the bottom (a notice, not a button), in English and Khmer;
+//   - the dock steps out of the way while a sheet is open; the header holds none of these controls and nothing at the top is sticky.
+// Each pin is followed by a control: the same scan run on a deliberately wrong input, which must fail.
+//
+// Run: node tests/portalDock.test.ts
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createRequire } from 'node:module'
+import { buildSync } from 'esbuild'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
+import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from '../src/components/catalog/portalLanguageOptions.ts'
+import { PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
+import { SRC, storefrontTranslator } from './storefrontCopyScan.ts'
+
+const requireActual = createRequire(import.meta.url)
+const t = storefrontTranslator()
+const read = (rel: string) => fs.readFileSync(path.join(SRC, rel), 'utf8').split(String.fromCharCode(13)).join('')
+const copyFor = (language: 'en' | 'km') => (key: string, fallback = '', fallbackKm = fallback) => resolveStorefrontCopy(language, t, key, fallback, fallbackKm)
+
+let passed = 0
+function check(name: string, fn: () => void) {
+  try {
+    fn()
+    passed += 1
+    console.log(`PASS ${name}`)
+  } catch (error) {
+    process.exitCode = 1
+    console.log(`FAIL ${name}: ${(error as Error).message}`)
+  }
+}
+
+function loadModule(relative: string) {
+  const bundle = buildSync({
+    entryPoints: [path.join(SRC, relative)],
+    bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic',
+    external: ['react', 'react-dom'], loader: { '.css': 'empty' }, write: false, logLevel: 'silent',
+  })
+  const module = { exports: {} as Record<string, unknown> }
+  new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(requireActual, module, module.exports)
+  return module.exports
+}
+const dockModule = loadModule('components/catalog/PortalDock.tsx')
+const Dock = dockModule.default as React.ComponentType<Record<string, unknown>>
+const DockMenu = dockModule.DockMenuContent as React.ComponentType<{ props: Record<string, unknown>; closeMenu: () => void }>
+const LanguageOptions = dockModule.LanguageOptions as React.ComponentType<Record<string, unknown>>
+
+const noop = () => {}
+const entries = [
+  { key: 'phone-0', platform: 'phone', href: 'tel:012345678', label: '012 345 678', accessibleName: 'Phone: 012 345 678', latin: true },
+  { key: 'telegram-1', platform: 'telegram', href: 'https://t.me/Leangcosmetic', label: 'Leangcosmetic', accessibleName: 'Telegram: Leangcosmetic', latin: true },
+]
+const baseProps = (language: 'en' | 'km', extra: Record<string, unknown> = {}) => ({
+  copy: copyFor(language), darkMode: false, contactEntries: entries,
+  onOpenAccount: noop, accountSignedIn: false, onOpenList: noop, onOpenWishlist: noop, listCount: 3, wishlistCount: 2,
+  languageEnabled: true, languageOptions: PUBLIC_STOREFRONT_LANGUAGE_OPTIONS, activeLanguage: 'km', changePageLanguage: noop, toggleTheme: noop,
+  ...extra,
+})
+const renderDock = (language: 'en' | 'km', extra: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(Dock, baseProps(language, extra)))
+const renderMenu = (language: 'en' | 'km', extra: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(DockMenu, { props: baseProps(language, extra), closeMenu: noop }))
+
+const orderOf = (html: string) => [...html.matchAll(/data-portal-dock-button="([a-z]+)"/g)].map((match) => match[1])
+const visible = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+const rowLabels = (html: string) => [...html.matchAll(/<span class="min-w-0 flex-1 truncate">([^<]*)<\/span>/g)].map((match) => match[1])
+const wide = (html: string) => html.slice(html.indexOf('data-portal-dock-wide'), html.indexOf('data-portal-dock-small'))
+
+for (const language of ['en', 'km'] as const) {
+  const copy = copyFor(language)
+
+  check(`${language}: wide stack order is Language, Theme, Account, Shop, Contact; the phone button is last in the markup`, () => {
+    const html = renderDock(language)
+    assert.deepEqual(orderOf(html), ['language', 'theme', 'account', 'shop', 'contact', 'menu'])
+    // control: a scan for a different order fails, and a dock without Language and Account really drops them
+    assert.notDeepEqual(orderOf(html), ['contact', 'shop', 'account', 'theme', 'language', 'menu'])
+    assert.deepEqual(orderOf(renderDock(language, { languageEnabled: false, onOpenAccount: undefined })), ['theme', 'shop', 'contact', 'menu'])
+  })
+
+  check(`${language}: Contact is the only filled button and the only one with a visible word, no-translate`, () => {
+    const stack = wide(renderDock(language))
+    const buttons = stack.split('<button').slice(1)
+    assert.equal(buttons.length, 5)
+    const filled = buttons.filter((button) => button.includes('bg-[#23201b]'))
+    assert.equal(filled.length, 1, 'one filled (charcoal) button')
+    assert.match(filled[0], /data-portal-dock-button="contact"/)
+    assert.ok(filled[0].includes(`<span translate="no" class="notranslate">${copy('contactButton', 'Contact', 'ទាក់ទង')}</span>`), 'the word Contact, no-translate')
+    for (const button of buttons.filter((item) => !item.includes('data-portal-dock-button="contact"'))) {
+      assert.equal(visible(`<button${button}`.split('</button>')[0] + '</button>').replace(/\d+/g, '').trim(), '', 'the others hold an icon and at most a count, no word')
+      assert.match(button, /aria-label="[^"]+"/, 'and carry an accessible name')
+    }
+    assert.doesNotMatch(stack, /\btitle="/, 'no title tooltip on any dock button')
+    // control: the scan sees a word when one is added
+    assert.notEqual(visible('<button><svg></svg>Shop</button>').replace(/\d+/g, '').trim(), '')
+  })
+
+  check(`${language}: the buttons are 48 px (round) on a wide screen and 56 px on a phone, and the phone button names itself`, () => {
+    const html = renderDock(language)
+    assert.equal((wide(html).match(/ h-12 w-12/g) || []).length, 4, 'four round 48 px buttons')
+    assert.match(wide(html), /data-portal-dock-button="contact" class="[^"]*\bh-12\b/)
+    const small = html.slice(html.indexOf('data-portal-dock-small'))
+    assert.match(small, /h-14 w-14/)
+    assert.ok(small.includes(`aria-label="${copy('dockMenu', 'Menu', 'ម៉ឺនុយ')}"`))
+    assert.equal((small.match(/<button/g) || []).length, 1, 'exactly one button below md')
+  })
+
+  check(`${language}: the List count rides on the shop button and the menu button, and is absent at zero`, () => {
+    const html = renderDock(language)
+    assert.equal((html.match(/<span translate="no" class="notranslate absolute[^>]*>3<\/span>/g) || []).length, 2)
+    assert.equal((renderDock(language, { listCount: 0 }).match(/rounded-full bg-rose-700/g) || []).length, 0)
+  })
+
+  check(`${language}: the phone menu rows are Contact, My List, Saved, Account, Language, Theme with their values`, () => {
+    const html = renderMenu(language, { accountSignedIn: true, accountName: 'Sokha' })
+    assert.deepEqual(rowLabels(html), [
+      copy('contactButton', 'Contact', 'ទាក់ទង'),
+      copy('bucketTitle', 'My List'),
+      copy('saved', 'Saved'),
+      copy('account', 'Account'),
+      copy('dockLanguage', 'Language', 'ភាសា'),
+      copy('dockTheme', 'Theme', 'របៀប'),
+    ])
+    assert.ok(html.includes('<span translate="no" class="notranslate">3</span>'), 'List count, no-translate')
+    assert.ok(html.includes('<span translate="no" class="notranslate">2</span>'), 'Saved count')
+    assert.ok(html.includes('<span translate="no" class="notranslate">Sokha</span>'), 'the signed-in name')
+    assert.ok(html.includes('<span translate="no" class="notranslate">ភាសាខ្មែរ</span>'), 'the current language name in its own script')
+    assert.ok(html.includes(`<span translate="no" class="notranslate">${copy('themeLight', 'Light', 'ភ្លឺ')}</span>`), 'the theme word')
+    const dark = renderMenu(language, { darkMode: true })
+    assert.ok(dark.includes(`>${copy('themeDark', 'Dark', 'ងងឹត')}</span>`), 'dark mode names itself and re-keys the word')
+    assert.doesNotMatch(html, /aria-label="Menu"|title="/, 'the rows carry no tooltip')
+    // control: without the account handler or a name the rows shrink and the Account value vanishes
+    assert.deepEqual(rowLabels(renderMenu(language, { onOpenAccount: undefined, languageEnabled: false })).length, 4)
+    assert.ok(!renderMenu(language, { accountSignedIn: false, accountName: 'Sokha' }).includes('>Sokha<'), 'a signed-out visitor never sees a name')
+  })
+
+  check(`${language}: the Language menu has the six options, the Google tags and one note line at the bottom`, () => {
+    const html = renderToStaticMarkup(React.createElement(LanguageOptions, { copy, options: PUBLIC_STOREFRONT_LANGUAGE_OPTIONS, active: 'km', onPick: noop }))
+    assert.equal((html.match(/<button/g) || []).length, 6, 'six options, and the note is no button')
+    assert.equal((html.slice(0, html.indexOf('data-portal-google-note')).match(/>Google</g) || []).length, 4, 'the four Google tags stay')
+    // The note is the policy pages' official-text notice (legal/legalContent.ts), one source for both. Nothing in it is wrapped:
+    // Google translates a sentence cut by an untranslated span piece by piece, and the pieces lose their meaning.
+    const note = PORTAL_LEGAL_EN.portal_legal_official_notice
+    const noteHtml = /<p data-portal-google-note=""[^>]*>([\s\S]*?)<\/p>/.exec(html)?.[1] ?? ''
+    const visibleNote = noteHtml.replace(/<\/?span\b[^>]*>/g, '')
+    const expected = language === 'en' ? note : PORTAL_LEGAL_KM.portal_legal_official_notice
+    assert.equal(visibleNote, expected, 'the note is the official-text notice, byte for byte')
+    assert.equal(noteHtml.includes('translate="no"'), false, 'the note reaches the translator as whole sentences')
+    assert.ok(html.lastIndexOf('data-portal-google-note') > html.lastIndexOf('</button>'), 'the note is under the options')
+    assert.match(html, /<p data-portal-google-note=""/, 'a paragraph, not a control')
+    assert.notEqual(PORTAL_LEGAL_EN.portal_legal_official_notice, PORTAL_LEGAL_KM.portal_legal_official_notice, 'the note changes with the language')
+    assert.doesNotMatch(html, /aria-label=/, 'the group is named by aria-labelledby, never an aria-label on a container')
+  })
+}
+
+check('hidden: the dock draws nothing while a sheet is open', () => {
+  assert.equal(renderDock('en', { hidden: true }), '')
+  assert.notEqual(renderDock('en', { hidden: false }), '')
+})
+
+check('the surface mounts the dock for the live page only, and hides it behind every sheet', () => {
+  const surface = read('components/catalog/CatalogPreviewSurface.tsx')
+  assert.match(surface, /<PortalDock\s+placement=\{publicView \? 'viewport' : 'frame'\}/, 'the live page gets the fixed dock; the Website Editor preview gets the frame dock')
+  assert.match(surface, /hidden=\{dockHidden \|\| Boolean\(productGalleryView\.open \|\| portalImageView\.open \|\| productDetailView\?\.open\)\}/)
+  const page = read('components/catalog/PublicCatalogPage.tsx')
+  assert.match(page, /dockHidden=\{accountOpen \|\| !!portalAccount\.consentRenewal\}/)
+  const dock = read('components/catalog/PortalDock.tsx')
+  assert.match(dock, /fixed bottom-\[calc\(1rem\+env\(safe-area-inset-bottom\)\)\] right-\[calc\(1rem\+env\(safe-area-inset-right\)\)\] z-\[55\]/, 'bottom-right, above the home bar, under the sheets (z-60) and the lightbox (z-90)')
+  assert.match(read('components/catalog/PortalSheet.tsx'), /fixed inset-0 z-\[60\]/, 'control: the sheets really are at z-60')
+})
+
+check('the header holds none of the six controls and nothing at the top is sticky or fixed', () => {
+  const surface = read('components/catalog/CatalogPreviewSurface.tsx')
+  const header = surface.slice(surface.indexOf('<header className="portal-header-shell'), surface.indexOf('<nav'))
+  const dockSource = read('components/catalog/PortalDock.tsx')
+  for (const icon of ['Heart', 'ClipboardList', 'User', 'Globe', 'Moon', 'MessageCircle']) {
+    assert.doesNotMatch(header, new RegExp('<' + icon + '\\b'), icon + ' left the header')
+  }
+  // control: the same icons are found in the dock file (Heart, User, Globe, Moon, MessageCircle); the old list clipboard became the shop bag
+  for (const icon of ['Heart', 'User', 'Globe', 'Moon', 'MessageCircle', 'ShoppingBag']) assert.match(dockSource, new RegExp('\\b' + icon + '\\b'), icon + ' is in the dock')
+  assert.doesNotMatch(dockSource, /ClipboardList/, 'one shop icon for List and Saved, not the clipboard')
+
+  assert.doesNotMatch(surface, /className=[^\n]*\bsticky\b|position: 'fixed'|publicPortalNavPinned/, 'nothing at the top is sticky or pinned')
+  assert.match(surface, /pb-\[calc\(8rem\+env\(safe-area-inset-bottom\)\)\]/, 'the page ends the tallest floating control plus 1 rem above the safe area (tests/storefrontFooterClearance.test.ts holds the arithmetic)')
+  assert.doesNotMatch(surface, /md:pb-\[calc/, 'and there is no blank band under the footer on a desktop')
+})
+
+check('the new keys have Khmer in the storefront pack, equal to the call-site text', () => {
+  const pack = read('components/catalog/portalLanguagePacks.ts')
+  for (const key of ['dockMenu', 'dockLanguage', 'dockTheme', 'themeLight', 'themeDark']) {
+    assert.match(pack, new RegExp('\n    ' + key + ": '[^']*[ក-៿]"), key + ' has Khmer in portalLanguagePacks.ts')
+  }
+  assert.doesNotMatch(read('components/catalog/PortalDock.tsx'), /\bt\('/, 'the dock never reaches the admin pack')
+})
+
+check('breakpoint: the five-button stack appears only from 1888 px; below it one round button at every width', () => {
+  const html = renderDock('en')
+  assert.match(html, /data-portal-dock-wide="" class="[^"]*\bhidden\b[^"]*min-\[1888px\]:flex"/, 'hidden until 1888 px')
+  assert.match(html, /data-portal-dock-small="" class="pointer-events-auto min-\[1888px\]:hidden"/, 'the one button hides only from 1888 px')
+  assert.doesNotMatch(html, /\bmd:(?:flex|hidden)\b/, 'control: the old 768 px switch is gone')
+})
+
+check('the Website Editor preview gets the dock too: a sticky zero-height row inside the frame with the one button, never the fixed dock', () => {
+  const html = renderDock('en', { placement: 'frame' })
+  assert.match(html, /data-portal-dock="frame" class="pointer-events-none sticky bottom-4 z-\[55\] h-0"/)
+  assert.match(html, /<div class="absolute bottom-0 right-4">/)
+  assert.equal(orderOf(html).join(','), 'menu', 'only the menu button')
+  assert.doesNotMatch(html, /\bfixed\b/, 'nothing fixed to the admin window')
+  assert.match(renderDock('en'), /\bfixed\b/, 'control: the live dock is fixed')
+})
+
+check('every dock menu hands focus back to its opener on close (Esc included, from any inner view): the menus go through FocusReturnMenu', () => {
+  const dock = read('components/catalog/PortalDock.tsx')
+  const contact = read('components/catalog/PortalContactMenu.tsx')
+  // LazyPortalMenu swaps the trigger node when it closes, so PortalMenu's own focus() lands on a removed button: the wrapper refocuses the live one.
+  assert.equal((dock.match(/<FocusReturnMenu/g) || []).length, 2, 'the phone menu and the wide Language menu')
+  assert.doesNotMatch(dock, /<LazyPortalMenu/, 'control: a bare LazyPortalMenu in the dock would lose focus on close')
+  const refocuses = (source: string) => ['export function FocusReturnMenu', 'window.requestAnimationFrame(() => window.requestAnimationFrame', 'resolveContactFocusTarget<HTMLElement>', 'target?.focus'].every((part) => source.includes(part))
+  assert.ok(refocuses(contact), 'the wrapper refocuses the live trigger after the trigger swap')
+  assert.ok(!refocuses(contact.split('target?.focus').join('target')), 'control: a wrapper that never calls focus fails the scan')
+  assert.match(contact, /<FocusReturnMenu\s+align=\{align}/, 'the Contact panel uses the same wrapper')
+  assert.doesNotMatch(contact, /<LazyPortalMenu\s+align/, 'one implementation, not two')
+})
+
+console.log('portalDock: ' + passed + ' checks passed')

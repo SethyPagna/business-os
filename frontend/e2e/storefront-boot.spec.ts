@@ -393,8 +393,8 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
 
   test('P2-3c the header has no social row to wait for, so the section tabs do not move when the shop arrives', async ({ page }) => {
     // CATCHES: a header that grows when the config lands (the old 56 px social row pushed the tabs and the card under it down by that much:
-    // 0.0486 of the 0.05 budget on its own). The contact accounts now sit behind the one Contact button in the header's icon row, so there
-    // is no row to hold a place for; a row or a placeholder coming back, or a header that changes height on a phone, fails here.
+    // 0.0486 of the 0.05 budget on its own). The contact channels now sit behind the bottom-right dock (below 1888 px its one round menu
+    // button), so the header has no row to hold a place for; a row or a placeholder coming back, or a header that changes height on a phone, fails here.
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => { release = resolve })
     await routeStorefrontConfig(page, { patch: REAL_SHOP, gate })
@@ -406,13 +406,13 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     const pending = await tabsTop()
     release()
     await expect(page.getByRole('heading', { level: 2, name: REAL_SHOP.businessName })).toBeVisible({ timeout: 20_000 })
-    await expect(page.locator('[data-portal-contact-trigger]'), 'the shop\'s accounts arrive as the one Contact button').toBeVisible()
+    await expect(page.locator('[data-portal-dock-button="menu"]'), 'the dock\'s one round button is there below 1888 px (the Contact panel is behind it)').toBeVisible()
     await expect(page.locator('[data-portal-social-skeleton], [data-portal-social-row]')).toHaveCount(0)
     const landed = await tabsTop()
-    // On a phone nothing in the header changes size when the shop lands, so the tabs stay put. From the sm width the header's first row
-    // grows by about 11 px at 1280 px (its icon buttons arrive with the config): a separate skeleton gap, outside the phone's CLS budget.
+    // The header holds only the shop name, so no icon row arrives with the config at any width. From the sm width the name line may still
+    // settle by a few px (skeleton block to text): a separate skeleton gap, outside the phone's CLS budget.
     if ((page.viewportSize()?.width ?? 0) < 640) expect(landed, 'the section tabs stay where they were').toBeCloseTo(pending, 0)
-    else expect(Math.abs(landed - pending), 'from the sm width the header may settle by its icon row, never by a whole row').toBeLessThan(24)
+    else expect(Math.abs(landed - pending), 'from the sm width the header may settle by the name line, never by a whole row').toBeLessThan(24)
   })
 
   test('P2-4 an old saved copy is never painted, never requested, and removed; the shopper list is untouched', async ({ page, context, browser }) => {

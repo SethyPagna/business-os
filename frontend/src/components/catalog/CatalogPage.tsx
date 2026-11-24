@@ -6,8 +6,7 @@ import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from
 import { fmtTime } from '../../utils/formatters.ts'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { settingsSaveNormalisedKeys } from '../../utils/settingsSave.ts'
-import { buildPortalContactEntries, buildPortalSocialFromConfig, portalContactFooterLinks } from './portalSocialLinks.ts'
-import { contactHref } from '../../utils/socialLinks.ts'
+import { buildPortalContactEntries, buildPortalSocialFromConfig, portalContactFooterLinks, portalFooterAccounts } from './portalSocialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
@@ -1299,8 +1298,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
   const [publicSecondaryTabsPrimed, setPublicSecondaryTabsPrimed] = useState(false)
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
-  const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
-  const [publicPortalNavMetrics, setPublicPortalNavMetrics] = useState({ left: 0, width: 0, height: 0 })
   const [portalLanguagePacksModule, setPortalLanguagePacksModule] = useState<PortalLanguagePacksModule | null>(null)
   const [portalContentI18nModule, setPortalContentI18nModule] = useState<PortalContentI18nModule | null>(null)
   const [categories, setCategories] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.categories))
@@ -2061,29 +2058,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   useEffect(() => {
     if (!publicView || typeof window === 'undefined') return undefined
     let frameRequested = false
-    const topOffset = window.innerWidth >= 640 ? 8 : 0
 
     const updateVisibility = () => {
       frameRequested = false
       const scrollTop = Math.max(window.scrollY || 0, document.documentElement?.scrollTop || 0, document.body?.scrollTop || 0)
       setPublicScrollButtonsVisible(scrollTop > 220)
-      if (publicPortalNavRef.current) {
-        const rect = publicPortalNavRef.current.getBoundingClientRect()
-        const shouldPin = rect.top <= topOffset
-        setPublicPortalNavPinned((current) => (current === shouldPin ? current : shouldPin))
-        setPublicPortalNavMetrics((current) => {
-          const next = {
-            left: Math.max(0, rect.left),
-            width: Math.max(0, rect.width),
-            height: Math.max(0, rect.height),
-          }
-          return (
-            current.left === next.left
-            && current.width === next.width
-            && current.height === next.height
-          ) ? current : next
-        })
-      }
     }
 
     const handleScroll = () => {
@@ -3034,24 +3013,20 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     : ''
 
   const businessFacts = [
-    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: contactHref('tel', displayConfig.businessPhone) },
-    { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: contactHref('mailto', displayConfig.businessEmail) },
+    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone },
     { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
-  // Same builder as the live page, so the editor preview shows the same names and the same Contact menu.
+  // Same builder as the live page, so the editor preview shows the same names, the same chat rows and the same account rows.
   const socialBuilt = buildPortalSocialFromConfig(displayConfig, activeCopyLanguage)
-  const contactEntries = buildPortalContactEntries({
+  const { chat: contactEntries, accounts: accountEntries } = buildPortalContactEntries({
     social: socialBuilt.social,
     contact: socialBuilt.contact,
     phone: businessFacts.find((item) => item.key === 'phone')?.value,
-    email: businessFacts.find((item) => item.key === 'email')?.value,
-    mapHref: addressFact?.href,
-    address: addressFact?.value,
     shopName: displayConfig.businessName || displayConfig.title,
     language: activeCopyLanguage,
   })
-  const socialLinks = portalContactFooterLinks(contactEntries)
+  const socialLinks = portalContactFooterLinks(portalFooterAccounts(accountEntries, contactEntries, { tab: activeTab, listOpen: false }))
 
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
   const redeemSummaryText = replaceVars(
@@ -3283,8 +3258,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     openPortalImage,
     mapEmbedUrl,
     addressFact,
-    businessFacts,
-    socialLinks,
+    emailText: displayConfig.showEmail ? String(displayConfig.businessEmail || '') : '',
+    contactEntries,
+    accountEntries,
     versionedBusinessLogo,
     versionedBusinessCover,
     publicFaqItems,
@@ -3539,8 +3515,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         activeTab={activeTab}
         setActiveTab={handlePortalTabChange}
         publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
-        publicPortalNavPinned={publicPortalNavPinned}
-        publicPortalNavMetrics={publicPortalNavMetrics}
         contactEntries={contactEntries}
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}

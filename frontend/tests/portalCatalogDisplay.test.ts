@@ -155,7 +155,7 @@ runTest('public portal mobile contact actions stay compact', () => {
   assert.match(catalogSecondaryTabsSource, /data-portal-about-hero="true"/, 'public about hero should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /flex items-start gap-3 pt-4 sm:gap-4/, 'the name sits below the photo or banner (never over it); only the round logo overlaps the gradient banner')
-  assert.match(catalogSecondaryTabsSource, /const hasFacts = detailFacts\.length > 0/, 'phone and address share one compact tray')
+  assert.match(catalogSecondaryTabsSource, /const hasFacts = Boolean\(addressText\) \|\| Boolean\(aboutEmail\) \|\| detailRows\.length > 0/, 'address, e-mail, chat and account rows share one compact tray')
   assert.doesNotMatch(catalogSecondaryTabsSource, /PortalSocialText|PORTAL_SOCIAL_ICONS/, 'About shows no social chips; the one Contact button opens the contact menu')
   assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
   assert.doesNotMatch(catalogPageSource, /<SectionShell title=\{copy\('loadingPortal', 'Loading customer portal\.\.\.'\)\}>\s*<div className="text-sm text-slate-500">Loading\.\.\.<\/div>\s*<\/SectionShell>\s*}\)/, 'public secondary tab fallback should not show the large generic loading card')
@@ -169,13 +169,13 @@ runTest('public portal About tab: story full width, contacts beside the map, and
   // future session can't make the same stale-carry-forward mistake again.
   assert.match(portalSocialRowSource, /messenger: MessengerIcon,/, 'public contact icon map should use the stylized MessengerIcon, not a generic MessageSquare stand-in')
   assert.match(catalogSecondaryTabsSource, /data-portal-about-details="true"[^>]*lg:grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)\]/, 'About tab contacts and map share one row on a large screen (2 Nov owner ask)')
-  assert.match(catalogSecondaryTabsSource, /<PortalEmbedConsent[\s\S]*?title=\{copy\('portal_a11y_map_title'/, 'About tab map still renders through the consent gate')
+  assert.match(catalogSecondaryTabsSource, /<iframe\s+src=\{mapEmbedUrl \|\| ''\}\s+title=\{copy\('portal_a11y_map_title'/, 'About tab map is a live iframe with its translated title')
   assert.match(catalogSecondaryTabsSource, /onClick=\{\(\) => openPortalImage\(previewConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), \[versionedBusinessLogo\]\)\}/, 'About tab logo should open the image lightbox on click')
   // 6.2 (Part 399, user): the LOGO left the top bar entirely. The clickable
   // logo lives on the About hero (pinned above); the header must carry
   // NO logo frame at all.
   assert.doesNotMatch(catalogPreviewSurfaceSource, /portal-logo-frame/, 'the top bar must not render a logo frame (6.2: logo removed from the header)')
-  assert.match(catalogPreviewSurfaceSource, /<div className="flex min-h-\[3\.25rem\] min-w-0 flex-1 flex-col justify-center sm:block sm:min-h-0">[\s\S]*?data-portal-header-icons/, 'the shop name takes the left of the one header row and the actions the right')
+  assert.match(catalogPreviewSurfaceSource, /<div className="flex min-h-\[3\.25rem\] min-w-0 flex-1 flex-col justify-center sm:block sm:min-h-0">[\s\S]*?<h1/, 'the shop name takes the left of the one header row; the actions moved to the dock')
 })
 
 runTest('portal cover paths are rendered as image sources instead of fragile CSS urls', () => {

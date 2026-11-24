@@ -12,6 +12,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { buildSync } from 'esbuild'
+import { buildPortalContactEntries } from '../src/components/catalog/portalSocialLinks.ts'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from '../src/components/catalog/faqStarterText.ts'
@@ -146,39 +147,25 @@ runTest('FAQ: no match shows the query with an icon-only Clear button; a matchin
   assert.doesNotMatch(some, /No question matches/)
 })
 
-runTest('FAQ: loading is a 4-row skeleton; empty is a contact card', () => {
+const chatRows = [{ key: 'phone-0', platform: 'phone', href: 'tel:012345678', label: '012 345 678', accessibleName: 'Phone: 012 345 678', latin: true }]
+
+runTest('FAQ: loading is a 4-row skeleton; empty is a card with the chat rows', () => {
   const loading = html(faqProps({ faqLoading: true, publicFaqItems: [] }))
   assert.match(loading, /data-portal-faq-skeleton/)
   assert.equal((loading.match(/min-h-\[3\.75rem\]/g) || []).length, 4)
-  const empty = html(faqProps({ publicFaqItems: [], onOpenContact: () => {} }))
+  const empty = html(faqProps({ publicFaqItems: [], contactEntries: chatRows }))
   assert.match(empty, /No questions yet\./)
-  assert.match(empty, />Contact</)
+  assert.match(empty, /href="tel:012345678"/)
+  assert.doesNotMatch(empty, />Contact</, 'no Contact button')
   assert.doesNotMatch(empty, /any time/, 'the retired promise is gone')
 })
 
-runTest('FAQ: the closing card calls the open-contact callback and is absent without one', () => {
-  const withCallback = html(faqProps({ onOpenContact: () => {} }))
-  assert.match(withCallback, /Still have a question\?/)
-  assert.doesNotMatch(html(faqProps()), /Still have a question\?/)
-  let calls = 0
-  const tree = FaqList(listProps({ onOpenContact: () => { calls += 1 } }))
-  const buttons: Array<{ onClick?: () => void }> = []
-  const walk = (node: unknown): void => {
-    if (!node || typeof node !== 'object') return
-    const element = node as { type?: unknown; props?: { children?: unknown; onClick?: () => void } }
-    if (element.type === 'button' || (typeof element.type === 'function' && element.props?.onClick)) buttons.push(element.props as { onClick?: () => void })
-    if (typeof element.type === 'function' && element.type.name === 'PortalContactButton') {
-      const rendered = (element.type as (p: unknown) => unknown)(element.props)
-      walk(rendered)
-    }
-    const children = element.props?.children
-    for (const child of Array.isArray(children) ? children : [children]) walk(child)
-  }
-  walk(tree)
-  const contact = buttons.filter((button) => button.onClick).pop()
-  assert.ok(contact?.onClick, 'a contact button is rendered')
-  contact.onClick()
-  assert.equal(calls, 1, 'clicking it opens the contact sheet')
+runTest('FAQ: the closing card shows the chat rows and is absent without any', () => {
+  const withRows = html(faqProps({ contactEntries: chatRows }))
+  assert.match(withRows, /Still have a question\?/)
+  assert.match(withRows, /data-portal-faq-contact="true"[\s\S]*?href="tel:012345678"/, 'the row itself is the link')
+  assert.doesNotMatch(withRows, />Contact</, 'no Contact button')
+  assert.doesNotMatch(html(faqProps()), /Still have a question\?/, 'control: no chat channel, no closing card')
 })
 
 // ---- Starter FAQ ---------------------------------------------------------
@@ -330,8 +317,8 @@ const aboutProps = (over: Record<string, unknown> = {}, config: Record<string, u
   copy: copyFor('en'),
   previewConfig: { businessName: 'Leang Cosmetics', title: 'Leang Cosmetics', businessTagline: 'Beauty in Phnom Penh', showLogo: false, aboutTitle: 'About', aboutContent: 'Our story.', ...config },
   openPortalImage: () => {},
-  businessFacts: [{ key: 'phone', label: 'Phone', value: '+855 12 345 678', href: 'tel:+855 12 345 678' }],
-  socialLinks: [],
+  // The business phone goes through the one builder, so the link is the clean tel: link whatever the number looks like.
+  contactEntries: buildPortalContactEntries({ phone: '+855 12 345 678', language: 'en' }).chat,
   ...over,
 })
 
@@ -350,7 +337,7 @@ runTest('About: the Leang icon replaces initials when no logo is shown', () => {
   assert.doesNotMatch(out, />LE</, 'no initials')
 })
 
-runTest('About: the phone link is a clean tel: link', () => {
+runTest('About: the phone row in the details card is a clean tel: link', () => {
   const out = html(aboutProps())
   assert.match(out, /href="tel:\+85512345678"/)
   assert.doesNotMatch(out, /href="tel:\+855 12/)

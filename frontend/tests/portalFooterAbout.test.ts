@@ -45,7 +45,7 @@ assert.equal('portal_legal_footer_follow' in PORTAL_LEGAL_KM, false, 'the Follow
 
 // Google Translate runs on this page for four languages: names, numbers and addresses are left alone, labels and sentences stay translatable.
 const footerBody = footer.slice(footer.indexOf('const details'), footer.indexOf('data-portal-footer-policies="true"'))
-for (const value of ['details.name', 'details.legalName', 'details.registrationNumber', 'details.address', 'details.phone', 'details.email', 'telegramLink.label']) {
+for (const value of ['details.name', 'details.legalName', 'details.registrationNumber', 'details.address', 'details.phone', 'details.email']) {
   const token = '{' + value + '}'
   let from = 0
   let sites = 0
@@ -59,6 +59,7 @@ for (const value of ['details.name', 'details.legalName', 'details.registrationN
   }
   assert.ok(sites > 0, `${value} is shown in the footer`)
 }
+assert.ok(!footerBody.includes('{telegramLink.label}'), 'the takedown sentence points at the page and no longer repeats the Telegram handle')
 assert.ok(socialColumn.includes('<span className="notranslate" translate="no"><PortalSocialText'), 'the account names in the Contact column are not translated')
 assert.ok(!footerBody.includes('translate="no">{link.label}'), 'quick-link labels stay translatable')
 assert.ok(!footerBody.includes("translate=\"no\">{text("), 'footer labels and headings stay translatable')

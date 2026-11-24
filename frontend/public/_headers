@@ -11,7 +11,7 @@
 # Content-Security-Policy and drop 'unsafe-inline'.
 #
 # The allowed origins are the storefront's real third parties and nothing
-# else: the Google Maps frame (two-click, see legal/PortalEmbedConsent.tsx) and
+# else: the Google Maps frame (the About map, CatalogSecondaryTabs.tsx) and
 # Google Translate, which loads only after a visitor picks Chinese, French or
 # Spanish (portalTranslateController.ts).
 # camera=(self) stays permitted because the barcode scanner needs it.

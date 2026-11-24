@@ -119,38 +119,21 @@ check('1b the alpha rail is exempt from the coarse-pointer 44px aria-label floor
   )
 })
 
-check('1c the header action row is exempt from the same floor', () => {
-  // CATCHES: the header's social-links and wishlist/account/language/theme
-  // rows intentionally shrink to h-8/h-9 (32/36px) below `sm` so they fit on
-  // one row (check 2) -- every icon in them carries an aria-label too, so
-  // without this exemption the 44px floor silently re-widens them past that
-  // width and reopens the same overflow the nowrap fix closed.
-  assert.equal(
-    (catalogPreviewSurface.match(/data-portal-header-icons=""/g) || []).length,
-    1,
-    'the one action row (contact, saved, list, account, language, theme) must carry the exemption hook',
-  )
-  assert.match(coarsePointerBlock, /\[data-portal-header-icons\] a\[aria-label\]/, 'the header-icon exemption must live inside the SAME pointer:coarse block as the 44px floor')
-  assert.match(
-    coarsePointerBlock,
-    /\[data-portal-header-icons\] a\[aria-label\],[\s\S]{0,400}\[data-portal-header-icons\] button\[aria-label\][\s\S]{0,200}min-width: 0;[\s\S]{0,40}min-height: 0;/,
-    'the exemption must cover both <a> and <button> icons (social links are anchors, account/wishlist/theme are buttons) and revert to 0',
-  )
+check('1c the header-icon exemption from the 44px floor is gone with the header icons', () => {
+  // The header no longer holds buttons (the dock does, and its smallest button is 48 px, above the floor), so nothing needs an exemption.
+  assert.equal((catalogPreviewSurface.match(/data-portal-header-icons/g) || []).length, 0, 'no header action row remains to carry the hook')
+  assert.doesNotMatch(coarsePointerBlock, /data-portal-header-icons/, 'a dead exemption selector is left in the pointer:coarse block')
+  assert.match(coarsePointerBlock, /\[data-alpha-rail\] button/, 'control: the block still carries the live rail exemption, so this scan can see an exemption')
 })
 
 // --- 2. Social icons on one row ---------------------------------------------
 
-check('2 the header icon rows never wrap on a phone', () => {
-  // CATCHES `flex-wrap` splitting Facebook/Instagram from Telegram (or
-  // wishlist/account from language/theme) onto a second row at 320-375px.
-  assert.ok(!/flex flex-wrap items-center justify-end/.test(catalogPreviewSurface), 'the action row must not wrap')
-  assert.match(catalogPreviewSurface, /data-portal-header-icons="" className="flex shrink-0 flex-nowrap items-center justify-end gap-0 sm:gap-1"/, 'actions: nowrap + no gap below sm, never shrunk themselves')
-  // Six actions share the row with the name. They are 44 px square on a phone
-  // (the gap between them closed to make room) and 40 px from sm up.
-  const iconClass = /const HEADER_ICON_CLASS = '(inline-flex h-11 w-11 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full[^']*)'/.exec(catalogPreviewSurface)
-  assert.ok(iconClass, 'the shared header button class: 44 px square on a phone, 40 px from sm')
-  const used = (catalogPreviewSurface.match(/HEADER_ICON_CLASS/g) || []).length
-  assert.ok(used >= 5, `expected the shared class on every header button, found ${used - 1} users`)
+check('2 the dock stack never wraps and the phone dock is one button', () => {
+  // CATCHES a dock that turns into a second row of buttons at 320-375px: below md there is exactly one round button.
+  const dock = read('src/components/catalog/PortalDock.tsx')
+  assert.match(dock, /data-portal-dock-wide="" className="pointer-events-auto hidden flex-col items-end gap-2 min-\[1888px\]:flex"/, 'wide: one vertical stack, only where there is room beside the content (1888 px)')
+  assert.match(dock, /data-portal-dock-small="" className=\{`pointer-events-auto \$\{frame \? '' : 'min-\[1888px\]:hidden'\}`\}/, 'below 1888 px: one button, at every width')
+  assert.doesNotMatch(dock, /flex-wrap/, 'the dock must not wrap')
   assert.doesNotMatch(catalogPreviewSurface, /inline-flex h-8 w-8 shrink-0/, 'a 32px-tall header icon is back')
 })
 
@@ -161,14 +144,16 @@ check('2 the header icon rows never wrap on a phone', () => {
 // (PortalContactFloat) shown from the first paint, each opening its chat directly, so there is no stub to expand
 // and no minimize control. What this check still guards: no remembered state, no overlaid or hover-gated control,
 // 44px targets, and the retired pieces staying retired.
-check('3 Contact is one header button that opens a menu: no floating buttons, no minimize stub', () => {
+check('3 Contact is one dock button that opens a menu: no floating buttons, no minimize stub', () => {
   assert.doesNotMatch(publicCatalogPage, /contactMinimized|setContactMinimized/, 'the page keeps no minimized state')
   assert.doesNotMatch(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY/, 'no remembered state can bring a stub back')
   assert.doesNotMatch(publicCatalogPage, /PortalContactFloat/, 'the floating chat buttons are gone')
   assert.doesNotMatch(portalSocialRow, /PortalContactFloat|data-portal-contact-float/, 'and so is their component')
-  assert.match(catalogPreviewSurface, /data-portal-contact-trigger=""/, 'the header Contact button is the one contact control')
-  assert.match(catalogPreviewSurface, /HEADER_CONTACT_CLASS = `inline-flex h-11 w-11 sm:h-10/, 'a 44 px target, icon alone on a phone')
-  assert.match(catalogPreviewSurface, /<span translate="no" className="notranslate hidden sm:inline">\{copy\('contactButton', 'Contact'/, 'the word Contact shows from sm up')
+  const dock = read('src/components/catalog/PortalDock.tsx')
+  assert.match(dock, /data-portal-contact-trigger=""/, 'the dock Contact button is the one contact control')
+  assert.match(dock, /CONTACT_BUTTON = .inline-flex h-12 /, 'a 48 px target')
+  assert.match(dock, /<span translate="no" className="notranslate">\{copy\('contactButton', 'Contact'/, 'the word Contact shows on the wide dock, no-translate')
+  assert.doesNotMatch(catalogPreviewSurface, /data-portal-contact-trigger/, 'the header holds no Contact button')
 })
 
 // P-public-5: the minimized icon IS the contact button (one tap expands and

@@ -22,11 +22,14 @@ import {
   LEGAL_PAGE_ORDER,
   LEGAL_PAGE_SECTIONS,
   LEGAL_PAGE_TITLE_KEY,
+  LEGAL_KEEP_OFFICIAL_KEYS,
   LEGAL_STORAGE_ROWS,
   formatLegalLastUpdated,
   interpolateLegal,
   isLegalPageKey,
-  legalText,
+  legalCopy,
+  padProtectedSegments,
+  protectLegalFacts,
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
 import { lockDocumentScroll } from '../../shared/documentScrollLock.ts'
@@ -71,8 +74,23 @@ type LegalOpenDetail = { page: LegalPageKey; handled: boolean }
 
 const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200'
 
-const CONCERNS_CONTACT_EN = 'If something on this site is about you, or you are concerned about an image, contact us on {contact}. We review every request and ask only for the information needed to identify the content and the person making the request.'
-const CONCERNS_CONTACT_KM = 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទងយើងតាម {contact}។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។'
+/**
+ * Legal text rendered so the machine translators leave the shop's own details and the AI provider names alone: those sit in
+ * <span translate="no" className="notranslate">, everything else stays in its sentence (see protectLegalFacts for why). The
+ * visible text is unchanged (the segments join back to the input).
+ */
+export function ProtectedText({ text, literals = [] }: { text: string; literals?: readonly string[] }) {
+  return (
+    <>
+      {padProtectedSegments(protectLegalFacts(text, literals)).map((part, index) => (
+        part.protect ? <span key={index} translate="no" className="notranslate">{part.text}</span> : part.text
+      ))}
+    </>
+  )
+}
+
+const CONCERNS_CONTACT_EN = 'If something on this site is about you, or you are concerned about an image, contact us using the contact details on this page. We review every request and ask only for the information needed to identify the content and the person making the request.'
+const CONCERNS_CONTACT_KM = 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទងយើងតាមព័ត៌មានទំនាក់ទំនងនៅលើទំព័រនេះ។ យើងពិនិត្យរាល់សំណើ ហើយសុំតែព័ត៌មានដែលត្រូវការ ដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។'
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
@@ -168,7 +186,7 @@ export default function PortalFooter({
   // first (so a future translation of portal_legal_* just works), then the
   // en/km text declared in legalContent.ts.
   const text = useCallback(
-    (key: string) => copy(key, legalText('en', key), legalText('km', key)),
+    (key: string) => legalCopy(copy, key),
     [copy],
   )
 
@@ -197,10 +215,15 @@ export default function PortalFooter({
     return () => { live = false }
   }, [activePage])
 
+  // The shop's own details, exactly as the page prints them: the legal text protects each wherever a sentence repeats it.
+  const factLiterals = useMemo(
+    () => [sanitizeBusinessDetail(businessName), details.legalName, details.registrationNumber, details.address, details.phone, details.email].filter(Boolean),
+    [businessName, details],
+  )
   const year = new Date().getFullYear()
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
   const telegramLink = socialLinks.find((link) => (link.platform ?? link.key) === 'telegram')
-  const [concernsBefore, concernsAfter = ''] = copy('portalFooterConcernsContact', CONCERNS_CONTACT_EN, CONCERNS_CONTACT_KM).split('{contact}')
+  const concernsContact = copy('portalFooterConcernsContact', CONCERNS_CONTACT_EN, CONCERNS_CONTACT_KM)
 
   const openPage = useCallback((page: LegalPageKey) => {
     // The opener -- one of the footer's always-visible policy links, or the
@@ -339,19 +362,9 @@ export default function PortalFooter({
                 is hidden only when none of the three is configured: a contact
                 route with nowhere to send it is worse than no route. */}
             {details.email ? (
-              <div className="pt-1">{fill('portal_legal_footer_content_concerns')}</div>
+              <div className="pt-1"><ProtectedText text={fill('portal_legal_footer_content_concerns')} literals={factLiterals} /></div>
             ) : telegramLink || details.phone ? (
-              <div className="pt-1">
-                {concernsBefore}
-                {telegramLink ? (
-                  <a className={INLINE_LINK_CLASS} href={telegramLink.value} target="_blank" rel="noreferrer">
-                    <span className="notranslate" translate="no">{telegramLink.label}</span>
-                  </a>
-                ) : contactHref('tel', details.phone) ? (
-                  <a className={`${INLINE_LINK_CLASS} notranslate`} translate="no" href={contactHref('tel', details.phone)}>{details.phone}</a>
-                ) : <span className="notranslate" translate="no">{details.phone}</span>}
-                {concernsAfter}
-              </div>
+              <div className="pt-1">{concernsContact}</div>
             ) : null}
           </div>
 
@@ -415,8 +428,8 @@ export default function PortalFooter({
         </div>
         <div className="mx-auto mt-6 flex max-w-5xl flex-wrap items-center justify-between gap-x-4 border-t border-slate-200 pt-4 text-[11px] leading-relaxed text-slate-500 dark:border-neutral-800 dark:text-neutral-500">
           <div className="min-w-0">
-            <p>{fill('portal_legal_footer_rights')}</p>
-            <p data-portal-footer-independent="true">{text('portal_legal_footer_independent')}</p>
+            <p><ProtectedText text={fill('portal_legal_footer_rights')} literals={factLiterals} /></p>
+            <p data-portal-footer-independent="true"><ProtectedText text={text('portal_legal_footer_independent')} literals={factLiterals} /></p>
           </div>
           <a
             href="/THIRD_PARTY_NOTICES.txt"
@@ -431,7 +444,7 @@ export default function PortalFooter({
       </footer>
 
       {activePage ? (
-        <LegalReader page={activePage} text={text} fill={fill} details={details} onClose={closePage} onNavigate={openPage} aiState={aiState} pick={pick} />
+        <LegalReader page={activePage} text={text} fill={fill} details={details} literals={factLiterals} onClose={closePage} onNavigate={openPage} aiState={aiState} pick={pick} />
       ) : null}
     </>
   )
@@ -442,6 +455,7 @@ function LegalReader({
   text,
   fill,
   details,
+  literals,
   onClose,
   onNavigate,
   aiState,
@@ -451,6 +465,7 @@ function LegalReader({
   text: (key: string) => string
   fill: (key: string) => string
   details: LegalBusinessDetails
+  literals: readonly string[]
   onClose: () => void
   onNavigate: (page: LegalPageKey) => void
   aiState: AiProviderState
@@ -547,21 +562,24 @@ function LegalReader({
 
       <div className="mx-auto max-w-3xl px-4 pb-16 pt-5 text-sm leading-7">
         <p data-portal-legal-last-updated="true" className="text-xs leading-6 text-slate-500 dark:text-neutral-500">
-          {text('portal_legal_last_updated').replace('{date}', formatLegalLastUpdated())}
+          <ProtectedText text={text('portal_legal_last_updated').replace('{date}', formatLegalLastUpdated())} />
         </p>
         <p data-portal-legal-updated="true" className="mt-1 text-xs leading-6 text-slate-600 dark:text-neutral-400">
-          {fill('portal_legal_updated_notice')}
+          <ProtectedText text={fill('portal_legal_updated_notice')} />
+        </p>
+        <p data-portal-legal-official-notice="true" className="mt-1 text-xs font-medium leading-6 text-slate-700 dark:text-neutral-300">
+          <ProtectedText text={text('portal_legal_official_notice')} />
         </p>
 
         <BusinessIdentityCard text={text} details={details} />
 
         {LEGAL_PAGE_SECTIONS[page].map((section) => (
           <section key={section.heading} className="mt-6">
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{fill(section.heading)}</h2>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-neutral-100"><ProtectedText text={fill(section.heading)} literals={literals} /></h2>
             {section.bodies.map((body) => (
               body === 'portal_legal_privacy_ai_b'
-                ? <AiProviderParagraphs key={body} body={body} state={aiState} text={text} fill={fill} pick={pick} />
-                : <p key={body} className="mt-2 whitespace-pre-line">{fill(body)}</p>
+                ? <AiProviderParagraphs key={body} body={body} state={aiState} text={text} fill={fill} pick={pick} literals={literals} />
+                : <p key={body} className="mt-2 whitespace-pre-line"><ProtectedText text={fill(body)} literals={literals} /></p>
             ))}
             {page === 'cookies' && section.heading === 'portal_legal_cookies_table_h' ? (
               <StorageTable text={text} />
@@ -589,28 +607,32 @@ function LegalReader({
 // The assistant paragraph of the privacy policy: neutral until the provider list
 // is known, "no AI provider" when the assistant is off, otherwise the provider
 // names, what each one does with a question, and a link to its own terms.
-export function AiProviderParagraphs({ body, state, text, fill, pick }: {
+export function AiProviderParagraphs({ body, state, text, fill, pick, literals = [] }: {
   body: string
   state: AiProviderState
   text: (key: string) => string
   fill: (key: string) => string
   pick: (en: string, km: string) => string
+  literals?: readonly string[]
 }) {
-  if (state.kind === 'off') return <p className="mt-2">{fill('portal_legal_privacy_ai_off')}</p>
-  if (state.kind === 'unknown') return <p className="mt-2">{fill(body)}</p>
+  // Keyed by state: Google may already have translated the other sentence in place, and React would patch the stale text.
+  if (state.kind === 'off') return <p key="ai-off" className="mt-2"><ProtectedText text={fill('portal_legal_privacy_ai_off')} literals={literals} /></p>
+  if (state.kind === 'unknown') return <p key="ai-unknown" className="mt-2"><ProtectedText text={fill(body)} literals={literals} /></p>
+  // The provider names are runtime data: each one is a fact the translator must not touch.
+  const withProviders = [...literals, ...state.providers.map((provider) => provider.displayName)]
   return (
     <>
-      <p className="mt-2">{fill('portal_legal_privacy_ai_named').replace('{providers}', pick(aiProviderNames(state, 'en'), aiProviderNames(state, 'km')))}</p>
+      <p className="mt-2"><ProtectedText text={fill('portal_legal_privacy_ai_named').replace('{providers}', pick(aiProviderNames(state, 'en'), aiProviderNames(state, 'km')))} literals={withProviders} /></p>
       {state.providers.map((provider) => (
         <p key={provider.id} className="mt-2" data-portal-ai-provider={provider.id}>
-          {pick(provider.retention.en, provider.retention.km)}{' '}
+          <ProtectedText text={pick(provider.retention.en, provider.retention.km)} literals={withProviders} />{' '}
           <a
             href={provider.policyUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex min-h-10 items-center break-words underline underline-offset-2"
           >
-            {text('portal_legal_ai_provider_terms').replace('{provider}', provider.displayName)}
+            <ProtectedText text={text('portal_legal_ai_provider_terms').replace('{provider}', provider.displayName)} literals={withProviders} />
           </a>
         </p>
       ))}
@@ -659,9 +681,11 @@ function StorageTable({ text }: { text: (key: string) => string }): ReactNode {
           {LEGAL_STORAGE_ROWS.map((row) => (
             <tr key={row.id} className="border-t border-slate-100 align-top dark:border-neutral-800">
               <td className="notranslate px-3 py-2 font-mono text-[11px] break-all text-slate-800 dark:text-neutral-200" translate="no">{row.name}</td>
-              <td className="px-3 py-2 whitespace-nowrap">{text(row.kindKey)}</td>
-              <td className="px-3 py-2">{text(row.purposeKey)}</td>
-              <td className="px-3 py-2">{text(row.lifetimeKey)}</td>
+              {LEGAL_KEEP_OFFICIAL_KEYS.includes(row.kindKey)
+                ? <td className="notranslate px-3 py-2 whitespace-nowrap" translate="no">{text(row.kindKey)}</td>
+                : <td className="px-3 py-2 whitespace-nowrap">{text(row.kindKey)}</td>}
+              <td className="px-3 py-2"><ProtectedText text={text(row.purposeKey)} /></td>
+              <td className="px-3 py-2"><ProtectedText text={text(row.lifetimeKey)} /></td>
             </tr>
           ))}
         </tbody>

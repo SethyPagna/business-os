@@ -9,9 +9,9 @@ import { isStandaloneDisplayMode } from './standaloneDisplay.ts'
 // chrome at all -- no back button, no address bar, no tab strip. A
 // `target="_blank"` link there opens a SECOND chromeless surface, and on iOS
 // the user's only way back to the till is to kill the app and relaunch it
-// from the icon. Eight such sites exist today; six are anchors (catalog
+// from the icon. Seven such sites exist today; five are anchors (catalog
 // editor, catalog preview, catalog products, catalog secondary tabs, the
-// portal embed map-consent fallback, the files responses citations) and none
+// files responses citations) and none
 // of them is worth editing individually: this is one delegated listener for
 // all of them, and for every one added later.
 //

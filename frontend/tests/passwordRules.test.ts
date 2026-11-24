@@ -99,12 +99,11 @@ await runTest('the storefront sign-up form and the public privacy text state the
   assert.ok(form.includes(`${server.MIN_PASSWORD_LENGTH} characters or more.`))
   assert.ok(form.includes(`minLength={PORTAL_MIN_PASSWORD_LENGTH}`), 'the field enforces the minimum itself')
   assert.ok(form.includes(`${khmerDigits(server.MIN_PASSWORD_LENGTH)} តួអក្សរឡើងទៅ។`))
-  const words: Record<number, string> = { 10: 'ten' }
-  for (const rel of ['../src/lang/en.json', '../src/components/catalog/legal/legalContent.ts']) {
-    assert.ok(read(rel).includes(`needs at least ${words[server.MIN_PASSWORD_LENGTH]} characters`), rel)
+    for (const rel of ['../src/lang/en.json', '../src/components/catalog/legal/legalContent.ts']) {
+    assert.ok(read(rel).includes(`needs at least ${server.MIN_PASSWORD_LENGTH} characters`), rel)
   }
   for (const rel of ['../src/lang/km.json', '../src/components/catalog/legal/legalContent.ts']) {
-    assert.ok(read(rel).includes(`ហើយត្រូវមានយ៉ាងតិច ${khmerDigits(server.MIN_PASSWORD_LENGTH)} តួអក្សរ`), rel)
+    assert.ok(read(rel).includes(`ត្រូវមានយ៉ាងតិច ${khmerDigits(server.MIN_PASSWORD_LENGTH)} តួអក្សរ`), rel)
   }
 })
 

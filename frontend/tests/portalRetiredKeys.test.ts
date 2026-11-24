@@ -13,8 +13,8 @@ import { PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/lega
 const here = path.dirname(fileURLToPath(import.meta.url))
 const readJson = (name: string) => JSON.parse(fs.readFileSync(path.join(here, '..', 'src', 'lang', name), 'utf8')) as Record<string, unknown>
 
-const RETIRED_PACK_KEYS = ['liveCatalog', 'liveCatalogNoStock', 'promotionsSectionHint', 'clickToViewDetails', 'productOfficialName', 'faqHint', 'assistantNotice', 'mapCard', 'noPaymentNotice', 'noPaymentNoticeShort', 'bucketHint', 'signupReminder', 'accountSubtitle', 'wishlistTitle', 'signedInAs', 'membershipIdHint', 'inYourList', 'accountMemoryHint', 'forgotPasswordHint', 'bucketEmpty']
-const RETIRED_LEGAL_KEYS = ['portal_legal_map_consent_b', 'portal_legal_map_consent_load', 'portal_legal_map_consent_link', 'portal_legal_consent_label', 'portal_legal_consent_read_terms', 'portal_legal_consent_read_privacy', 'portal_legal_footer_follow']
+const RETIRED_PACK_KEYS = ['portalGoogleNote', 'mapConsentLine', 'mapLoad', 'liveCatalog', 'liveCatalogNoStock', 'promotionsSectionHint', 'clickToViewDetails', 'productOfficialName', 'faqHint', 'assistantNotice', 'mapCard', 'noPaymentNotice', 'noPaymentNoticeShort', 'bucketHint', 'signupReminder', 'accountSubtitle', 'wishlistTitle', 'signedInAs', 'membershipIdHint', 'inYourList', 'accountMemoryHint', 'forgotPasswordHint', 'bucketEmpty']
+const RETIRED_LEGAL_KEYS = ['portal_legal_map_consent_revoke', 'portal_legal_store_map_consent_p', 'portal_legal_map_consent_b', 'portal_legal_map_consent_load', 'portal_legal_map_consent_link', 'portal_legal_consent_label', 'portal_legal_consent_read_terms', 'portal_legal_consent_read_privacy', 'portal_legal_footer_follow']
 const RETIRED_A11Y_KEYS = ['social_links', 'choose_account', 'contact_messenger', 'contact_telegram', 'contact_instagram', 'contact_whatsapp', 'contact_phone'].map((name) => `portal_a11y_${name}`)
 
 for (const key of RETIRED_PACK_KEYS) assert.equal(getPortalLanguageText('km', key), '', `${key} is back in the Khmer pack`)

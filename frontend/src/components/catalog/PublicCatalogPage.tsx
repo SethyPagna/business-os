@@ -8,12 +8,8 @@ import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
 import PullToRefreshIndicator from '../shared/PullToRefreshIndicator.tsx'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
-import Mail from 'lucide-react/dist/esm/icons/mail.js'
-import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
-import Phone from 'lucide-react/dist/esm/icons/phone.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
-import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import type { LucideIcon } from 'lucide-react'
 import { useApp } from '../../app/AppContextCore.tsx'
@@ -25,9 +21,7 @@ import { dismissPortalAnnouncement, readDismissedPortalAnnouncement, resolvePort
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
-import { buildPortalContactEntries, buildPortalSocialFromConfig, normalizePortalExternalUrl as normalizeExternalUrl, portalContactFooterLinks } from './portalSocialLinks.ts'
-import { contactHref } from '../../utils/socialLinks.ts'
-import PortalContactMenu, { type PortalContactAnchor } from './PortalContactMenu.tsx'
+import { buildPortalContactEntries, buildPortalSocialFromConfig, normalizePortalExternalUrl as normalizeExternalUrl, portalContactFooterLinks, portalFooterAccounts } from './portalSocialLinks.ts'
 import PortalSheet from './PortalSheet.tsx'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
@@ -575,10 +569,6 @@ export default function PublicCatalogPage() {
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
-  // The Contact menu opened from a button that belongs to another part of the page (the FAQ and About "Contact" buttons call openContactSheet with
-  // no trigger of their own): it opens beside whatever was pressed last, and focus goes back there when it closes.
-  const [contactAnchor, setContactAnchor] = useState<PortalContactAnchor | null>(null)
-  const lastPressRef = useRef<HTMLElement | null>(null)
   const [bucketCopyState, setBucketCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [scrollButtonsVisible, setScrollButtonsVisible] = useState(false)
   // Bumped by the pull-to-refresh gesture and by Retry to run the load effect
@@ -631,18 +621,6 @@ export default function PublicCatalogPage() {
   // feature on the real public portal (it only ever worked in the admin's
   // editable preview, CatalogPage.tsx, which tracks its own scroll
   // position). Same 220px threshold as that preview.
-  //
-  // NOTE on the `!bucketOpen && !contactAnchor` guard at the call site below:
-  // these buttons render at z-[70] (bottom-left), which is intentionally
-  // *above* the bucket drawer (z-[60]) and contact popover (z-[65]) so they
-  // don't get trapped underneath either overlay. But that same ordering
-  // means that without this guard, scrolling past 220px and then opening
-  // either modal would leave the scroll buttons floating on top of the
-  // modal's dimmed backdrop, fully clickable -- visually intruding on the
-  // modal and letting a tap scroll the page behind it while the modal is
-  // supposed to have focus. Tying visibility to the overlay state keeps
-  // them hidden/inert for as long as either modal is open, same as any
-  // other page-content control would be.
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
     const updateVisibility = () => {
@@ -1008,25 +986,22 @@ export default function PublicCatalogPage() {
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
   const mapEmbedUrl = displayConfig.showGoogleMap && activeTab === 'about' ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '') : ''
   const businessFacts = [
-    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: contactHref('tel', displayConfig.businessPhone), icon: Phone },
-    { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: contactHref('mailto', displayConfig.businessEmail), icon: Mail },
-    { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink), icon: MapPin },
+    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone },
+    { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address') || null
-  // One builder for the header's Contact menu, About and the footer: the visible text is the owner's label, else the real account name (never the
-  // platform word when a name is known, never a leading "@"). Chat channels and page links are one list, with the same names everywhere.
+  // One builder for the dock's Contact panel, the inline chat rows, About and the footer: the visible text is the owner's label, else the real account
+  // name (never the platform word when a name is known, never a leading "@"). Chat entries (Phone, Messenger, Telegram, WhatsApp) and account entries
+  // (Facebook, Instagram, TikTok, Telegram channel, Website) are two lists; the footer drops what the screen already shows (portalFooterAccounts).
   const socialBuilt = buildPortalSocialFromConfig(displayConfig, pageLanguage)
-  const contactEntries = buildPortalContactEntries({
+  const { chat: contactEntries, accounts: accountEntries } = buildPortalContactEntries({
     social: socialBuilt.social,
     contact: socialBuilt.contact,
     phone: businessFacts.find((item) => item.key === 'phone')?.value,
-    email: businessFacts.find((item) => item.key === 'email')?.value,
-    mapHref: addressFact?.href,
-    address: addressFact?.value,
     shopName: displayConfig.businessName || displayConfig.title,
     language: pageLanguage,
   })
-  const socialLinks = portalContactFooterLinks(contactEntries)
+  const socialLinks = portalContactFooterLinks(portalFooterAccounts(accountEntries, contactEntries, { tab: activeTab, listOpen: Boolean(listView) }))
   const assistantCategoryOptions = useMemo(() => Array.from(new Set(products.map((item) => String(item.category || '').trim()).filter(Boolean))).slice(0, 40), [products])
 
   const toggleFilterValue = (values: string[], setter: Dispatch<SetStateAction<string[]>>, value: string) => {
@@ -1210,16 +1185,6 @@ export default function PublicCatalogPage() {
       })
   }
 
-  // The FAQ and About Contact buttons open the same menu as the header's, beside the button that was pressed.
-  const openContactSheet = () => {
-    const opener = lastPressRef.current
-    const rect = opener?.isConnected ? opener.getBoundingClientRect() : null
-    setContactAnchor(rect
-      ? { top: rect.top, left: rect.left, width: rect.width, height: rect.height, opener }
-      : { top: Math.max(0, window.innerHeight - 96), left: Math.round(window.innerWidth / 2), width: 1, height: 1, opener: null })
-  }
-  const closeContactSheet = useCallback(() => setContactAnchor(null), [])
-
   const storefrontSkeleton = <PublicStorefrontSkeleton label={copy('loadingPortal', 'Loading website...')} />
   const loadFailedText = copy('portalLoadFailed', "We couldn't open the shop. Check your connection and try again.", 'យើងមិនអាចបើកហាងបានទេ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត ហើយព្យាយាមម្ដងទៀត។')
   const loadFailedPanel = (
@@ -1320,13 +1285,14 @@ export default function PublicCatalogPage() {
         openPortalImage={openPortalImage}
         mapEmbedUrl={mapEmbedUrl}
         addressFact={addressFact}
-        businessFacts={businessFacts}
+        emailText={displayConfig.showEmail ? String(displayConfig.businessEmail || '') : ''}
+        accountEntries={accountEntries}
         versionedBusinessLogo={businessLogoUrl}
         versionedBusinessCover={coverState === 'failed' ? '' : businessCoverUrl}
         publicFaqItems={publicFaqItems}
         expandedFaqId={expandedFaqId}
         setExpandedFaqId={setExpandedFaqId}
-        onOpenContact={contactEntries.length > 0 ? openContactSheet : undefined}
+        contactEntries={contactEntries}
         faqLoading={!realConfigInHand}
         openProductById={openProductById}
         catalogProducts={products}
@@ -1478,7 +1444,7 @@ export default function PublicCatalogPage() {
   // gallery/lightbox or either drawer/popover is open, so a pull-down
   // gesture inside one of those (which have their own pinch/pan/scroll
   // handling) is never mistaken for a page-level refresh pull.
-  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !listView && !contactAnchor && !filePicker.open && !accountOpen
+  const pullToRefreshEnabled = !productGalleryView.open && !portalImageView.open && !listView && !filePicker.open && !accountOpen
   const { pullDistance: publicPullDistance, refreshing: publicPullRefreshing } = usePullToRefresh(
     publicPageRootRef,
     () => {
@@ -1490,10 +1456,10 @@ export default function PublicCatalogPage() {
     pullToRefreshEnabled,
   )
 
-  // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason). It is pinned to the bottom: the
-  // header is one row that holds Contact, List, Account and Language, and a notice over the top hid all of them on an iPhone until it was
-  // closed. The band publishes how much of the bottom it covers (--install-band-clearance); the page root pads by that much so the footer
-  // links scroll clear of it, and the List button rides above it on a phone. From sm it takes the left corner, opposite the List button.
+  // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason). It is pinned to the bottom, never the
+  // top: a notice over the top hid the header on an iPhone until it was closed. The band publishes how much of the bottom it covers
+  // (--install-band-clearance); the page root pads by that much so the footer links scroll clear of it, and the dock rides above it on a
+  // phone. From sm it takes the left corner, opposite the dock.
   const installBand = offersShopInstall ? (
     <div
       data-portal-install-notice=""
@@ -1501,22 +1467,6 @@ export default function PublicCatalogPage() {
     >
       <InstallPromptBand translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} />
     </div>
-  ) : null
-
-  // The floating List button: only on the Products tab, and only once the list has something in it.
-  const bucketFab = activeTab === 'products' && bucket.count > 0 && !listView ? (
-    <button
-      type="button"
-      className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] max-[639px]:bottom-[max(calc(1.25rem+env(safe-area-inset-bottom)),calc(var(--install-band-clearance,0px)+0.5rem))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-2 rounded-full bg-[#23201b] px-4 py-3 text-[#f4f1ea] shadow-xl transition hover:bg-stone-700 dark:bg-neutral-100 dark:text-neutral-950 dark:hover:bg-neutral-300"
-      onClick={() => openListView('list')}
-      aria-label={copy('bucketTitle', 'My List')}
-      title={copy('bucketTitle', 'My List')}
-    >
-      <ClipboardList className="h-5 w-5" />
-      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-700 px-1 text-[11px] font-bold text-white">
-        {bucket.count}
-      </span>
-    </button>
   ) : null
 
   return (
@@ -1530,16 +1480,11 @@ export default function PublicCatalogPage() {
       onDragStartCapture={(event) => {
         if (event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
       }}
-      onClickCapture={(event) => {
-        lastPressRef.current = event.target instanceof Element ? event.target.closest<HTMLElement>('button, a, [role="button"]') : null
-      }}
       onAuxClickCapture={(event) => {
         if (event.button === 1 && event.target instanceof Element && event.target.closest('img, video, [data-protected-media="true"]')) event.preventDefault()
       }}
     >
     {installBand}
-    {bucketFab}
-    {contactAnchor ? <PortalContactMenu entries={contactEntries} copy={copy} anchor={contactAnchor} onClose={closeContactSheet} /> : null}
     {accountDrawer}
     {portalAccount.consentRenewal ? (
       <Suspense fallback={null}>
@@ -1581,10 +1526,10 @@ export default function PublicCatalogPage() {
       listCount={bucket.count}
       listPage={listPage}
       accountSignedIn={!!portalAccount.account}
+      accountName={portalAccount.account?.name}
+      dockHidden={accountOpen || !!portalAccount.consentRenewal}
       contactEntries={contactEntries}
       publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
-      publicPortalNavPinned={false}
-      publicPortalNavMetrics={{ left: 0, width: 0, height: 0 }}
       catalogSection={!loadFailed && activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={loadFailed ? loadFailedPanel : secondaryTabSection}
       footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}
@@ -1599,7 +1544,7 @@ export default function PublicCatalogPage() {
       productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}
       announcement={announcement}
       onDismissAnnouncement={dismissAnnouncement}
-      publicScrollButtonsVisible={scrollButtonsVisible && !contactAnchor}
+      publicScrollButtonsVisible={scrollButtonsVisible}
       scrollPublicPortal={scrollPublicPortal}
       productGalleryView={productGalleryView}
       setProductGalleryView={setProductGalleryView}

@@ -92,14 +92,14 @@ test.describe('Search joined to the section tabs', () => {
     })
   }
 
-  test('the tab bar with the search stays pinned while the products scroll', async ({ page }) => {
-    // CATCHES: a docked search that scrolls away with the page (the card used to be sticky on its own).
+  test('the tab bar with the search scrolls away with the page (nothing is sticky)', async ({ page }) => {
+    // CATCHES: a tab bar or docked search that pins to the top again (owner: "Let them scroll away").
     await openProducts(page, 1280)
     await page.evaluate(() => window.scrollTo(0, 1600))
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(1000)
     const bar = await nav(page).boundingBox()
-    expect(bar!.y).toBeLessThanOrEqual(12)
-    await expect(page.locator('#portal-product-search')).toBeInViewport()
+    expect(bar!.y + bar!.height, 'the bar is above the viewport').toBeLessThanOrEqual(0)
+    await expect(page.locator('#portal-product-search')).not.toBeInViewport()
   })
 
   test('typing in the docked search narrows the products; clearing restores them', async ({ page }) => {

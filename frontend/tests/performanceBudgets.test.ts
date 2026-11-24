@@ -135,6 +135,11 @@ const CATALOG_PRODUCTS_D1_BELL_GROWTH_BYTES = 520
 // = 982,397 B / 31 chunks, with the guard 984,169 B / 31): signed-in marker, session-answer gate, storage listener, script removal with one reload. Same pattern as 6.0.1048:
 // the baseline above stays, and the ceiling is the old one plus what this client code really weighs (about 800 B of headroom).
 const CATALOG_PRODUCTS_TRANSLATE_GUARD_GROWTH_BYTES = 1_772
+// Storefront dock (lane/web-storefront-dock, owner asks A57-A65 of 21 Nov: one bottom-right dock for Contact, the one shop icon, Account, Language and
+// Theme; Contact holds chat channels only, accounts are shown as information; light-mode tones): measured closure 985,523 B / 31 chunks after the lane won
+// back 743 B (wording tip 984,481 B). The rest is catalog-public-core (the chat/account split and the tone tokens the storefront and the editor preview share).
+// Release lead's ruling (21 Nov): ceiling = the measured figure rounded up to the next 100, 985,600 B; any later growth needs a new ruling with numbers.
+const CATALOG_PRODUCTS_DOCK_GROWTH_BYTES = 623
 const CATALOG_PRODUCTS_BASELINE_CHUNKS = 28
 const PUBLIC_PRELOAD_BASELINE_CHUNKS = 36
 const BUDGET_TOLERANCE = 1.10
@@ -156,8 +161,8 @@ await runTest('the catalog-products closure stays within +10% of its measured ba
     'no chunk of the catalog-products closure carries the Expenses report endpoint',
   )
   assert.ok(
-    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES + CATALOG_PRODUCTS_B4_GROWTH_BYTES + CATALOG_PRODUCTS_D1_GROWTH_BYTES + CATALOG_PRODUCTS_D1_BELL_GROWTH_BYTES + CATALOG_PRODUCTS_TRANSLATE_GUARD_GROWTH_BYTES,
-    `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048, the ${CATALOG_PRODUCTS_B4_GROWTH_BYTES} bytes of B4, the ${CATALOG_PRODUCTS_D1_GROWTH_BYTES} bytes of the D1 audit and the ${CATALOG_PRODUCTS_TRANSLATE_GUARD_GROWTH_BYTES} bytes of the Translate guard: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
+    bytes <= CATALOG_PRODUCTS_BASELINE_BYTES * BUDGET_TOLERANCE + CATALOG_PRODUCTS_P07_GROWTH_BYTES + CATALOG_PRODUCTS_B4_GROWTH_BYTES + CATALOG_PRODUCTS_D1_GROWTH_BYTES + CATALOG_PRODUCTS_D1_BELL_GROWTH_BYTES + CATALOG_PRODUCTS_TRANSLATE_GUARD_GROWTH_BYTES + CATALOG_PRODUCTS_DOCK_GROWTH_BYTES,
+    `catalog-products closure grew past +10% of the ${CATALOG_PRODUCTS_BASELINE_BYTES}-byte baseline plus the ${CATALOG_PRODUCTS_P07_GROWTH_BYTES} bytes of 6.0.1048, the ${CATALOG_PRODUCTS_B4_GROWTH_BYTES} bytes of B4, the ${CATALOG_PRODUCTS_D1_GROWTH_BYTES} bytes of the D1 audit and the ${CATALOG_PRODUCTS_TRANSLATE_GUARD_GROWTH_BYTES} bytes of the Translate guard and the ${CATALOG_PRODUCTS_DOCK_GROWTH_BYTES} bytes of the storefront dock: ${bytes} bytes (${chunks} chunks) -- update the baseline deliberately if this growth is expected, do not just raise the tolerance`,
   )
   assert.ok(
     chunks <= Math.ceil(CATALOG_PRODUCTS_BASELINE_CHUNKS * BUDGET_TOLERANCE),

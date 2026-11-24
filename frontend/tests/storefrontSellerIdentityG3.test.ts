@@ -63,41 +63,49 @@ const CONCERNS_KM = /បើមានខ្លឹមសារអំពីអ្�
 runTest('with an e-mail the concerns line names the e-mail, as before', () => {
   const html = footer({ email: 'hello@example.com', phone: '012 345 678', socialLinks: [TELEGRAM] })
   assert.match(html, CONCERNS_EN)
-  assert.match(html, /contact hello@example\.com\./)
-  assert.doesNotMatch(html, /contact us on/, 'the fallback wording is not used while an e-mail exists')
+  assert.match(html, /contact<span\b[^>]*> hello@example\.com<\/span>\./)
+  assert.doesNotMatch(html, /contact us using the contact details on this page/, 'the fallback wording is not used while an e-mail exists')
 })
 
-runTest('without an e-mail the concerns line points to the Telegram link, then the phone', () => {
+const POINTS_AT_THE_PAGE = /contact us using the contact details on this page\. We review every request/
+
+runTest('without an e-mail the concerns line points at the contact details on the page and repeats none of them', () => {
   const viaTelegram = footer({ phone: '012 345 678', socialLinks: [TELEGRAM] })
   assert.match(viaTelegram, CONCERNS_EN)
-  assert.match(viaTelegram, /contact us on <a [^>]*href="https:\/\/t\.me\/leangcosmetics"[^>]*><span[^>]*>Telegram<\/span><\/a>\./)
+  assert.match(viaTelegram, POINTS_AT_THE_PAGE)
+  assert.match(viaTelegram, /href="https:\/\/t\.me\/leangcosmetics"/, 'the Telegram link the sentence points at is in the same footer')
+  assert.doesNotMatch(viaTelegram, /contact us on/, 'the sentence does not repeat the handle')
   assert.doesNotMatch(viaTelegram, /\{contact\}/)
 
   const viaPhone = footer({ phone: '012 345 678', socialLinks: [] })
   assert.match(viaPhone, CONCERNS_EN)
-  assert.match(viaPhone, /contact us on <a [^>]*href="tel:012345678"[^>]*>012 345 678<\/a>\./)
+  assert.match(viaPhone, POINTS_AT_THE_PAGE)
+  assert.match(viaPhone, /href="tel:012345678"/, 'the phone the sentence points at is in the same footer')
+  assert.doesNotMatch(viaPhone, /contact us on/, 'the sentence does not repeat the number')
 
   const phoneNotDialable = footer({ phone: 'ask at the till', socialLinks: [] })
-  assert.match(phoneNotDialable, /contact us on <span class="notranslate" translate="no">ask at the till<\/span>\./, 'a phone value that cannot make a tel: link is still printed')
+  assert.match(phoneNotDialable, POINTS_AT_THE_PAGE)
+  assert.match(phoneNotDialable, /<span class="notranslate" translate="no">ask at the till<\/span>/, 'a phone value that cannot make a tel: link is still printed')
 })
 
 runTest('the Khmer storefront gets the Khmer sentence', () => {
   const html = footer({ phone: '012 345 678', socialLinks: [TELEGRAM] }, 'km')
   assert.match(html, CONCERNS_KM)
-  assert.match(html, /សូមទាក់ទងយើងតាម <a [^>]*href="https:\/\/t\.me\/leangcosmetics"/)
+  assert.match(html, /សូមទាក់ទងយើងតាមព័ត៌មានទំនាក់ទំនងនៅលើទំព័រនេះ/)
+  assert.match(html, /href="https:\/\/t\.me\/leangcosmetics"/)
 })
 
 runTest('with no e-mail, no Telegram and no phone the line stays hidden', () => {
   const html = footer({ address: '136 St 215, Phnom Penh', socialLinks: [{ key: 'facebook', label: 'Facebook', value: 'https://facebook.com/leang' }] })
   assert.doesNotMatch(html, CONCERNS_EN)
-  assert.doesNotMatch(html, /contact us on/)
+  assert.doesNotMatch(html, /contact us using the contact details on this page/)
 })
 
-runTest('the fallback sentence is in both packs with the same placeholder as the call site', () => {
+runTest('the fallback sentence is in both packs and equals the call-site constant', () => {
   const en = readPack('en.json')
   const km = readPack('km.json')
-  assert.match(en.portalFooterConcernsContact, /\{contact\}/)
-  assert.match(km.portalFooterConcernsContact, /\{contact\}/)
+  assert.doesNotMatch(en.portalFooterConcernsContact, /\{contact\}/, 'the sentence points at the page, so it has no placeholder')
+  assert.doesNotMatch(km.portalFooterConcernsContact, /\{contact\}/)
   assert.match(km.portalFooterConcernsContact, /[ក-៿]/)
   const legal = read('components', 'catalog', 'legal', 'LegalPages.tsx')
   assert.equal(en.portalFooterConcernsContact, /const CONCERNS_CONTACT_EN = '([^']+)'/.exec(legal)?.[1])

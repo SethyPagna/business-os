@@ -50,12 +50,11 @@ run('the primary recipe is ink with ivory text, swapped in dark, and both pairs 
 
 run('every storefront primary button takes the recipe', () => {
   const files: Record<string, RegExp> = {
-    'components/catalog/CatalogPreviewSurface.tsx': /HEADER_CONTACT_CLASS = `[^`]*\$\{PORTAL_PRIMARY_COLORS\}`/,
+    'components/catalog/PortalDock.tsx': /CONTACT_BUTTON = `[^`]*\$\{PORTAL_PRIMARY_COLORS\}`/,
     'components/catalog/CatalogProductsSection.tsx': /: PORTAL_PRIMARY_COLORS\}/,
     'components/catalog/ProductDetailFlyout.tsx': /\$\{PORTAL_PRIMARY_BUTTON\} flex-1/,
     'components/catalog/CatalogAccountSection.tsx': /submitClass = `\$\{PORTAL_PRIMARY_BUTTON\}/,
     'components/catalog/CatalogSecondaryTabs.tsx': /CHARCOAL_BUTTON = PORTAL_PRIMARY_BUTTON/,
-    'components/catalog/PortalListPage.tsx': /\$\{PORTAL_PRIMARY_BUTTON\} min-h-10/,
   }
   for (const [file, pattern] of Object.entries(files)) {
     const source = read(file)
@@ -126,7 +125,7 @@ run('Caution and Need More Details are closed rows with a chevron', () => {
 // ---- 1 and 5. About ----
 const Tabs = loadModule('components/catalog/CatalogSecondaryTabs.tsx').default as React.ComponentType<Record<string, unknown>>
 const aboutHtml = (over: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(Tabs, {
-  tab: 'about', copy, openPortalImage: () => {}, onOpenContact: () => {},
+  tab: 'about', copy, openPortalImage: () => {},
   previewConfig: { businessName: 'Leang Beauty', showLogo: false, showCover: false, ...over },
 }))
 
@@ -147,14 +146,16 @@ run('About without a cover: the name never sits on the banner', () => {
   assert.match(html, /-mt-11 sm:-mt-14/, 'the round logo still overlaps the banner edge')
 })
 
-run('About has no Contact button; the FAQ closing row keeps its own', () => {
-  assert.doesNotMatch(aboutHtml(), />Contact</, 'the header Contact is the one entry point')
+run('About has no Contact button; the FAQ shows the chat rows itself instead of a Contact button', () => {
+  assert.doesNotMatch(aboutHtml(), />Contact</, 'the dock Contact is the one button')
   const faq = renderToStaticMarkup(React.createElement(Tabs, {
-    tab: 'faq', copy, previewConfig: { faqTitle: 'Questions' }, publicFaqItems: [], expandedFaqId: null, setExpandedFaqId: () => {}, onOpenContact: () => {},
+    tab: 'faq', copy, previewConfig: { faqTitle: 'Questions' }, publicFaqItems: [], expandedFaqId: null, setExpandedFaqId: () => {},
+    contactEntries: [{ key: 'phone-0', platform: 'phone', href: 'tel:012345678', label: '012 345 678', accessibleName: 'Phone: 012 345 678', latin: true }],
   }))
-  assert.match(faq, />Contact</)
+  assert.doesNotMatch(faq, />Contact</, 'no Contact button')
+  assert.match(faq, /data-portal-contact-inline="true"[\s\S]*?href="tel:012345678"/, 'the row itself, tappable')
   const about = read('components/catalog/CatalogSecondaryTabs.tsx')
-  assert.doesNotMatch(about.slice(about.indexOf('function CatalogAboutSection'), about.indexOf('function FaqSkeleton')), /onOpenContact|PortalContactButton/)
+  assert.doesNotMatch(about, /onOpenContact|PortalContactButton/)
 })
 
 // ---- 6. Saved / List ----
