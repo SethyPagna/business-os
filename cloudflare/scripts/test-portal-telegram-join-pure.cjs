@@ -488,7 +488,27 @@ check('T-D13: the name rules (control characters, 80 characters, empty -> member
   assert.equal(join.joinMemberName('x'.repeat(79) + '\u{1F600}\u{1F600}', null, code), 'x'.repeat(79) + '\u{1F600}', 'an emoji at the cut is kept whole or dropped whole')
   assert.equal(join.joinMemberName('x'.repeat(80) + '\u{1F600}', null, code), 'x'.repeat(80), 'an emoji just past the cut is dropped whole')
   assert.equal(join.joinMemberName('x'.repeat(78) + '\u202E' + '\u200B' + 'yz', null, code), 'x'.repeat(78) + 'yz', 'the hidden characters do not use up the 80')
+  // R3-3: more invisible characters go (written as escapes, never as the characters themselves).
+  const r33Hidden = ['\u115F', '\u1160', '\uFFA0', '\u2800', '\u034F', '\u206A', '\u206B', '\u206C', '\u206D', '\u206E', '\u206F', '\u{E0100}', '\u{E01A0}', '\u{E01EF}']
+  for (const hidden of r33Hidden) {
+    const label = `U+${hidden.codePointAt(0).toString(16).toUpperCase()}`
+    assert.equal(join.joinMemberName(`a${hidden}b`, null, code), 'ab', `${label} is removed`)
+    assert.equal(join.joinMemberName(hidden + hidden, hidden, code), code, `a name of only ${label} is the member code`)
+  }
+  // U+200D, U+FE0F and U+FE0E stay inside a visible name, and are invisible when nothing visible is left.
+  assert.equal(join.joinMemberName('\u2764\uFE0F', null, code), '\u2764\uFE0F', 'a variation selector stays with its emoji')
+  assert.equal(join.joinMemberName('\u2764\uFE0E', null, code), '\u2764\uFE0E')
+  for (const lone of ['\uFE0F', '\uFE0E', '\u200D\uFE0F\u200D\uFE0E']) {
+    assert.equal(join.joinMemberName(lone, lone, code), code, `U+${lone.codePointAt(0).toString(16).toUpperCase()} alone is no name`)
+  }
+  // The cut comes first, then the empty check: a name whose visible part is past the cut is no name.
+  assert.equal(join.joinMemberName('\u200D'.repeat(80) + 'a', null, code), code, '80 joiners then a letter past the cut')
+  assert.equal(join.joinMemberName('\uFE0F'.repeat(80) + 'a', null, code), code, '80 variation selectors then a letter past the cut')
+  assert.equal(join.joinMemberName('\u200D'.repeat(64), '\u200D'.repeat(16) + 'a', code), code, 'a Telegram-sized name of joiners and one late letter')
+  assert.equal(join.joinMemberName('\u200D'.repeat(79) + 'a', null, code), '\u200D'.repeat(79) + 'a', 'a letter inside the cut makes the name visible')
   const cleaner = loadLib('portalTelegramName')
+  assert.equal(cleaner.cleanTelegramName('\u200D'.repeat(60) + 'a', 60), '', 'reply cut: joiners then a late letter')
+  assert.equal(cleaner.cleanTelegramName('\u200D'.repeat(59) + 'a', 60), '\u200D'.repeat(59) + 'a')
   assert.equal(cleaner.cleanTelegramName('A\nB', 60), 'AB', 'a line feed is a control character and is removed')
   assert.equal(cleaner.cleanTelegramName(42, 60), '')
 

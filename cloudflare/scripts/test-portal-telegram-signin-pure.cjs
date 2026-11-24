@@ -222,9 +222,20 @@ check('A5 the reply text cleans names like the join: hidden characters out, a cu
   }
   assert.match(text('A\nB\u0000C'), /^Sign in to the website as ABC\? /)
   // R2-5: U+200D stays inside an emoji sequence; joiners alone are no name
-  const family = '\u{1F468}‍\u{1F469}‍\u{1F467}'
+  const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'
   assert.ok(text(family).includes(`as ${family}? `), 'the zero width joiner keeps an emoji sequence whole')
-  assert.match(text('‍‍'), /^Sign in to the website\? /, 'joiners alone are no name')
+  assert.match(text('\u200D\u200D'), /^Sign in to the website\? /, 'joiners alone are no name')
+  // R3-3: more invisible characters, and the cut comes before the empty check
+  for (const hidden of ['\u115F', '\u1160', '\uFFA0', '\u2800', '\u034F', '\u206A', '\u206F', '\u{E0100}', '\u{E01EF}']) {
+    const label = `U+${hidden.codePointAt(0).toString(16).toUpperCase()}`
+    assert.match(text(`a${hidden}b`), /^Sign in to the website as ab\? /, label)
+    assert.match(text(hidden + hidden), /^Sign in to the website\? /, `only ${label} is no name`)
+  }
+  for (const lone of ['\uFE0F', '\uFE0E', '\uFE0F\u200D']) {
+    assert.match(text(lone), /^Sign in to the website\? /, 'a variation selector or joiner alone is no name')
+  }
+  assert.ok(text('\u2764\uFE0F').includes('as \u2764\uFE0F? '), 'a variation selector stays with its emoji')
+  assert.match(text('\u200D'.repeat(60) + 'a'), /^Sign in to the website\? /, '60 joiners then a late letter is no name')
   assert.match(text('x'.repeat(80)), new RegExp(`as ${'x'.repeat(60)}\\? `), 'cut at 60')
   assert.match(text('x'.repeat(59) + '\u{1F600}\u{1F600}'), new RegExp(`as ${'x'.repeat(59)}\u{1F600}\\? `), 'an emoji at the cut is kept whole or dropped whole')
   assert.match(text('x'.repeat(60) + '\u{1F600}'), new RegExp(`as ${'x'.repeat(60)}\\? `))
