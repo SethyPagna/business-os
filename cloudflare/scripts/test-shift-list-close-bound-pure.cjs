@@ -189,13 +189,13 @@ ok(/if \(shift\.closed_at \|\| shift\.cancelled_at\) return null/.test(closeBoun
   'a row that cannot be closed answers null without touching D1')
 ok(/close_before: await closeBoundFor\(db, shift\)/.test(presentSource),
   'presentShift attaches the bound to the row it presents')
-ok(/const shifts = await Promise\.all\(rows\.filter\([\s\S]{0,240}?presentShift\(db, user, shift\)\)\)/.test(source),
+ok(/const shifts = await Promise\.all\(rows\.filter\([\s\S]{0,240}?presentShift\(db, user, shift, policy\)\)\)/.test(source),
   'the PAGED list maps its rows through that presenter')
-ok(/shifts: await Promise\.all\(\[\.\.\.openShifts, \.\.\.closedShifts\]\.map\(\(shift\) => presentShift\(db, user, shift\)\)\)/.test(source),
+ok(/shifts: await Promise\.all\(\[\.\.\.openShifts, \.\.\.closedShifts\]\.map\(\(shift\) => presentShift\(db, user, shift, policy\)\)\)/.test(source),
   'and so does the plain list')
-ok(/segments: await Promise\.all\(segments\.map\(\(segment\) => presentShift\(db, user, segment\)\)\)/.test(source),
+ok(/segments: await Promise\.all\(segments\.map\(\(segment\) => presentShift\(db, user, segment, policy\)\)\)/.test(source),
   'the record read presents its segments the same way')
-ok(/const shift = await presentShift\(getDb\(env\), user, row\)/.test(source),
+ok(/const shift = await presentShift\(getDb\(env\), user, row, options\.policy\)/.test(source),
   'and reconciledShift -- the record read and every close/replay response -- goes through it too')
 console.log('  ok - source: the bound comes from readAdjacentShift(next) and every presented row carries it')
 
