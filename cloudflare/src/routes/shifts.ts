@@ -94,8 +94,11 @@ app.use('*', async (c, next) => {
   c.set('shiftPre', { shift: target, policy: policyRead })
   // The same split the handlers enforce, applied before the replay lookup so
   // a caller who may not act cannot probe a receipt: amend follows
-  // canAmendShift (any shifts user), and close, reopen and cancel stay with
-  // the owner or an administrator.
+  // canAmendShift (any shifts user), close follows canCloseShift (the opener, an
+  // administrator, today's shop-wide shift for any shifts user, or the late-close
+  // grant), and reopen and cancel stay with the owner or an administrator. A closed
+  // row stays answerable to its closer: its retry reaches the replay, a second
+  // closer reaches the 409.
   const permitted = action === 'amend' ? canAmendShift(user, target) : action === 'close' ? canCloseShift(user, target, Date.now(), policyRead) : canMutateShift(user, target)
   if (!permitted) return c.json(action === 'close' && isOpenOnEarlierDay(target, Date.now()) ? SHIFT_LATE_NOT_PERMITTED : { error: 'Shift permission is required.' }, 403)
   const prior = await replay(); if (prior) return prior
@@ -620,7 +623,7 @@ const SHIFT_LATE_REASON_REQUIRED = { code: 'shift_late_reason_required', error: 
 const SHIFT_LATE_OUTSIDE_DAY = { code: 'shift_late_close_outside_day', error: "Pick a time on the shift's own day." } as const
 const SHIFT_LATE_NOT_COUNTED = { code: 'shift_late_close_not_counted', error: 'Today is already open, so this earlier shift is closed without a cash count.' } as const
 const SHIFT_LATE_NEEDS_REASON = { code: 'shift_late_close_needs_reason', error: "Update the app to close an earlier day's shift." } as const
-/** Who may end this row: its cashier, an administrator, or (for an open earlier-day row) a holder of the late-close grant. */
+/** Who may end this row: its cashier, an administrator, any shifts user for today's shop-wide row, or (for an open earlier-day row) a holder of the late-close grant. */
 function canCloseShift(user: SessionUser, shift: ShiftRow, nowMs: number, policy?: ShiftPolicy): boolean {
   return canMutateShift(user, shift) || canCloseSharedToday(user, shift, nowMs, policy) || (isOpenOnEarlierDay(shift, nowMs) && holdsLateClose(user))
 }
@@ -632,7 +635,7 @@ function canCloseShift(user: SessionUser, shift: ShiftRow, nowMs: number, policy
  */
 function canCloseSharedToday(user: SessionUser, shift: ShiftRow, nowMs: number, policy?: ShiftPolicy): boolean {
   return policy?.scope_mode === 'shop_wide' && shift.scope_mode === 'shop_wide' && canUseShifts(user)
-    && !shift.closed_at && !shift.cancelled_at && shift.business_date === businessToday(nowMs)
+    && !shift.cancelled_at && shift.business_date === businessToday(nowMs)
 }
 /** The row as it is STORED, which is what a before/after snapshot must hold:
  * the two derived columns above are answers about the row, not fields of it,
@@ -660,9 +663,10 @@ function canMutateShift(user: SessionUser, shift: ShiftRow): boolean {
  * row in `shift_session_amendments` and an audit line naming the actor.
  *
  * What did NOT widen: CANCEL stays administrator-only (canManageShifts), and
- * the CLOSE and REOPEN lifecycle transitions stay with the shift owner or an
- * administrator (canMutateShift) -- they end and restart a working shift
- * rather than correct a record of one. A cancelled row is not amendable at
+ * REOPEN stays with the shift owner or an administrator (canMutateShift). CLOSE
+ * follows canCloseShift: the owner or an administrator, today's shop-wide row for
+ * any shifts user, or the late-close grant on an earlier day -- they end and
+ * restart a working shift rather than correct a record of one. A cancelled row is not amendable at
  * all; its amendment would have nothing left to correct.
  */
 function canAmendShift(user: SessionUser, shift: ShiftRow): boolean {
