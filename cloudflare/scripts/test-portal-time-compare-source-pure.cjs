@@ -154,7 +154,9 @@ function rawHits(sql) {
   // R2-4 (review F6): the operand of a comparison, found by walking out from the operator, whose outermost form is not
   // datetime() / julianday(): a bracketed column, coalesce(), ifnull(), trim(), CAST(), a `||` chain, a nested substr().
   // A bare column and the plain substr(col, ...) form are the passes above and are not counted twice.
-  const SAFE_CALL = /^(?:datetime|julianday|date|strftime|unixepoch)\s*\(/i
+  // Only datetime() and julianday() make a stored time format-proof (design 1.3). date(), strftime() and unixepoch() over a
+  // column are judged like any other wrapper: reported (F5).
+  const SAFE_CALL = /^(?:datetime|julianday)\s*\(/i
   const CALL_KEYWORD = /^(?:AND|OR|NOT|WHERE|ON|WHEN|THEN|ELSE|IN|BETWEEN|SELECT|HAVING|EXISTS|CASE|END)$/i
   const closeOf = (s, open) => {
     for (let d = 0, i = open; i < s.length; i += 1) {
@@ -235,7 +237,7 @@ function rawHits(sql) {
   const bareColumn = new RegExp(`^(?:(\\w+)\\.)?(${COL})$`, 'i')
   const plainSubstr = new RegExp(`^(?:substr|substring)\\(\\s*(?:(\\w+)\\.)?(${COL})\\s*,[^()]*\\)$`, 'i')
   const columnIn = new RegExp(`(?<![\\w.])(?:(\\w+)\\.)?(${COL})\\b(?!\\s*\\()`, 'i')
-  function wrappedColumnHit(term, chained) {
+  function wrappedColumnHit(term, chained, bareIsRaw = false) {
     let text = term.text.trim()
     let wrapped = false
     for (;;) {
@@ -244,7 +246,7 @@ function rawHits(sql) {
     if (/^SELECT\b/i.test(text)) return null
     if (SAFE_CALL.test(text) && closeOf(text, text.indexOf('(')) === text.length - 1) return null
     const bare = bareColumn.exec(text)
-    if (bare) return wrapped || chained ? { alias: bare[1], column: bare[2] } : null
+    if (bare) return wrapped || chained || bareIsRaw ? { alias: bare[1], column: bare[2] } : null
     if (plainSubstr.test(text)) return null
     const found = columnIn.exec(text)
     return found ? { alias: found[1], column: found[2] } : null
@@ -259,6 +261,31 @@ function rawHits(sql) {
         if (hit && owns(hit.alias, term.start)) hits.push(`raw comparison of wrapped ${hit.column}`)
       }
     }
+  }
+  // F5: BETWEEN (the tested value and both bounds) and IS / IS NOT [DISTINCT FROM] <value> compare text too. A bare column is
+  // raw here (the passes above only know < > <= >= <> != =). IS [NOT] NULL tests presence, not an instant, and is not a comparison.
+  const termEnd = (terms) => terms[terms.length - 1].start + terms[terms.length - 1].text.length
+  const judge = (groups) => {
+    for (const terms of groups) {
+      for (const term of terms) {
+        const hit = wrappedColumnHit(term, terms.length > 1, true)
+        if (hit && owns(hit.alias, term.start)) hits.push(`raw comparison of ${hit.column} (BETWEEN / IS)`)
+      }
+    }
+  }
+  const betweenOp = /\b(?:NOT\s+)?BETWEEN\b/gi
+  while ((m = betweenOp.exec(sql))) {
+    const low = operandRight(m.index + m[0].length)
+    const groups = [operandLeft(m.index), low]
+    const and = low.length ? /^\s*AND\b/i.exec(sql.slice(termEnd(low))) : null
+    if (and) groups.push(operandRight(termEnd(low) + and[0].length))
+    judge(groups)
+  }
+  const isOp = /\bIS(?:\s+NOT)?(?:\s+DISTINCT\s+FROM)?(?=\s)/gi
+  while ((m = isOp.exec(sql))) {
+    const right = operandRight(m.index + m[0].length)
+    if (right.length && /^NULL$/i.test(right[0].text)) continue
+    judge([operandLeft(m.index), right])
   }
   const orderBy = /\bORDER\s+BY\b([^;]*?)(?=\bLIMIT\b|\bOFFSET\b|\)|$)/gi
   while ((m = orderBy.exec(sql))) {
@@ -349,6 +376,18 @@ check('positive control: the scanner reports one of every forbidden pattern', ()
     "SELECT 1 FROM portal_sessions WHERE substr(expires_at, 1, length(@now)) < @now",
     "SELECT 1 FROM portal_sessions WHERE @now >= coalesce(last_seen_at, created_at)",
     "SELECT 1 FROM portal_sessions WHERE revoked_at IS NULL AND ((expires_at)) <= datetime(@now)",
+    // F5 (carried to S3e): BETWEEN, IS / IS NOT against a value, and strftime() / date() / unixepoch() around a column
+    "SELECT 1 FROM portal_sessions WHERE @now BETWEEN created_at AND expires_at",
+    "SELECT 1 FROM portal_sessions WHERE expires_at BETWEEN @a AND @b",
+    "SELECT 1 FROM portal_sessions s WHERE s.created_at NOT BETWEEN @a AND @b",
+    "SELECT 1 FROM portal_sessions WHERE @a BETWEEN @b AND expires_at",
+    "SELECT 1 FROM portal_sessions WHERE expires_at IS NOT @now",
+    "SELECT 1 FROM portal_sessions WHERE expires_at IS @now",
+    "SELECT 1 FROM portal_sessions WHERE @now IS NOT expires_at",
+    "SELECT 1 FROM portal_accounts WHERE last_seen_at IS NOT DISTINCT FROM @now",
+    "SELECT 1 FROM portal_sessions WHERE strftime('%s', expires_at) > @now",
+    "SELECT 1 FROM portal_sessions WHERE @now < date(expires_at)",
+    "SELECT 1 FROM portal_sessions WHERE unixepoch(expires_at) < @n",
   ]
   for (const sql of forbidden) assert.ok(hitsOf(sql).length >= 1, `not reported: ${sql}`)
 })
@@ -390,6 +429,13 @@ check('positive control: look-alikes report nothing', () => {
     "SELECT 1 FROM portal_sessions WHERE datetime(substr(expires_at, 1, 19)) < datetime(@now)",
     "SELECT 1 FROM portal_accounts a JOIN customers c ON c.id = a.contact_id WHERE coalesce(c.created_at, '') < @x",
     "SELECT 1 FROM portal_sessions WHERE length(@now) < 5 AND trim(token_hash) = @h",
+    // F5 look-alikes: BETWEEN or IS over datetime(), IS NULL checks, another table's column, a column outside the list
+    "SELECT 1 FROM portal_sessions WHERE datetime(@now) BETWEEN datetime(created_at) AND datetime(expires_at)",
+    "SELECT 1 FROM portal_sessions WHERE datetime(expires_at) NOT BETWEEN datetime(@a) AND datetime(@b)",
+    "SELECT 1 FROM portal_sessions WHERE datetime(expires_at) IS NOT datetime(@now)",
+    "SELECT 1 FROM portal_sessions WHERE expires_at IS NULL OR last_seen_at IS NOT NULL",
+    "SELECT 1 FROM portal_accounts a JOIN customers c ON c.id = a.contact_id WHERE c.created_at BETWEEN @a AND @b AND c.created_at IS NOT @x",
+    "SELECT 1 FROM portal_sessions WHERE id BETWEEN @a AND @b AND revoked_at IS NOT @r",
   ]
   for (const sql of clean) assert.deepEqual(hitsOf(sql), [], `wrongly reported: ${sql}`)
 })

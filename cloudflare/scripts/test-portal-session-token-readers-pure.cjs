@@ -262,23 +262,29 @@ const SQLISH = /\b(SELECT|UPDATE|INSERT|DELETE)\b/i
 // A predicate in a nested sub-select, even one that reuses the alias, does not cover a mention outside that sub-select.
 const PREDICATE_ANY = /substr\(\s*((?:\w+\.)?)token_hash\s*,\s*1\s*,\s*4\s*\)\s*<>\s*'tg1:'/gi
 const TOKEN_MENTION = /(?<![@:\w])((?:\w+\.)?)token_hash\b/gi // a bound parameter (@token_hash) is a value, not the column
+// paths[i]: the bracket groups around character i. scopes[i] (F4): the innermost enclosing group that opens with SELECT,
+// '' at the top of the statement. A nested SELECT is its own scope: a predicate outside it covers nothing inside it.
 function groupPaths(text) {
   const paths = []
+  const scopes = []
   const stack = []
   let next = 0
+  const opensSelect = (at) => { const re = /\(\s*SELECT\b/iy; re.lastIndex = at; return re.test(text) }
   for (let i = 0; i < text.length; i += 1) {
     if (text[i] === ')' && stack.length) stack.pop()
-    paths.push(stack.join('/'))
-    if (text[i] === '(') stack.push(++next)
+    paths.push(stack.map((g) => g.id).join('/'))
+    const select = [...stack].reverse().find((g) => g.select)
+    scopes.push(select ? String(select.id) : '')
+    if (text[i] === '(') stack.push({ id: ++next, select: opensSelect(i) })
   }
-  return paths
+  return { paths, scopes }
 }
 const encloses = (outer, inner) => outer === '' || inner === outer || inner.startsWith(`${outer}/`)
 function lookupsCarryPredicate(text) {
-  const paths = groupPaths(text)
+  const { paths, scopes } = groupPaths(text)
   const predicates = [...text.matchAll(PREDICATE_ANY)].map((m) => ({ alias: m[1].toLowerCase(), start: m.index, end: m.index + m[0].length }))
   const mentions = [...text.matchAll(TOKEN_MENTION)].filter((m) => !predicates.some((p) => m.index >= p.start && m.index < p.end))
-  return mentions.every((m) => predicates.some((p) => p.alias === m[1].toLowerCase() && encloses(paths[p.start], paths[m.index])))
+  return mentions.every((m) => predicates.some((p) => p.alias === m[1].toLowerCase() && scopes[p.start] === scopes[m.index] && encloses(paths[p.start], paths[m.index])))
 }
 
 function listSourceFiles(dir, out = []) {
@@ -465,6 +471,12 @@ async function main() {
     assert.equal(at('routes/portal.ts', wrapSql(head + "s.token_hash = @h AND EXISTS (SELECT 1 FROM portal_sessions s WHERE substr(s.token_hash, 1, 4) <> 'tg1:')")), 1, 'a nested sub-select that reuses the alias for the predicate')
     assert.equal(at('routes/portal.ts', wrapSql(head + 's.token_hash = @h' + nestedOwn)), 1, 'the outer lookup of a mixed statement has no predicate of its own')
     assert.equal(at('routes/portal.ts', wrapSql(head + 's.token_hash = @h' + own + nestedOwn)), 0, 'each scope carries its own predicate')
+    // F4 (carried to S3e): a predicate in an outer scope does not cover a lookup in a nested SELECT over portal_sessions
+    assert.equal(at('routes/portal.ts', wrapSql("SELECT a.id FROM portal_accounts a JOIN portal_sessions s ON s.account_id = a.id WHERE substr(s.token_hash, 1, 4) <> 'tg1:' AND a.id IN (SELECT s.account_id FROM portal_sessions s WHERE s.token_hash = @h)")), 1, 'F4: outer predicate, nested lookup on a reused alias')
+    assert.equal(at('routes/portal.ts', wrapSql("SELECT 1 FROM portal_sessions WHERE substr(token_hash, 1, 4) <> 'tg1:' AND account_id IN (SELECT account_id FROM portal_sessions WHERE token_hash = @h)")), 1, 'F4: outer predicate, unaliased nested lookup')
+    assert.equal(at('routes/portal.ts', wrapSql("SELECT 1 FROM portal_sessions WHERE token_hash = @h AND account_id IN (SELECT account_id FROM portal_sessions WHERE substr(token_hash, 1, 4) <> 'tg1:' AND token_hash = @g)")), 1, 'F4: nested predicate only, outer lookup bare')
+    assert.equal(at('routes/portal.ts', wrapSql("SELECT 1 FROM portal_sessions WHERE token_hash = @h AND substr(token_hash, 1, 4) <> 'tg1:' AND account_id IN (SELECT account_id FROM portal_sessions WHERE token_hash = @g AND substr(token_hash, 1, 4) <> 'tg1:')")), 0, 'F4: each nested SELECT carries its own predicate')
+    assert.equal(at('routes/portal.ts', wrapSql("SELECT 1 FROM portal_sessions WHERE token_hash = @h AND substr(token_hash, 1, 4) <> 'tg1:' AND (revoked_at IS NULL OR (id > 0 AND token_hash <> @g))")), 0, 'F4: a bracket group that is not a SELECT stays in its scope')
     // the INSERT ... VALUES exemption refuses ON CONFLICT and any SELECT
     assert.equal(at('lib/anyNewFile.ts', 'const q = `INSERT INTO portal_sessions (account_id, token_hash) VALUES (@a, @h) ON CONFLICT(id) DO UPDATE SET revoked_at = NULL WHERE token_hash = @h`'), 1, 'ON CONFLICT is not a plain insert')
     assert.equal(at('lib/anyNewFile.ts', 'const q = `INSERT INTO portal_sessions (account_id, token_hash) VALUES (@a, (SELECT token_hash FROM portal_sessions LIMIT 1))`'), 1, 'a SELECT inside the VALUES is not a plain insert')
