@@ -815,7 +815,7 @@ async function readStaleDrawersToAlert(db: D1Compat, policy: ShiftPolicy, userId
       AND business_date < ${localTodayExpr()}
       AND closed_at IS NULL AND cancelled_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
-      AND ((((branch_id IS @branchId OR (@branchId IS NOT NULL AND branch_id IS NULL))) ${accountClause})
+      AND ((((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId) ${accountClause})
         OR (user_id = @userId AND branch_id IS NOT NULL AND (${BRANCH_ACTIVE_SQL}) = 0))
       AND NOT EXISTS (SELECT 1 FROM shift_sessions seen
         WHERE seen.id != @newShiftId AND seen.parent_shift_id IS NULL AND seen.scope_mode = shift_sessions.scope_mode
