@@ -137,11 +137,36 @@ check('T-C2 the memo: one S-G1 per period, a second one after it', async () => {
   assert.match(db.sql[0], /system_budget_stage/)
 })
 
-check('T-C2 concurrent first reads share one S-G1', async () => {
+check('A3 concurrent requests with an empty memo each run their own S-G1 (no read is shared while in flight)', async () => {
   gateLib.resetPortalTelegramGateMemo()
   const db = fakeDb(() => rowsOn('0'))
-  await Promise.all([1, 2, 3].map(() => gateLib.readPortalTelegramGate({}, db, T0)))
-  assert.equal(db.calls, 1)
+  const answers = await Promise.all([1, 2, 3].map(() => gateLib.readPortalTelegramGate({}, db, T0)))
+  assert.equal(db.calls, 3)
+  for (const answer of answers) assert.deepEqual(answer, { enabled: true, stage: 0 })
+  await gateLib.readPortalTelegramGate({}, db, T0 + 1000)
+  assert.equal(db.calls, 3, 'the resolved value is still shared through the memo')
+})
+
+const settlesWithin = (promise, ms) => Promise.race([promise.then(() => true, () => true), new Promise((resolve) => setTimeout(() => resolve(false), ms))])
+
+check('A3 a first read that never settles does not leave the second request waiting', async () => {
+  gateLib.resetPortalTelegramGateMemo()
+  const db = fakeDb((call) => (call === 1 ? new Promise(() => {}) : rowsOn('0')))
+  void gateLib.readPortalTelegramGate({}, db, T0)
+  const second = gateLib.readPortalTelegramGate({}, db, T0)
+  assert.equal(await settlesWithin(second, 500), true, 'the second request answered')
+  assert.deepEqual(await second, { enabled: true, stage: 0 })
+  assert.equal(db.calls, 2)
+})
+
+check('A3 a rejected first read does not change the second request answer', async () => {
+  gateLib.resetPortalTelegramGateMemo()
+  const db = fakeDb((call) => (call === 1 ? Promise.reject(new Error('D1 cancelled')) : rowsOn('0')))
+  const first = gateLib.readPortalTelegramGate({}, db, T0)
+  const second = gateLib.readPortalTelegramGate({}, db, T0)
+  assert.equal(await settlesWithin(second, 500), true)
+  assert.deepEqual(await second, { enabled: true, stage: 0 })
+  assert.equal(await settlesWithin(first, 500), true, 'the failed request also answers (off, or the value the second read just stored)')
 })
 
 check('T-C2 a failed first read counts as switch off, and that answer is memoised for the period', async () => {

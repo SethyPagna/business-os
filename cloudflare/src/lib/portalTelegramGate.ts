@@ -40,36 +40,28 @@ export function gateFromRows(rows: ReadonlyArray<{ key?: unknown; value?: unknow
 
 type Memo = { value: PortalTelegramGate; at: number; graceUsed: boolean }
 let memo: Memo | null = null
-let inflight: Promise<PortalTelegramGate> | null = null
 
 export function resetPortalTelegramGateMemo(): void {
   memo = null
-  inflight = null
 }
 
-// One S-G1 per memo period per isolate. A failed read keeps the previous value for one more period; with no previous
+// One S-G1 per memo period per isolate, once a value has resolved. A failed read keeps the previous value for one more period; with no previous
 // value, or after that one period, the switch counts as off.
 export async function readPortalTelegramGate(env: PortalTelegramEnv, db: GateDb, nowMs: number = Date.now()): Promise<PortalTelegramGate> {
   const periodMs = getPlanLimits(env).portalTelegramGateMemoSeconds * 1000
   if (memo && nowMs >= memo.at && nowMs - memo.at < periodMs) return memo.value
-  if (inflight) return inflight
-  const run = (async () => {
-    try {
-      const rows = await db.prepare(GATE_SQL).all<{ key: unknown; value: unknown }>()
-      const value = gateFromRows(rows)
-      memo = { value, at: nowMs, graceUsed: false }
-      return value
-    } catch {
-      if (memo && !memo.graceUsed) memo = { value: memo.value, at: nowMs, graceUsed: true }
-      else memo = { value: GATE_OFF, at: nowMs, graceUsed: true }
-      return memo.value
-    }
-  })()
-  inflight = run
+  // Only a resolved value is shared between requests. A read in flight belongs to the request that started it: awaiting
+  // another request's promise can hang for good once that request answered or was cancelled (workerd), so a request that
+  // finds no fresh value runs its own S-G1.
   try {
-    return await run
-  } finally {
-    inflight = null
+    const rows = await db.prepare(GATE_SQL).all<{ key: unknown; value: unknown }>()
+    const value = gateFromRows(rows)
+    memo = { value, at: nowMs, graceUsed: false }
+    return value
+  } catch {
+    if (memo && !memo.graceUsed) memo = { value: memo.value, at: nowMs, graceUsed: true }
+    else memo = { value: GATE_OFF, at: nowMs, graceUsed: true }
+    return memo.value
   }
 }
 
