@@ -374,8 +374,8 @@ assert.equal(valueOf('Profit'), '$93.00')
 assert.equal(valueOf('Delivery fee'), '$6.00')
 // The two Expenses-section bullets: the recorded courier payout, and (since
 // this fixture has no per-expense rows) the fallback "Other expenses" bullet.
-assert.equal(bulletValue('Actual delivery cost'), '$3.50')
-assert.equal(bulletValue('Other expenses'), '$4.00')
+assert.equal(bulletValue('Actual delivery cost'), '0៛ · $3.50')
+assert.equal(bulletValue('Other expenses'), '0៛ · $4.00')
 // The Invoices section is ONE row: the total, and the two counts that
 // qualify it, joined by ' · ' rather than printed on their own lines.
 const invoicesRow = sectionBlock(report, 'invoices')[0]
@@ -386,7 +386,7 @@ assert.equal(invoicesRow, `${lang.ROW_BULLET}${lang.label('total')}: 12 · ${lan
 // of those two -- a section total that does not equal its own breakdown is
 // the failure this file exists for.
 const expensesTotal = sectionBlock(report, 'expenses').at(-1)
-assert.equal(expensesTotal, lang.labeled('total', '$7.50'))
+assert.equal(expensesTotal, lang.labeled('total', '0៛ · $7.50'))
 assert.equal(Math.round((FIGURES.otherExpenseUsd + FIGURES.deliveryCostUsd) * 100) / 100, 7.5)
 
 // THE CREDIT RULING, on the value: positive, the word "credit", and NOT
@@ -439,7 +439,7 @@ const noCost = telegram.formatShiftReport('Shop', CLOSED, {
 assert.ok(!noCost.includes('Actual delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
 const noCostLines = noCost.split('\n')
 assert.ok(noCostLines.some((line) => line.startsWith(`${lang.ROW_BULLET}Delivery fee${SEP}`) && line.endsWith(': $6.00')), 'the charged fee is still reported')
-assert.deepEqual(sectionBlock(noCost, 'expenses'), [`${lang.ROW_BULLET}${lang.label('expensesOther')}: $4.00`, lang.labeled('total', '$4.00')],
+assert.deepEqual(sectionBlock(noCost, 'expenses'), [`${lang.ROW_BULLET}${lang.label('expensesOther')}: 0៛ · $4.00`, lang.labeled('total', '0៛ · $4.00')],
   'an unrecorded courier cost must not be folded into the expense total as a zero, nor as its own bullet')
 console.log('PASS honesty: an unrecorded courier cost prints no line and enters no total')
 
@@ -931,12 +931,12 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // profit definition. Asserted as a VALUE so a second profit rule invented
   // here would show up as a different number.
   assert.equal(mappedValue('Profit'), '$92.50', 'profit is the kernel definition, not one computed in the message')
-  assert.equal(mappedBulletValue('Example expense'), '$4.00', 'the per-expense bullet comes from the grouped query, by its own label')
+  assert.equal(mappedBulletValue('Example expense'), '0៛ · $4.00', 'the per-expense bullet comes from the grouped query, by its own label')
   assert.equal(mappedValue('Still owed'), '$18.00', 'credit must read not_paid_owed_usd (owner, 21 Oct 2026), not the refund')
   assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
-  assert.equal(mappedBulletValue(lang.label('deliveryCost')), '$3.50', 'the courier money actually paid out')
+  assert.equal(mappedBulletValue(lang.label('deliveryCost')), '0៛ · $3.50', 'the courier money actually paid out')
   // 4.00 other + 3.50 courier, the two bullets above it.
-  assert.equal(mappedSection('expenses').at(-1), lang.labeled('total', '$7.50'), 'the section total is its own two bullets')
+  assert.equal(mappedSection('expenses').at(-1), lang.labeled('total', '0៛ · $7.50'), 'the section total is its own two bullets')
   assert.equal(mappedSection('invoices')[0], `${lang.ROW_BULLET}${lang.label('total')}: 12 · ${lang.label('cancelled')}: 1 · ${lang.label('edited')}: 2`)
   assert.equal(mappedValue('Opening cash'), '100,000៛ · $50.00', 'the registered opening cash is the shift row, both currencies')
   assert.equal(mappedValue('Closing cash'), '100,000៛ · $256.00', 'and the closing cash is the shift row too')

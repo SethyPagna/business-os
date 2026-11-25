@@ -187,7 +187,7 @@ function unwrap(lines) {
   const section = expensesSection(report)
 
   // 1. The delivery cost row carries the SAME figure the app shows.
-  const deliveryRow = `${lang.ROW_BULLET}${lang.label('deliveryCost')}: $13.00`
+  const deliveryRow = `${lang.ROW_BULLET}${lang.label('deliveryCost')}: 0៛ · $13.00`
   assert.ok(section.includes(deliveryRow),
     `Telegram delivery cost must match the app (${deliveryRow}); the section was:\n${section.join('\n')}`)
   assert.ok(deliveryRow.includes('ថ្លៃដឹកដើម') && deliveryRow.includes('Actual delivery cost'), `the row is bilingual: ${deliveryRow}`)
@@ -196,12 +196,12 @@ function unwrap(lines) {
   // 2. The delivery-typed fee is NOT listed again as an "other" expense.
   assert.ok(!section.some((line) => line.includes('Moto courier')),
     `the delivery-typed fee is inside the delivery cost row and must not be listed again:\n${section.join('\n')}`)
-  assert.ok(section.includes(`${lang.ROW_BULLET}Ice: $4.00`), `the ordinary expense keeps its own row:\n${section.join('\n')}`)
+  assert.ok(section.includes(`${lang.ROW_BULLET}Ice: 0៛ · $4.00`), `the ordinary expense keeps its own row:\n${section.join('\n')}`)
   checks += 1; console.log('PASS the delivery-typed fee is not double-listed; Ice keeps its row')
 
   // 3. The rows foot to the total, and the total is every fee plus the
   //    courier payout -- unchanged by the split.
-  const totalRow = lang.labeled('total', '$17.00')
+  const totalRow = lang.labeled('total', '0៛ · $17.00')
   assert.equal(section[section.length - 1], totalRow, `section total:\n${section.join('\n')}`)
   const rowUsd = section.slice(0, -1).reduce((sum, line) => sum + Number((line.match(/\$(\d+\.\d\d)/) || [0, 0])[1]), 0)
   assert.equal(Math.round(rowUsd * 100) / 100, 17, `the rows must add up to the total:\n${section.join('\n')}`)
@@ -212,9 +212,9 @@ function unwrap(lines) {
   // 4. The whole section, in the shop's own Khmer-only mode: the same split.
   const km = await telegram.telegramCommandReply({}, '/shift 06/09/2026', NOW, 'km')
   const kmSection = unwrap(km.split('\n'))
-  assert.ok(kmSection.includes(`${lang.ROW_BULLET}ថ្លៃដឹកដើម: $13.00`), `Khmer delivery cost row:\n${km}`)
+  assert.ok(kmSection.includes(`${lang.ROW_BULLET}ថ្លៃដឹកដើម: 0៛ · $13.00`), `Khmer delivery cost row:\n${km}`)
   assert.ok(!km.includes('Moto courier'), 'the Khmer message does not double-list the fee either')
-  checks += 1; console.log('PASS Khmer-only message: · ថ្លៃដឹកដើម: $13.00')
+  checks += 1; console.log('PASS Khmer-only message: · ថ្លៃដឹកដើម: 0៛ · $13.00')
 
   // 5. One kernel, not two: the message goes through composeShiftFigures and
   //    shiftDeliveryFeeExpenses, and the delivery predicate is defined once.

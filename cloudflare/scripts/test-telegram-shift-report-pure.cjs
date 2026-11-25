@@ -268,9 +268,9 @@ assert.deepEqual(lines, [
   // the rows and the Total have to add up on the reader's own screen.
   '=====Expenses/ចំណាយ=====',
   '· Actual delivery cost/ថ្លៃដឹកដើម:',
-  `${telegramLang.HANGING_INDENT}$7.50`,
-  '· Rent: $9.50 · 20,000៛',
-  '· Total/សរុប: $17.00 · 20,000៛',
+  `${telegramLang.HANGING_INDENT}0៛ · $7.50`,
+  '· Rent: 20,000៛ · $9.50',
+  '· Total/សរុប: 20,000៛ · $17.00',
 ], report)
 check('the exact owner sequence renders: title, identity, six `=====` sections', true)
 
@@ -319,9 +319,9 @@ assert.deepEqual(englishReport.split('\n'), [
   '· Grab:',
   `${telegramLang.HANGING_INDENT}3 · $12.0000 fee · $7.5000 cost`,
   '=====Expenses=====',
-  '· Actual delivery cost: $7.50',
-  '· Rent: $9.50 · 20,000៛',
-  '· Total: $17.00 · 20,000៛',
+  '· Actual delivery cost: 0៛ · $7.50',
+  '· Rent: 20,000៛ · $9.50',
+  '· Total: 20,000៛ · $17.00',
 ], englishReport)
 check('the \'en\' mode report carries no Khmer word at all (the riel sign is a symbol, not a word)',
   !khmerText(englishReport), englishReport)
@@ -361,9 +361,9 @@ assert.deepEqual(khmerReport.split('\n'), [
   '· Grab: 3 · $12.0000 ថ្លៃដឹក',
   `${telegramLang.HANGING_INDENT}· $7.5000 ថ្លៃដើម`,
   '=====ចំណាយ=====',
-  '· ថ្លៃដឹកដើម: $7.50',
-  '· Rent: $9.50 · 20,000៛',
-  '· សរុប: $17.00 · 20,000៛',
+  '· ថ្លៃដឹកដើម: 0៛ · $7.50',
+  '· Rent: 20,000៛ · $9.50',
+  '· សរុប: 20,000៛ · $17.00',
 ], khmerReport)
 // A label position is everything before the first ': '. Product names,
 // payment methods and couriers live on list rows too (`· name: figure`,
@@ -380,7 +380,7 @@ check(`no English word survives on a label position in 'km' mode (${khmerLabelPo
   khmerLabelPositions.filter((labelPart) => /[A-Za-z]/.test(labelPart)).join('\n'))
 check('...while the VALUES are untouched in every mode',
   khmerReport.includes('Sunrise Mart') && khmerReport.includes('· Cash: 18 · $300.0000')
-  && khmerReport.includes('· Rent: $9.50 · 20,000៛'), khmerReport)
+  && khmerReport.includes('· Rent: 20,000៛ · $9.50'), khmerReport)
 // Every mode is the SAME report: same number of rows, same section titles in
 // the same places. That is what "one message, three renderings" means.
 const titlePositions = (text) => rowsOf(text).map((line, index) => (isShiftSection(line) ? index : -1)).filter((index) => index >= 0)

@@ -1564,7 +1564,19 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // Expected is shown for both open and closed shifts. An open drawer has no
   // counted value (and therefore no difference), but the employee still needs
   // the current target while trading.
+  // The Expenses split and rows are composed first: the per-shift dollar decision reads the figures this message prints, as the screen's does.
+  const split = figures.expenseSplit ?? (() => {
+    const derived = composeShiftFigures({
+      opening: null, counted: null, totals: null,
+      expenses: { usd: figures.otherExpenseUsd, khr: figures.otherExpenseKhr },
+      deliveryFees: null,
+      courier: { usd: figures.deliveryCostRecorded > 0 ? figures.deliveryCostUsd : 0, khr: 0 },
+    })
+    return { deliveryCost: derived.delivery_cost, otherExpenses: derived.other_expenses }
+  })()
+  const details = figures.expenseDetails || []
   const showUsd = shiftHasUsdCash(shift, recon)
+    || [split.deliveryCost.usd, split.otherExpenses.usd, ...details.map((detail) => detail.usd)].some(nonZeroUsd)
   const cash = registeredCashRows(shift, showUsd)
   const expected = recon.expected.usd == null && recon.expected.khr == null
     ? NOT_APPLICABLE
@@ -1612,18 +1624,8 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // list the delivery-typed fee under its own label). The total is still
   // every fee plus the courier payout -- the split moves money between the
   // two rows, never in or out of the section.
-  const split = figures.expenseSplit ?? (() => {
-    const derived = composeShiftFigures({
-      opening: null, counted: null, totals: null,
-      expenses: { usd: figures.otherExpenseUsd, khr: figures.otherExpenseKhr },
-      deliveryFees: null,
-      courier: { usd: figures.deliveryCostRecorded > 0 ? figures.deliveryCostUsd : 0, khr: 0 },
-    })
-    return { deliveryCost: derived.delivery_cost, otherExpenses: derived.other_expenses }
-  })()
   const expenseRows: string[] = []
   if (split.deliveryCost.usd || split.deliveryCost.khr) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}:`, [registeredMoney(split.deliveryCost.usd, split.deliveryCost.khr, showUsd)]))
-  const details = figures.expenseDetails || []
   if (details.length) {
     for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}:`, [registeredMoney(detail.usd, detail.khr, showUsd)]))
   } else if (split.otherExpenses.usd || split.otherExpenses.khr) {

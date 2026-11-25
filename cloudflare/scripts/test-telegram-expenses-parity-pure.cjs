@@ -199,6 +199,21 @@ function figure(rows, key) {
   return row ? row.slice(prefix.length) : null
 }
 
+// The (usd, khr) VALUE of a printed money text in either form (`$A · B៛`, `B៛ · $A`, `$A`, `B៛`): a missing half is zero, anything else is unparsed.
+// The shift report prints riel first (and dollars per shift); the day report and overview still print dollars first, so parity is on the amounts.
+function valueOfMoney(text) {
+  if (text == null) return null
+  const value = { usd: 0, khr: 0 }
+  for (const part of text.split(' · ')) {
+    const dollars = part.match(/^\$(\d[\d,]*\.\d\d)$/)
+    const riel = part.match(/^(\d[\d,]*)៛$/)
+    if (dollars) value.usd = Number(dollars[1].replace(/,/g, ''))
+    else if (riel) value.khr = Number(riel[1].replace(/,/g, ''))
+    else return { unparsed: text }
+  }
+  return value
+}
+
 ;(async () => {
   let checks = 0
   const shift = sql.prepare('SELECT * FROM shift_sessions WHERE id = 1').get()
@@ -219,23 +234,34 @@ function figure(rows, key) {
   }
 
   // All three read side by side, so a failure shows every surface at once.
-  const wanted = { deliveryCost: '$18.00', total: '$22.00' }
+  const wanted = { deliveryCost: { usd: 18, khr: 0 }, total: { usd: 22, khr: 0 } }
   const seen = {}
   for (const [name, report] of Object.entries(reports)) {
     const rows = section(report, 'expenses')
     assert.ok(rows, `${name} has no Expenses section:\n${report}`)
-    seen[name] = { deliveryCost: figure(rows, 'deliveryCost'), total: figure(rows, 'total') }
+    seen[name] = { deliveryCost: valueOfMoney(figure(rows, 'deliveryCost')), total: valueOfMoney(figure(rows, 'total')) }
   }
   assert.deepEqual(seen, { '/shift': wanted, '/report': wanted, overview: wanted },
-    `one delivery cost and one total on all three reports; the Expenses sections read:\n${
+    `one delivery cost and one total on all three reports, by value; the Expenses sections read:\n${
       Object.entries(reports).map(([name, report]) => `${name}\n${section(report, 'expenses').join('\n')}`).join('\n')}`)
-  checks += 1; console.log(`PASS the three reports print one delivery cost (${wanted.deliveryCost}) and one total (${wanted.total})`)
+  checks += 1; console.log('PASS the three reports print one delivery cost ($18.00) and one total ($22.00), by value in both currency halves')
+
+  // The shift report alone is riel first with the dollar half (this shift has a dollar); the day report and the overview keep dollars first.
+  const shiftExpenses = section(reports['/shift'], 'expenses')
+  assert.equal(figure(shiftExpenses, 'deliveryCost'), '0៛ · $18.00', `/shift delivery cost is riel first:\n${shiftExpenses.join('\n')}`)
+  assert.equal(figure(shiftExpenses, 'total'), '0៛ · $22.00', `/shift total is riel first:\n${shiftExpenses.join('\n')}`)
+  for (const name of ['/report', 'overview']) {
+    const rows = section(reports[name], 'expenses')
+    assert.equal(figure(rows, 'deliveryCost'), '$18.00', `${name} keeps its own text form:\n${rows.join('\n')}`)
+    assert.equal(figure(rows, 'total'), '$22.00', `${name} keeps its own text form:\n${rows.join('\n')}`)
+  }
+  checks += 1; console.log('PASS /shift is riel first (0៛ · $18.00); /report and the overview keep $18.00')
 
   // The remainder is the same $4.00 everywhere: /shift lists it as its one
   // row (Ice), /report and the overview under "Other expenses" -- and no
   // delivery-typed fee is listed again on any of them.
   const shiftRows = section(reports['/shift'], 'expenses')
-  assert.ok(shiftRows.includes(`${lang.ROW_BULLET}Ice: $4.00`), `/shift lists Ice:\n${shiftRows.join('\n')}`)
+  assert.ok(shiftRows.includes(`${lang.ROW_BULLET}Ice: 0៛ · $4.00`), `/shift lists Ice:\n${shiftRows.join('\n')}`)
   for (const name of ['/report', 'overview']) {
     const rows = section(reports[name], 'expenses')
     assert.equal(figure(rows, 'expensesOther'), '$4.00', `${name} other expenses:\n${rows.join('\n')}`)
@@ -254,10 +280,13 @@ function figure(rows, key) {
   }
   for (const [name, report] of Object.entries(km)) {
     const rows = unwrap(report.split('\n'))
-    assert.ok(rows.includes(`${lang.ROW_BULLET}ថ្លៃដឹកដើម: $18.00`), `${name} Khmer delivery cost row:\n${report}`)
-    assert.ok(rows.includes(`${lang.ROW_BULLET}សរុប: $22.00`), `${name} Khmer total row:\n${report}`)
+    const khmerRow = (labelText) => rows.findLast((row) => row.startsWith(`${lang.ROW_BULLET}${labelText}: `))?.slice(`${lang.ROW_BULLET}${labelText}: `.length)
+    assert.deepEqual(valueOfMoney(khmerRow('ថ្លៃដឹកដើម')), wanted.deliveryCost, `${name} Khmer delivery cost row:\n${report}`)
+    assert.deepEqual(valueOfMoney(khmerRow('សរុប')), wanted.total, `${name} Khmer total row:\n${report}`)
   }
-  checks += 1; console.log('PASS Khmer-only: · ថ្លៃដឹកដើម: $18.00 and · សរុប: $22.00 on all three')
+  assert.ok(unwrap(km['/shift'].split('\n')).includes(`${lang.ROW_BULLET}ថ្លៃដឹកដើម: 0៛ · $18.00`), `/shift Khmer delivery cost is riel first:\n${km['/shift']}`)
+  assert.ok(unwrap(km['/shift'].split('\n')).includes(`${lang.ROW_BULLET}សរុប: 0៛ · $22.00`), `/shift Khmer total is riel first:\n${km['/shift']}`)
+  checks += 1; console.log('PASS Khmer-only: delivery cost and total are the same value on all three; /shift is riel first')
 
   // Expenses switched off: the fees table's rows go with the switch, the
   // courier paid on the sales stays in the day summary's Sales section -- in
