@@ -1,13 +1,14 @@
 // Storefront wording for shoppers on Google-translated pages (21 Nov 2026). Measured with Google Translate's real
 // script: the old no-payment line came out as "online payment only" in French; one-word labels were translated
 // without context (Back as the body part, Clear as the adjective, A-Z as Arizona); a number React rewrote after Google
-// translated its neighbourhood stayed stale. The wording table is the result of real-script runs kept under
-// Records/Design/2026-11-21/real-google/wording/. This test keeps the measured-bad strings out and pins the markup.
+// translated its neighbourhood stayed stale. The wording table is the result of those real-script runs. This test keeps
+// the measured-bad strings out and pins the markup.
 //
 // Run: node tests/portalGoogleWording.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { buildSync } from 'esbuild'
 import React from 'react'
@@ -262,8 +263,8 @@ const classIdentifier = (name: string) => (node: ts.JsxElement | ts.JsxSelfClosi
 check('the count next to a word is its own notranslate element: list segment, header badge, filter badge, Add quantity', () => {
   const segment = unmarkedCountElements('components/catalog/PortalListPage.tsx', childIdentifier(['count']))
   assert.equal(segment.found.length, 1, 'one list-segment count')
-  const header = unmarkedCountElements('components/catalog/CatalogPreviewSurface.tsx', classIdentifier('HEADER_COUNT_CLASS'))
-  assert.equal(header.found.length, 2, 'saved and list header counts')
+  const header = unmarkedCountElements('components/catalog/PortalDock.tsx', classIdentifier('COUNT_BADGE'))
+  assert.equal(header.found.length, 2, 'the dock list badge on the wide stack and on the phone menu button')
   const filters = unmarkedCountElements('components/catalog/CatalogProductsSection.tsx', childIdentifier(['portalActiveFilterCount']))
   assert.equal(filters.found.length, 2, 'phone and desktop Filters counts')
   const addQty = unmarkedCountElements('components/catalog/CatalogProductsSection.tsx', childIdentifier(['qty']))
@@ -309,7 +310,7 @@ check('every visible contactButton text sits in an element with translate="no" a
     total += result.found.length
     unmarked.push(...result.unmarked.map((entry) => `${path.relative(SRC, file)} ${entry}`))
   }
-  assert.ok(total >= 3, `found the header, assistant and list Contact buttons (${total})`)
+  assert.ok(total >= 1, `found the dock Contact button (${total})`)
   assert.deepEqual(unmarked, [])
   assert.deepEqual(entriesFor('contactButton').map((entry) => shopperEnglish(entry)).filter((text) => text !== 'Contact'), [], 'the visible word stays Contact')
 })
@@ -385,6 +386,65 @@ check('control: removing any one of the four marks or either key turns the assis
     assert.ok(problems.length >= 1, `${name}: removing it must turn the check red`)
   }
   assert.deepEqual(assistantViolations(sourceOf(original)), [], 'the unmutated source is clean')
+})
+
+// The repository is public: no test may name a folder that lives outside it. The needles are built from pieces so this
+// file does not match itself.
+// d15fix2 D3: the folder name is matched in any case (the lower-case spelling is the same folder on Windows) and a
+// percent-encoded space (as in a file:// URL) counts as a word boundary, because the 0 of that encoding would
+// otherwise read as the end of a longer word. Rules, in order (the examples are built in the next check, not written here):
+//   1. The word must start a path segment: preceded by a non-word character, the start of the text, or a percent-encoded
+//      space. So a longer word (onOpen..., fetchReturn..., sale_...) followed by the slash is not the folder.
+//   2. Written in the original exact case with a slash or backslash it is flagged whatever follows (original rule, unchanged).
+//   3. In any other case, or with an encoded separator, a path must continue after it (a letter, digit, underscore or
+//      hyphen). A bare lower-case word then slash is how a regular-expression literal ends in prose or in an API path
+//      assertion, and is not a folder.
+const namesInternalRecordsFolder = (text: string): boolean => {
+  const word = 'Record' + 's'
+  const pattern = new RegExp(word + '(?:[/\\\\]|%2f|%5c)', 'gi')
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    const at = match.index
+    const startsSegment = at === 0 || !/[A-Za-z0-9_]/.test(text[at - 1]) || text.slice(Math.max(0, at - 3), at).toLowerCase() === '%20'
+    if (!startsSegment) continue
+    const exactOriginal = match[0] === word + '/' || match[0] === word + String.fromCharCode(92)
+    if (exactOriginal || /[A-Za-z0-9_-]/.test(text[at + match[0].length] ?? '')) return true
+  }
+  return false
+}
+check('the internal-folder guard sees lower case and a percent-encoded space, and still passes a longer word', () => {
+  const word = 'Record' + 's'
+  const lower = word.toLowerCase()
+  const bs = String.fromCharCode(92)
+  const named: Array<[string, string]> = [
+    ['exact case with a slash', `see ${word}/Design/a.md`],
+    ['exact case at the start of the text', `${word}/Design`],
+    ['exact case with a backslash', `C:${bs}x${bs}${word}${bs}Design`],
+    ['lower case', `see ${lower}/design/a.md`],
+    ['lower case with a backslash', `C:${bs}x${bs}${lower}${bs}design`],
+    ['upper case', `see ${word.toUpperCase()}/DESIGN/a.md`],
+    ['a percent-encoded space before it', `file:///C:/x/Organization%20${word}/AI.md`],
+    ['a percent-encoded space before it, lower case', `file:///C:/x/Organization%20${lower}/ai.md`],
+    ['a percent-encoded slash after it', `Organization%20${word}%2FDesign%2Fa.md`],
+    ['a percent-encoded backslash after it', `Organization%20${lower}%5Cdesign`],
+  ]
+  for (const [label, text] of named) assert.equal(namesInternalRecordsFolder(text), true, `${label} must be reported: ${text}`)
+  // The 13 hits in tests/ today, as rule-by-rule stand-ins: all must stay unreported.
+  const exempt: Array<[string, string]> = [
+    ['onOpen' + word + '/ (longer word)', `\`onOpen${word}/\``],
+    ['fetchReturn' + word + '/ (longer word)', `fetchReturn${word}/`],
+    ['sale_' + lower + '/ (longer word with an underscore)', `/${'sale_' + lower}/`],
+    ['regex ending after a lower-case word', `/Barcodes kept on the merged ${lower}/.test(x)`],
+    ['regex ending after an API path', `/\\/api\\/returns\\/\\$\\{id\\}\\/${lower}/)`],
+    ['regex ending in a call', `/received-date ${lower}/)`],
+    ['regex ending in a comma', `/history ${lower}/, 'explained')`],
+  ]
+  for (const [label, text] of exempt) assert.equal(namesInternalRecordsFolder(text), false, `${label} must not be reported: ${text}`)
+})
+check('no file under tests names the internal records folder', () => {
+  const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)])
+  const hits = walk(path.dirname(fileURLToPath(import.meta.url))).filter((file) => namesInternalRecordsFolder(fs.readFileSync(file, 'utf8')))
+  assert.deepEqual(hits.map((file) => path.basename(file)), [], 'a test names a folder outside the repository')
 })
 
 console.log(`portalGoogleWording: ${passed} checks passed`)

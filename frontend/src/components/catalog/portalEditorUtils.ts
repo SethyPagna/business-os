@@ -181,6 +181,11 @@ const GOOGLE_MAPS_EMBED_HOSTS = new Set(
 )
 const GOOGLE_MAPS_SHARE_HOSTS = new Set(['share.google', 'maps.app.goo.gl', 'goo.gl'])
 
+// The one pair of attributes every Google map frame wears (the storefront About map and the Website Editor preview): Google Maps needs
+// scripts and its own origin, it must never navigate the page out from under the visitor, and it gets the origin only, never the page path.
+export const PORTAL_MAP_FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox'
+export const PORTAL_MAP_FRAME_REFERRER = 'strict-origin-when-cross-origin'
+
 export function normalizeGoogleMapsEmbed(value: unknown): string {
   const raw = extractGoogleMapsEmbedUrl(value)
   if (!raw) return ''

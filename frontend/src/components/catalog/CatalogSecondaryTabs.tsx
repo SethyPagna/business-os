@@ -1,15 +1,12 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ComponentType, CSSProperties, Dispatch, SetStateAction } from 'react'
+import type { CSSProperties, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
-import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
+import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
-import MessageCircle from 'lucide-react/dist/esm/icons/message-circle.js'
-import Phone from 'lucide-react/dist/esm/icons/phone.js'
-import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
@@ -20,20 +17,23 @@ import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu.tsx'
-import PortalEmbedConsent, { mapFallbackHref } from './legal/PortalEmbedConsent.tsx'
 import { COVER_BANNER_MAX_PX, coverRatio, coverShape, sameImageFile } from '../../utils/aboutCoverLayout.ts'
 import type { CoverShape } from '../../utils/aboutCoverLayout.ts'
 import { SectionShell, withTypedTerm } from './catalogUi'
 import { portalPrimaryValue } from './portalMultiValue.ts'
+import { PORTAL_CONTACT_ROW_INLINE, PortalContactRows } from './PortalSocialRow.tsx'
+import { portalAccountsNotShown } from './portalSocialLinks.ts'
+import type { PortalContactEntry } from './portalSocialLinks.ts'
 import { assistantRowNames } from './portalProductNames.ts'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { faqEntries, faqSearchVisible, filterFaqEntries, nextOpenFaqKey } from './portalFaqLayout.ts'
 import { defaultConfigText } from './portalLanguagePacks.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
-import { contactHref } from '../../utils/socialLinks.ts'
 import { aiConsentGiven, fillAiProviderTemplate, saveAiConsent } from './legal/aiProviderDisclosure.ts'
 import type { AiDisclosureLanguage, AiProviderState } from './legal/aiProviderDisclosure.ts'
+import { contactHref } from '../../utils/socialLinks.ts'
+import { PORTAL_MAP_FRAME_REFERRER, PORTAL_MAP_FRAME_SANDBOX } from './portalEditorUtils.ts'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -75,7 +75,6 @@ interface BusinessFact {
   label: string
   value?: string
   href?: string
-  icon?: ComponentType<{ className?: string }>
 }
 
 interface AboutBlock {
@@ -91,7 +90,12 @@ interface CatalogAboutSectionProps {
   previewConfig: PreviewConfig
   mapEmbedUrl?: string
   addressFact?: BusinessFact | null
-  businessFacts?: BusinessFact[]
+  /** The shop's e-mail when the owner shows it (Show email), else empty. */
+  emailText?: string
+  // The chat entries (Phone, Messenger, Telegram, WhatsApp) and the account entries (Facebook, Instagram, TikTok, Telegram channel, Website): the
+  // details card under the story lists both, as tappable rows with the real names.
+  contactEntries?: readonly PortalContactEntry[]
+  accountEntries?: readonly PortalContactEntry[]
   versionedBusinessLogo?: string
   versionedBusinessCover?: string
   imageFetchPriority?: 'high' | 'low' | 'auto'
@@ -110,8 +114,8 @@ interface CatalogFaqSectionProps {
   publicFaqItems: FaqItem[]
   expandedFaqId: IdValue | null
   setExpandedFaqId: Dispatch<SetStateAction<IdValue | null>>
-  // Both optional: a surface without a contact sheet simply shows no button.
-  onOpenContact?: () => void
+  // The chat entries (Phone, Messenger, Telegram, WhatsApp): the FAQ shows them as rows where a Contact button used to be. None: nothing is drawn.
+  contactEntries?: readonly PortalContactEntry[]
   faqLoading?: boolean
 }
 
@@ -241,17 +245,6 @@ const ICON_BUTTON = 'flex h-11 w-11 shrink-0 items-center justify-center rounded
 // only 2.5:1 on a white card and 2.4:1 on the dark one, and a field line must reach 3:1 on the page and on the card.
 const FIELD = 'border border-stone-500 bg-white text-[#23201b] placeholder:text-stone-500 focus-visible:border-[#7a5c22] dark:border-neutral-500 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-400 dark:focus-visible:border-amber-300'
 
-// The one Contact entry point on this page: the page's own contact callback, icon and one word.
-function PortalContactButton({ copy, onOpenContact }: { copy: CopyFn; onOpenContact?: () => void }) {
-  if (!onOpenContact) return null
-  return (
-    <button type="button" className={CHARCOAL_BUTTON} onClick={onOpenContact}>
-      <MessageCircle aria-hidden="true" className="h-4 w-4" />
-      <span translate="no" className="notranslate">{copy('contactButton', 'Contact', 'ទាក់ទង')}</span>
-    </button>
-  )
-}
-
 // The owner's photo, laid out by its own shape (utils/aboutCoverLayout.ts) so no frame colour ever shows
 // beside it: a wide picture is a full-width banner, a square or tall one sits in a box of its own ratio
 // (the hero's left column from md up). Every box is the picture's ratio and the picture fills it
@@ -303,36 +296,52 @@ function AboutCover({ src, imageFetchPriority, onFailed, onShape }: { src: strin
 // A long story reads better in two columns on a wide screen; a short one stays one block.
 const ABOUT_STORY_TWO_COLUMN_FROM = 700
 
-// Phone and address: icon, value, one action icon. The visible word is dropped (the icon says it);
-// the field name stays for a screen reader.
-function AboutFactRow({ item, copy, address }: { item: BusinessFact; copy: CopyFn; address: boolean }) {
-  const Icon = item.icon || (address ? MapPin : Phone)
-  const ActionIcon = address ? ExternalLink : PhoneCall
-  // The dialer link is rebuilt from the number (digits only, 6 or more); a number that makes none shows as plain text.
-  const href = address ? item.href || mapFallbackHref(item.value || '', '') : contactHref('tel', item.value)
-  const actionLabel = address
-    ? copy('openInGoogleMaps', 'Open in Google Maps', 'បើកក្នុង Google Maps')
-    : copy('callUs', 'Call us', 'ហៅទូរស័ព្ទ')
-  return (
-    <div className="flex min-h-12 items-center gap-3">
-      <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
-      <div className="min-w-0 flex-1 break-words text-sm font-medium leading-6 text-[#23201b] dark:text-neutral-100" title={item.value}>
+/**
+ * Where "Open in Maps" goes: the shop's own Google Maps link when the owner set one, else a plain Maps search for the address, else nothing.
+ * Both are https links the visitor opens themselves.
+ */
+export function portalMapOpenHref(addressLink: unknown, address: unknown): string {
+  const link = String(addressLink ?? '').trim()
+  // The callers' own rule (normalizeExternalUrl): http or https only. Checked here too so a future caller cannot hand a script URL to an href.
+  if (/^https?:\/\//i.test(link)) return link
+  const text = String(address ?? '').trim()
+  return text ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(text)}` : ''
+}
+
+// The address row of the details card: the brass pin, the real address, the whole row a link to the map. It wears the same recipe as a contact row.
+function AboutAddressRow({ item }: { item: BusinessFact }) {
+  const href = portalMapOpenHref(item.href, item.value)
+  const body = (
+    <>
+      <MapPin aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
+      <span className="min-w-0 flex-1 break-words leading-6">
         <span className="sr-only">{item.label}: </span>
         <span translate="no" className="notranslate">{item.value}</span>
-      </div>
-      {href ? (
-        <a
-          href={href}
-          target={address ? '_blank' : undefined}
-          rel={address ? 'noreferrer noopener' : undefined}
-          className={ICON_BUTTON}
-          aria-label={actionLabel}
-          title={actionLabel}
-        >
-          <ActionIcon aria-hidden="true" className="h-4 w-4" />
-        </a>
-      ) : null}
-    </div>
+      </span>
+    </>
+  )
+  if (!href) return <div className={PORTAL_CONTACT_ROW_INLINE} data-portal-about-address="">{body}</div>
+  return (
+    <a href={href} target="_blank" rel="noreferrer noopener" className={PORTAL_CONTACT_ROW_INLINE} data-portal-about-address="" aria-label={`${item.label}: ${item.value}`}>
+      {body}
+    </a>
+  )
+}
+
+// The one check for the e-mail row: the row is drawn, and the details card is counted, only when this gives a link.
+function aboutEmailHref(email: string): string {
+  return contactHref('mailto', email)
+}
+
+function AboutEmailRow({ email, copy }: { email: string; copy: CopyFn }) {
+  const label = copy('email', 'Email')
+  const href = aboutEmailHref(email)
+  if (!href) return null
+  return (
+    <a href={href} className={PORTAL_CONTACT_ROW_INLINE} data-portal-about-email="" aria-label={`${label}: ${email}`}>
+      <Mail aria-hidden="true" className={`h-4 w-4 shrink-0 ${BRASS_TEXT}`} />
+      <span translate="no" className="notranslate min-w-0 flex-1 break-all leading-6">{email}</span>
+    </a>
   )
 }
 
@@ -342,7 +351,9 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     previewConfig,
     mapEmbedUrl,
     addressFact,
-    businessFacts,
+    emailText = '',
+    contactEntries = [],
+    accountEntries = [],
     versionedBusinessLogo,
     versionedBusinessCover,
     imageFetchPriority,
@@ -381,9 +392,13 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const logoSizePx = Math.max(72, Number(previewConfig.logoSize || 80))
   // The same file as the cover: the round logo would only repeat the picture beside it.
   const showRoundLogo = !(hasCover && sameImageFile(versionedBusinessLogo, versionedBusinessCover))
-  const detailFacts = (businessFacts || []).filter((item) => item.key === 'phone' || item.key === 'address')
-  const hasFacts = detailFacts.length > 0
+  // The details card: Address, then the chat rows (Phone first), then the account rows; an account already listed as a chat row is not repeated.
+  const detailRows = [...contactEntries, ...portalAccountsNotShown(accountEntries, contactEntries)]
+  const addressText = String(addressFact?.value || '').trim()
+  const aboutEmail = String(emailText || '').trim()
+  const hasFacts = Boolean(addressText) || Boolean(aboutEmailHref(aboutEmail)) || detailRows.length > 0
   const hasMap = Boolean(mapEmbedUrl)
+  const mapOpenHref = portalMapOpenHref(addressFact?.href, addressText)
   const storyInColumns = storyText.length > ABOUT_STORY_TWO_COLUMN_FROM
 
   return (
@@ -482,9 +497,9 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         </figure>
       ) : null}
 
-      {/* 2 Nov (owner): no empty space. The story takes the full width (two columns on a
-          wide screen when it is long). Under it, phone and address sit BESIDE the map
-          on a large screen and stack on a phone. The map keeps its consent gate. */}
+      {/* The story takes the full width (two columns on a wide screen when it is long). Directly under it (owner A62, 21 Nov 2026), before the About
+          blocks and not only in the footer: one details card (address, the chat rows, the account rows) with the live map beside it on a wide screen,
+          stacked on a phone (A63). */}
       {storyText ? (
         <div className={`rounded-2xl p-5 ${SURFACE}`}>
           <div className="text-sm font-semibold leading-6 text-[#23201b] dark:text-neutral-100">{aboutTitle}</div>
@@ -495,27 +510,41 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
       ) : null}
 
       {hasFacts || hasMap ? (
-        <div data-portal-about-details="true" className={`grid gap-4 ${hasFacts && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-stretch' : ''}`}>
+        <div data-portal-about-details="true" className={`grid gap-4 ${hasFacts && hasMap ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start' : ''}`}>
           {hasFacts ? (
-            <div data-portal-contact-tray="true" className={`flex flex-col justify-center divide-y divide-stone-200 rounded-2xl px-4 py-1 dark:divide-neutral-700 ${SURFACE}`}>
-              {detailFacts.map((item) => <AboutFactRow key={item.key} item={item} copy={copy} address={item.key === 'address'} />)}
+            <div data-portal-contact-tray="true" className={`space-y-2 rounded-2xl p-3 ${SURFACE}`}>
+              {addressText ? <AboutAddressRow item={{ ...addressFact, key: 'address', label: addressFact?.label || copy('address', 'Address'), value: addressText }} /> : null}
+              <PortalContactRows inline entries={detailRows} copy={copy} className="space-y-2" />
+              {aboutEmail ? <AboutEmailRow email={aboutEmail} copy={copy} /> : null}
             </div>
           ) : null}
 
           {hasMap ? (
             <div data-portal-map-card="true" className={`flex flex-col overflow-hidden rounded-2xl ${SURFACE}`}>
-              {/* N45: the map is the storefront's only automatically-loading
-                  third party, so it waits for a click instead of fetching Google
-                  the moment this tab renders. Declining is a plain link, not a
-                  dead end. */}
-              <PortalEmbedConsent
-                className="flex-1"
-                frameClassName="h-72 w-full border-0 lg:h-auto lg:min-h-64 lg:flex-1"
-                copy={copy}
-                src={mapEmbedUrl || ''}
-                title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
-                address={addressFact?.value || ''}
-              />
+              {/* The live map loads as soon as this tab is shown (no click): 16:9 on a wide screen, 4:3 on a phone, lazy-loaded; Google gets the origin only, never the page path. */}
+              <div className="aspect-[4/3] w-full bg-[#f6ece0] sm:aspect-video dark:bg-neutral-800">
+                <iframe
+                  src={mapEmbedUrl || ''}
+                  title={copy('portal_a11y_map_title', "Map showing the shop's location", 'ផែនទីបង្ហាញទីតាំងហាង')}
+                  loading="lazy"
+                  referrerPolicy={PORTAL_MAP_FRAME_REFERRER}
+                  // Google Maps needs scripts and its own origin; it must never navigate the storefront out from under the visitor.
+                  sandbox={PORTAL_MAP_FRAME_SANDBOX}
+                  className="block h-full w-full border-0"
+                  allowFullScreen
+                />
+              </div>
+              {addressText || mapOpenHref ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#e3d9c8] bg-[#faf6ef] p-3 dark:border-neutral-700 dark:bg-neutral-800">
+                  {addressText ? <p className="min-w-0 flex-1 break-words text-sm leading-6 text-[#23201b] dark:text-neutral-100"><span translate="no" className="notranslate">{addressText}</span></p> : null}
+                  {mapOpenHref ? (
+                    <a href={mapOpenHref} target="_blank" rel="noreferrer noopener" className={`${CHARCOAL_BUTTON} shrink-0`}>
+                      <MapPin aria-hidden="true" className="h-4 w-4" />
+                      <span>{copy('openInMaps', 'Open in Maps', 'បើកក្នុងផែនទី')}</span>
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -580,10 +609,10 @@ export function FaqList(props: {
   setExpandedFaqId: Dispatch<SetStateAction<IdValue | null>>
   query: string
   setQuery: (value: string) => void
-  onOpenContact?: () => void
+  contactEntries?: readonly PortalContactEntry[]
   loading?: boolean
 }) {
-  const { copy, items, expandedFaqId, setExpandedFaqId, query, setQuery, onOpenContact, loading } = props
+  const { copy, items, expandedFaqId, setExpandedFaqId, query, setQuery, contactEntries = [], loading } = props
   const entries = faqEntries(items)
   const searchable = faqSearchVisible(entries.length)
   const activeQuery = searchable ? query.trim() : ''
@@ -592,9 +621,9 @@ export function FaqList(props: {
   if (loading) return <FaqSkeleton />
   if (!entries.length) {
     return (
-      <div className={`mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ${SURFACE}`}>
+      <div className={`mx-auto w-full max-w-3xl space-y-3 rounded-2xl px-4 py-3 ${SURFACE}`}>
         <p className="min-w-0 text-sm font-semibold leading-7 text-[#23201b] dark:text-neutral-100">{copy('faqEmptyNone', 'No questions yet.', 'មិនទាន់មានសំណួរនៅឡើយទេ។')}</p>
-        <PortalContactButton copy={copy} onOpenContact={onOpenContact} />
+        <PortalContactRows inline entries={contactEntries} copy={copy} className="grid gap-2 sm:grid-cols-2" />
       </div>
     )
   }
@@ -638,7 +667,7 @@ export function FaqList(props: {
                 <h3 className="m-0">
                   <button
                     type="button"
-                    className="flex min-h-11 w-full items-start justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-stone-50 dark:hover:bg-neutral-800"
+                    className="flex min-h-11 w-full items-start justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-[#f6ece0] dark:hover:bg-neutral-800"
                     aria-expanded={open}
                     aria-controls={open ? answerId : undefined}
                     onClick={() => setExpandedFaqId((current) => nextOpenFaqKey(current, key))}
@@ -674,10 +703,10 @@ export function FaqList(props: {
         </div>
       )}
 
-      {onOpenContact ? (
-        <div className={`mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 ${SURFACE}`} data-portal-faq-contact="true">
+      {contactEntries.length > 0 ? (
+        <div className={`mt-4 space-y-3 rounded-2xl px-4 py-3 ${SURFACE}`} data-portal-faq-contact="true">
           <p className="min-w-0 text-base font-semibold leading-8 text-[#23201b] dark:text-neutral-100">{copy('faqStillHeading', 'Still have a question?', 'នៅមានសំណួរទៀតទេ?')}</p>
-          <PortalContactButton copy={copy} onOpenContact={onOpenContact} />
+          <PortalContactRows inline entries={contactEntries} copy={copy} className="grid gap-2 sm:grid-cols-2" />
         </div>
       ) : null}
     </div>
@@ -685,7 +714,7 @@ export function FaqList(props: {
 }
 
 function CatalogFaqSection(props: CatalogFaqSectionProps) {
-  const { copy, previewConfig, publicFaqItems, expandedFaqId, setExpandedFaqId, onOpenContact, faqLoading } = props
+  const { copy, previewConfig, publicFaqItems, expandedFaqId, setExpandedFaqId, contactEntries, faqLoading } = props
   const [query, setQuery] = useState('')
 
   return (
@@ -697,7 +726,7 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
         setExpandedFaqId={setExpandedFaqId}
         query={query}
         setQuery={setQuery}
-        onOpenContact={onOpenContact}
+        contactEntries={contactEntries}
         loading={faqLoading}
       />
     </SectionShell>

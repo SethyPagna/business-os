@@ -137,7 +137,8 @@ const GLOSSARY: GlossaryRule[] = [
   { concept: 'Expenses section', canonical: 'ចំណាយ', forbidden: ['កម្រៃថ្លៃសេវា'] },
   // 31 Aug: the duplicates sections are Conflicts.
   { concept: 'Conflicts section', canonical: 'ទំនាស់ទិន្នន័យ', forbidden: ['ស្ទួនដែលអាចមាន'] },
-  { concept: 'customer', canonical: 'អតិថិជន', forbidden: ['អ្នកទិញ'], except: ['fee_by_customer', 'pos_customer_pays', 'customer_pays'] },
+  // portal_legal_terms_prices_b says នៅពេលអ្នកទិញ, "when you buy" (អ្នក "you" + ទិញ "buy"), not the noun "buyer".
+  { concept: 'customer', canonical: 'អតិថិជន', forbidden: ['អ្នកទិញ'], except: ['fee_by_customer', 'pos_customer_pays', 'customer_pays', 'portal_legal_terms_prices_b'] },
   { concept: 'cost', canonical: 'ថ្លៃដើម', forbidden: ['តម្លៃដើម'] },
   { concept: 'variant', canonical: 'ជម្រើស', forbidden: ['វ៉ារ្យ៉ង់', 'វ៉ារីយ៉ង់'] },
   // ទាន់សម័យ is "up to date" and merely contains សម័យ -- spare it.

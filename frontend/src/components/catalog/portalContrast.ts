@@ -56,8 +56,10 @@ export const PORTAL_FIELD_LINE_LIGHT = '#78716c'
  * brass = UI parts / large text; brassText = small text.
  */
 export const PORTAL_TOKENS = {
-  light: { ink: '#23201b', ground: '#f4f1ea', card: '#ffffff', brass: '#9c7a3c', brassText: '#7a5c22', onInk: '#f4f1ea' },
-  dark: { ink: '#f5f1e8', ground: '#0b0b0c', card: '#171717', brass: '#d6b56b', brassText: '#e3c887', onInk: '#23201b' },
+  // inset = the quiet tint of a secondary block (filter panel, details card rows, segment track, contact rows, notices); insetLine = its border;
+  // band = a section header band or an active state (owner A61, 21 Nov 2026: tones and borders, not white on white).
+  light: { ink: '#23201b', ground: '#f4f1ea', card: '#ffffff', brass: '#9c7a3c', brassText: '#7a5c22', onInk: '#f4f1ea', inset: '#faf6ef', insetLine: '#e3d9c8', band: '#f6ece0' },
+  dark: { ink: '#f5f1e8', ground: '#0b0b0c', card: '#171717', brass: '#d6b56b', brassText: '#e3c887', onInk: '#23201b', inset: '#262626', insetLine: '#404040', band: '#404040' },
 } as const
 
 export function normalizePortalHex(value: unknown, fallback: string): string {
@@ -258,6 +260,17 @@ export const PORTAL_CONTRAST_PAIRS: PortalContrastPair[] = [
   { name: 'dark destructive icon button (rose-400)', foreground: '#fb7185', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'remove-from-list / remove-from-wishlist' },
   { name: 'dark inactive promo dot (neutral-400)', foreground: '#a3a3a3', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'PortalPromoStrip dot row' },
   { name: 'dark focus ring against the dark ground', foreground: '#fcd34d', background: PORTAL_DARK_SURFACE, kind: 'ui', where: 'public-portal.css :focus-visible outline + the focus-visible:outline-[] classes on the createPortal()ed popups and the account form' },
+
+  // --- the three surface tones (card white, inset, band) and their ink ---------------------------------
+  { name: 'ink on the inset tone', foreground: PORTAL_TOKENS.light.ink, background: PORTAL_TOKENS.light.inset, kind: 'text', where: 'filter panel, details card rows, contact rows, notices' },
+  { name: 'secondary text (stone-600) on the inset tone', foreground: '#57534e', background: PORTAL_TOKENS.light.inset, kind: 'text', where: 'the no-payment notice, hints inside an inset block' },
+  { name: 'brass text on the inset tone', foreground: PORTAL_TOKENS.light.brassText, background: PORTAL_TOKENS.light.inset, kind: 'text', where: 'small brass text inside an inset block' },
+  { name: 'ink on the band tone', foreground: PORTAL_TOKENS.light.ink, background: PORTAL_TOKENS.light.band, kind: 'text', where: 'active segment, hovered contact row' },
+  { name: 'secondary text (stone-600) on the band tone', foreground: '#57534e', background: PORTAL_TOKENS.light.band, kind: 'text', where: 'counts beside an active segment' },
+  { name: 'brass text on the band tone', foreground: PORTAL_TOKENS.light.brassText, background: PORTAL_TOKENS.light.band, kind: 'text', where: 'small brass text on an active state' },
+  { name: 'dark ink on the dark inset tone', foreground: PORTAL_TOKENS.dark.ink, background: PORTAL_TOKENS.dark.inset, kind: 'text', where: 'filter panel, details card rows, contact rows, notices' },
+  { name: 'dark secondary text (neutral-300) on the dark inset tone', foreground: '#d4d4d4', background: PORTAL_TOKENS.dark.inset, kind: 'text', where: 'the no-payment notice' },
+  { name: 'dark ink on the dark band tone', foreground: PORTAL_TOKENS.dark.ink, background: PORTAL_TOKENS.dark.band, kind: 'text', where: 'active segment, hovered contact row' },
 
   // --- storefront tokens (public-portal.css --portal-*) ----------------------
   { name: 'token ink on ivory ground', foreground: PORTAL_TOKENS.light.ink, background: PORTAL_TOKENS.light.ground, kind: 'text', where: '--portal-ink on --portal-ground' },

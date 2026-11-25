@@ -187,31 +187,43 @@ export type PortalFlatSocialLink = {
   latin: boolean
 }
 
-// The one Contact list (public-web overhaul, spec section 3). The header button, the FAQ and About buttons, the list page, the account's
-// "Forgot password?" link and the footer column all show these entries, so a name is decided in exactly one place.
-export type PortalContactPlatform = SocialPlatform | 'email' | 'map'
+// The storefront's contact data, split in two (owner A57, 21 Nov 2026: "the contact don't merge the chat with the account"):
+//   - CHAT entries are ways to message or call the shop: Phone, Messenger, Telegram (chat link), WhatsApp, in that order. They are the Contact
+//     panel behind the bottom-right dock button, and the inline rows wherever a page used to carry a Contact button;
+//   - ACCOUNT entries are information: Facebook page, Instagram, TikTok, Telegram channel, Website. They sit in the About details card and the
+//     footer column, never in the Contact panel.
+// A name is decided in exactly one place, so every surface shows the same text.
+export type PortalChatPlatform = 'phone' | 'messenger' | 'telegram' | 'whatsapp'
+export type PortalAccountPlatform = 'facebook' | 'instagram' | 'tiktok' | 'telegram' | 'website'
+export type PortalContactPlatform = PortalChatPlatform | PortalAccountPlatform
 
 export type PortalContactEntry = {
   key: string
   platform: PortalContactPlatform
   href: string
-  /** The account name, number or address a visitor reads. Never "@name" and never just the platform word (unless nothing else is known). */
+  /** The account name or number a visitor reads. Never "@name" and never just the platform word (unless nothing else is known). */
   label: string
   /** "Facebook: leanggirlactik": the platform stays available to a screen reader. */
   accessibleName: string
   latin: boolean
 }
 
-/** The order of the rows: Phone, Messenger, Telegram, Instagram, Facebook, TikTok, WhatsApp, Website, Email, Map. */
-export const PORTAL_CONTACT_MENU_ORDER: readonly PortalContactPlatform[] = ['phone', 'messenger', 'telegram', 'instagram', 'facebook', 'tiktok', 'whatsapp', 'website', 'email', 'map']
+export const PORTAL_CHAT_ORDER: readonly PortalChatPlatform[] = ['phone', 'messenger', 'telegram', 'whatsapp']
+export const PORTAL_ACCOUNT_ORDER: readonly PortalAccountPlatform[] = ['facebook', 'instagram', 'tiktok', 'telegram', 'website']
 
 const KHMER_TEXT = /[ក-៿᧠-᧿]/
 const clean = (value: unknown): string => String(value ?? '').trim()
 
+/** One account is one row however it is typed: a number by its digits, anything else by platform and name. */
+const entryIdentity = (entry: Pick<PortalContactEntry, 'platform' | 'href' | 'label'>): string =>
+  entry.platform === 'phone' ? `phone|${entry.href.replace(/\D/g, '').replace(/^855/, '').replace(/^0+/, '')}` : `${entry.platform}|${entry.label.toLowerCase()}`
+
 /**
- * Every way to reach the shop, in menu order. `contact` are the direct-message channels (Messenger, Telegram, WhatsApp, Call, Instagram),
- * `social` the page links (website, Facebook, Instagram, TikTok, Telegram), the rest the business facts. The same account that is both a
- * chat channel and a page link (Telegram, Instagram) is one row, and the chat link wins. A platform with two accounts gets two rows.
+ * The chat entries and the account entries. `contact` are the direct-message channels (Messenger, Telegram, WhatsApp, Call, Instagram),
+ * `social` the page links (website, Facebook, Instagram, TikTok, Telegram), `phone` the shop's business phone. The same account listed twice
+ * under one list is one row; a platform with two accounts gets two rows. The one Telegram account that is both chat link and channel is in BOTH
+ * lists (the panel and the information rows); a screen that shows both drops the second with `portalAccountsNotShown`.
+ * Instagram is an account here: its chat link is used only when no page link names the same account.
  *
  * A Facebook link with no readable name (the live shop's is a facebook.com/share/ link) takes, in this order: the owner's label (already
  * applied by resolveSocialDisplay), the account name of the same business's Messenger link, then the shop name.
@@ -220,87 +232,80 @@ export function buildPortalContactEntries(input: {
   social?: readonly PortalSocialGroup[]
   contact?: readonly PortalSocialGroup[]
   phone?: unknown
-  email?: unknown
-  mapHref?: unknown
-  /** The address text the Map row shows. */
-  address?: unknown
   shopName?: unknown
   language?: string
-}): PortalContactEntry[] {
+}): { chat: PortalContactEntry[]; accounts: PortalContactEntry[] } {
   const language: SocialLanguage = input.language === 'km' ? 'km' : 'en'
   const shopName = clean(input.shopName)
-  const found: PortalContactEntry[] = []
-  const seen = new Set<string>()
-  const push = (platform: PortalContactPlatform, href: string, label: string, accessibleName: string) => {
-    if (!href || !label) return
-    // One number is one row however it is typed: +855 12 345 678, 855 12 345 678 and 012 345 678 are the same Cambodian line.
-    const identity = platform === 'phone' ? `phone|${href.replace(/\D/g, '').replace(/^855/, '').replace(/^0+/, '')}` : `${platform}|${label.toLowerCase()}`
-    if (seen.has(identity)) return
-    seen.add(identity)
-    found.push({ key: `${platform}-${found.length}`, platform, href, label, accessibleName, latin: !KHMER_TEXT.test(label) })
+  const make = (platform: PortalContactPlatform, href: string, label: string, accessibleName: string): PortalContactEntry | null =>
+    href && label ? { key: '', platform, href, label, accessibleName, latin: !KHMER_TEXT.test(label) } : null
+  const collect = (order: readonly PortalContactPlatform[], candidates: Array<PortalContactEntry | null>): PortalContactEntry[] => {
+    const seen = new Set<string>()
+    const found: PortalContactEntry[] = []
+    for (const entry of candidates) {
+      if (!entry || !order.includes(entry.platform)) continue
+      const identity = entryIdentity(entry)
+      if (seen.has(identity)) continue
+      seen.add(identity)
+      found.push(entry)
+    }
+    return found
+      .sort((a, b) => order.indexOf(a.platform) - order.indexOf(b.platform))
+      .map((entry, position) => ({ ...entry, key: `${entry.platform}-${position}` }))
   }
 
   const messengerName = (input.contact ?? [])
     .filter((group) => group.platform === 'messenger')
     .flatMap((group) => group.links)
     .find((link) => link.kind === 'username')?.visibleText || ''
-
-  for (const group of [...(input.contact ?? []), ...(input.social ?? [])]) {
-    for (const link of group.links) {
-      const platformName = SOCIAL_PLATFORM_NAMES[group.platform][language]
-      if (group.platform === 'facebook' && link.kind === 'platform') {
-        const name = messengerName || shopName
-        if (name) {
-          push('facebook', link.href, name, `${platformName}: ${name}`)
-          continue
-        }
-      }
-      push(group.platform, link.href, link.visibleText, link.accessibleName)
+  const fromGroup = (group: PortalSocialGroup): Array<PortalContactEntry | null> => group.links.map((link) => {
+    if (group.platform === 'facebook' && link.kind === 'platform') {
+      const name = messengerName || shopName
+      if (name) return make('facebook', link.href, name, `${SOCIAL_PLATFORM_NAMES.facebook[language]}: ${name}`)
     }
-  }
+    return make(group.platform, link.href, link.visibleText, link.accessibleName)
+  })
 
   const phone = clean(input.phone)
-  if (phone) {
-    const href = contactHref('tel', phone)
+  const businessPhone = phone ? (() => {
     const display = resolveSocialDisplay({ platform: 'phone', href: phone, language })
-    push('phone', href, display.visibleText, display.accessibleName)
-  }
-  const email = clean(input.email)
-  if (email) push('email', contactHref('mailto', email), email, `${language === 'km' ? 'អ៊ីមែល' : 'Email'}: ${email}`)
-  const mapHref = clean(input.mapHref)
-  if (mapHref) {
-    const address = clean(input.address)
-    push('map', mapHref, address || (language === 'km' ? 'ផែនទី' : 'Map'), `${language === 'km' ? 'ផែនទី' : 'Map'}${address ? `: ${address}` : ''}`)
-  }
-
-  const rank = (platform: PortalContactPlatform) => PORTAL_CONTACT_MENU_ORDER.indexOf(platform)
-  return found
-    .map((entry, index) => ({ entry, index }))
-    .sort((a, b) => rank(a.entry.platform) - rank(b.entry.platform) || a.index - b.index)
-    .map(({ entry }, position) => ({ ...entry, key: `${entry.platform}-${position}` }))
+    return make('phone', contactHref('tel', phone), display.visibleText, display.accessibleName)
+  })() : null
+  const chat = collect(PORTAL_CHAT_ORDER, [
+    ...(input.contact ?? []).flatMap(fromGroup),
+    businessPhone,
+  ])
+  const accounts = collect(PORTAL_ACCOUNT_ORDER, [
+    ...(input.social ?? []).flatMap(fromGroup),
+    ...(input.contact ?? []).filter((group) => group.platform === 'instagram').flatMap(fromGroup),
+  ])
+  return { chat, accounts }
 }
 
-type ContactFocusNode = { isConnected: boolean; focus: () => void }
-type ContactFocusHost = { querySelector: (selector: string) => unknown }
-
-export const PORTAL_CONTACT_TRIGGER_SELECTOR = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+/** The accounts a screen has not already shown as chat rows: the same account never appears twice on one screen. */
+export function portalAccountsNotShown(accounts: readonly PortalContactEntry[], shown: readonly PortalContactEntry[]): PortalContactEntry[] {
+  const taken = new Set(shown.map(entryIdentity))
+  return accounts.filter((entry) => !taken.has(entryIdentity(entry)))
+}
 
 /**
- * Where focus goes when the Contact menu closes: nowhere if the visitor already put focus on something else, else the element that
- * opened the menu if it is still on the page, else the trigger now inside the menu's host.
+ * The accounts the footer column lists on this screen. About prints every account in its details card, so the footer prints none there; the FAQ
+ * and the List page print the chat rows inline, so the footer leaves out the same account; every other screen lists them all.
+ *
+ * One exception, kept on purpose: the footer's Telegram entry stays on every screen. The footer's takedown sentence ("if you or a picture of you is
+ * on this site, contact us via ...", legal/LegalPages.tsx) reads its link from this list, so dropping Telegram would leave that legal route with
+ * no link. The entry comes from the accounts, else from the chat rows.
  */
-export function resolveContactFocusTarget<T extends ContactFocusNode>(opener: T | null, host: ContactFocusHost | null, active: unknown, body: unknown): T | null {
-  const focusIsFree = !active || active === body || (active as ContactFocusNode).isConnected === false
-  if (!focusIsFree) return null
-  if (opener?.isConnected) return opener
-  return (host?.querySelector(PORTAL_CONTACT_TRIGGER_SELECTOR) as T | null | undefined) ?? null
+export function portalFooterAccounts(accounts: readonly PortalContactEntry[], chat: readonly PortalContactEntry[], screen: { tab: string; listOpen: boolean }): PortalContactEntry[] {
+  const covered = screen.tab === 'about' && !screen.listOpen ? [...accounts] : screen.listOpen || screen.tab === 'faq' ? accounts.filter((entry) => !portalAccountsNotShown([entry], chat).length) : []
+  const telegram = accounts.find((entry) => entry.platform === 'telegram') ?? chat.find((entry) => entry.platform === 'telegram')
+  const shown = accounts.filter((entry) => entry === telegram || !covered.includes(entry))
+  return telegram && !shown.includes(telegram) ? [...shown, telegram] : shown
 }
 
-/** The footer's contact column lists the same entries minus what it already prints itself (phone, e-mail, address). */
-export function portalContactFooterLinks(entries: readonly PortalContactEntry[]): PortalFlatSocialLink[] {
-  return entries
-    .filter((entry): entry is PortalContactEntry & { platform: SocialPlatform } => entry.platform !== 'phone' && entry.platform !== 'email' && entry.platform !== 'map')
-    .map((entry) => ({ key: entry.key, platform: entry.platform, value: entry.href, label: entry.label, accessibleName: entry.accessibleName, latin: entry.latin }))
+/** The footer's column lists the account entries. */
+export function portalContactFooterLinks(accounts: readonly PortalContactEntry[]): PortalFlatSocialLink[] {
+  return accounts.map((entry) => ({ key: entry.key, platform: entry.platform as SocialPlatform, value: entry.href, label: entry.label, accessibleName: entry.accessibleName, latin: entry.latin }))
 }
 
 

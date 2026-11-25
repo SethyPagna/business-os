@@ -4,8 +4,9 @@ import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import SignupConsentField, { AGE_CONFIRMATION_REQUIRED_CODE, consentRequiredMessage, signupConsentFields } from './legal/SignupConsentField.tsx'
-import PortalContactMenu from './PortalContactMenu.tsx'
+import { PortalContactRows } from './PortalSocialRow.tsx'
 import { PORTAL_PRIMARY_BUTTON } from './portalButtons.ts'
+import { PRODUCT_BAND_CLASS, PRODUCT_INSET_CLASS } from './portalProductSurfaces.ts'
 import { PORTAL_SHEET_CORNER_PAD } from './PortalSheet.tsx'
 import type { PortalContactEntry } from './portalSocialLinks.ts'
 import type { PortalAccountProfile } from './portalAccount.ts'
@@ -55,7 +56,7 @@ export default function CatalogAccountSection({
   signupEnabled?: boolean
   /** The Worker's refusal code for `error` (usePortalAccount errorCode). */
   errorCode?: string
-  /** "Forgot password?" opens the Contact menu with these. None: a plain line (data-portal-forgot-password-hint) tells the shopper to ask the shop, since there is no menu to open. */
+  /** The chat entries (Phone, Messenger, Telegram, WhatsApp) shown under the "Forgot password?" line. None: the line alone tells the shopper to ask the shop. */
   contactEntries?: readonly PortalContactEntry[]
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
@@ -143,14 +144,14 @@ export default function CatalogAccountSection({
       {/* The first thing in the sheet: the Sign in / Sign up switch. With sign-up off there is no Sign up side at all: one muted line takes its place. */}
       <div className={`${PORTAL_SHEET_CORNER_PAD} flex items-center`}>
         {signupOpen ? (
-          <div role="group" className="inline-flex rounded-xl bg-stone-100 p-1 text-sm dark:bg-neutral-800">
+          <div role="group" className={`inline-flex rounded-xl p-1 text-sm ${PRODUCT_INSET_CLASS}`}>
             {(['signin', 'signup'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => switchMode(value)}
                 aria-pressed={mode === value}
-                className={`min-h-9 rounded-lg px-4 font-semibold transition ${mode === value ? 'bg-white text-[#23201b] shadow-sm dark:bg-neutral-700 dark:text-white' : 'text-stone-600 dark:text-neutral-300'}`}
+                className={`min-h-9 rounded-lg px-4 font-semibold transition ${mode === value ? `${PRODUCT_BAND_CLASS} shadow-sm` : 'border border-transparent text-stone-600 dark:text-neutral-300'}`}
               >
                 {value === 'signin' ? copy('signIn', 'Sign in') : copy('signUp', 'Sign up')}
               </button>
@@ -213,26 +214,13 @@ export default function CatalogAccountSection({
           <button type="submit" disabled={busy} className={submitClass}>
             {busy ? copy('signingIn', 'Signing in…') : copy('signIn', 'Sign in')}
           </button>
-          {contactEntries.length > 0 ? (
-            <PortalContactMenu
-              entries={contactEntries}
-              copy={copy}
-              align="left"
-              trigger={(
-                <button
-                  type="button"
-                  data-portal-forgot-password=""
-                  className="inline-flex min-h-10 items-center text-sm font-medium text-[#7a5c22] underline underline-offset-2 transition hover:text-[#23201b] dark:text-amber-300 dark:hover:text-amber-200"
-                >
-                  {copy('forgotPasswordLink', 'Forgot password?', 'ភ្លេចពាក្យសម្ងាត់?')}
-                </button>
-              )}
-            />
-          ) : (
+          {/* Forgot password: one short line and, when the shop has chat channels, the rows themselves (no button to open first). */}
+          <div data-portal-forgot-password="" className="space-y-2">
             <p data-portal-forgot-password-hint="" className="text-sm text-stone-600 dark:text-neutral-300">
               {copy('forgotPasswordAskShop', 'Forgot your password? Ask the shop to reset it.', 'ភ្លេចពាក្យសម្ងាត់? សូមសុំហាងកំណត់ថ្មី។')}
             </p>
-          )}
+            <PortalContactRows inline entries={contactEntries} copy={copy} className="space-y-2" />
+          </div>
         </form>
       ) : (
         <form onSubmit={onSignUp} className="space-y-3" autoComplete="on">

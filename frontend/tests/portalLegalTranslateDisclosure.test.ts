@@ -14,6 +14,7 @@ import ts from 'typescript'
 import { LEGAL_PAGE_SECTIONS, LEGAL_STORAGE_ROWS, PORTAL_LEGAL_EN, PORTAL_LEGAL_KM } from '../src/components/catalog/legal/legalContent.ts'
 import { AI_CONSENT_STORAGE_KEY } from '../src/components/catalog/legal/aiProviderDisclosure.ts'
 import { parseSource, storefrontModules } from './storefrontCopyScan.ts'
+import { parseText, retiredKeyUseProblems } from './retiredStorageKeyUses.ts'
 
 // 1. The privacy paragraph.
 const privacySections = LEGAL_PAGE_SECTIONS.privacy
@@ -22,19 +23,19 @@ assert.ok(translation, 'the Privacy Policy has no Translation section')
 assert.deepEqual(translation.bodies, ['portal_legal_privacy_translate_b'], 'the Translation section is one paragraph')
 const en = PORTAL_LEGAL_EN.portal_legal_privacy_translate_b
 const km = PORTAL_LEGAL_KM.portal_legal_privacy_translate_b
-for (const fact of [/Simplified Chinese, Traditional Chinese, French and Spanish/, /Google Translate in your browser when you pick one of them/, /page text is then sent to Google/, /If you stay on Khmer or English, nothing is sent to Google/]) {
+for (const fact of [/Simplified Chinese, Traditional Chinese, French and Spanish/, /machine translations/, /Google Translate makes them in your browser when you pick one of these languages/, /page text is then sent to Google/, /If you stay on Khmer or English, nothing is sent to Google/]) {
   assert.match(en, fact, `the English Translation paragraph lost: ${fact}`)
 }
 assert.match(en, /^[^]*\.$/, 'the paragraph ends in a full stop')
-assert.equal(en.split('. ').length, 4, 'four plain sentences')
-assert.match(en, /Translation is paused while you are signed in or have the account panel open.$/)
-for (const fact of [/ចិនសាមញ្ញ/, /ចិនប្រពៃណី/, /បារាំង/, /អេស្ប៉ាញ/, /Google Translate/, /ភាសាខ្មែរ ឬអង់គ្លេស/, /គ្មានអ្វីត្រូវបានផ្ញើទៅ Google/, /ការបកប្រែត្រូវបានផ្អាក ពេលអ្នកចូលគណនី ឬបើកផ្ទាំងគណនី។$/]) {
+assert.equal(en.split('. ').length, 5, 'five plain sentences')
+assert.match(en, /Translation is paused while you are signed in or while the account panel is open.$/)
+for (const fact of [/ចិនសាមញ្ញ/, /ចិនប្រពៃណី/, /បារាំង/, /អេស្ប៉ាញ/, /Google Translate/, /ភាសាខ្មែរ ឬអង់គ្លេស/, /គ្មានអ្វីត្រូវបានផ្ញើទៅ Google/, /ការបកប្រែត្រូវបានផ្អាក ពេលអ្នកចូលគណនី ឬពេលផ្ទាំងគណនីបើក។$/]) {
   assert.match(km, fact, `the Khmer Translation paragraph lost: ${fact}`)
 }
 assert.equal(PORTAL_LEGAL_EN.portal_legal_privacy_translate_h, 'Translation')
 // Nobody has verified in a browser who writes googtrans: this site does, and Google's widget sets it too. The text must say both and neither alone.
-const EN_POLICY_WRITERS = /This site and Google's translation script set the googtrans cookie to remember that choice; this site clears it when you go back to Khmer or English or when translation is paused\./
-const KM_POLICY_WRITERS = /គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី googtrans ដើម្បីចងចាំជម្រើសនោះ ហើយគេហទំព័រនេះលុបវាពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែផ្អាក។/
+const EN_POLICY_WRITERS = /This site and the Google translation script set the googtrans cookie to remember that choice\. This site deletes that cookie when you go back to Khmer or English, or when translation is paused\./
+const KM_POLICY_WRITERS = /គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី googtrans ដើម្បីចងចាំជម្រើសនោះ។ គេហទំព័រនេះលុបខូឃីនោះ ពេលអ្នកត្រឡប់ទៅភាសាខ្មែរ ឬអង់គ្លេស ឬពេលការបកប្រែត្រូវបានផ្អាក។/
 assert.match(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, EN_POLICY_WRITERS)
 assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /Google's script reads it/, 'nobody verified that Google only reads it')
 assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_cookies_third_b, /which sets the googtrans cookie/, 'Google alone does not set googtrans')
@@ -51,7 +52,7 @@ assert.ok(KM_SENTENCES(PORTAL_LEGAL_KM.portal_legal_cookies_third_b).length >= 5
 assert.equal(googtransSentences(EN_SENTENCES(PORTAL_LEGAL_EN.portal_legal_cookies_third_b)), 1, 'exactly one English sentence mentions googtrans')
 assert.equal(googtransSentences(KM_SENTENCES(PORTAL_LEGAL_KM.portal_legal_cookies_third_b)), 1, 'exactly one Khmer sentence mentions googtrans')
 const semicolonEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace('or when translation is paused.', "or when translation is paused; Google's script alone also sets googtrans.")
-const semicolonKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('ឬពេលការបកប្រែផ្អាក។', "ឬពេលការបកប្រែផ្អាក; Google's script alone also sets googtrans។")
+const semicolonKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('ឬពេលការបកប្រែត្រូវបានផ្អាក។', "ឬពេលការបកប្រែត្រូវបានផ្អាក; Google's script alone also sets googtrans។")
 assert.notEqual(semicolonEn, PORTAL_LEGAL_EN.portal_legal_cookies_third_b, 'control: the semicolon EN mutation changed the text')
 assert.notEqual(semicolonKm, PORTAL_LEGAL_KM.portal_legal_cookies_third_b, 'control: the semicolon KM mutation changed the text')
 assert.equal(googtransSentences(EN_SENTENCES(semicolonEn)), 2, 'control: a claim joined by a semicolon is counted (EN)')
@@ -63,11 +64,11 @@ assert.notEqual(policyExtraKm, PORTAL_LEGAL_KM.portal_legal_cookies_third_b, 'co
 assert.equal(googtransSentences(EN_SENTENCES(policyExtraEn)), 2, 'control: a second English googtrans sentence is counted')
 assert.equal(googtransSentences(KM_SENTENCES(policyExtraKm)), 2, 'control: a second Khmer googtrans sentence is counted')
 // Controls: a text that says the site alone writes it, or Google alone does, must fail these patterns.
-const policyClauseKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('ដើម្បីចងចាំជម្រើសនោះ ហើយ', 'ដើម្បីចងចាំជម្រើសនោះ ហើយស្គ្រីបរបស់ Google តែមួយគត់កំណត់វាផងដែរ ហើយ')
+const policyClauseKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('ដើម្បីចងចាំជម្រើសនោះ។', 'ដើម្បីចងចាំជម្រើសនោះ ហើយស្គ្រីបរបស់ Google តែមួយគត់កំណត់វាផងដែរ។')
 assert.notEqual(policyClauseKm, PORTAL_LEGAL_KM.portal_legal_cookies_third_b, 'control: the inserted-clause KM policy mutation changed the text')
 assert.doesNotMatch(policyClauseKm, KM_POLICY_WRITERS, 'control: a contradicting clause inside the Khmer policy sentence is rejected')
-const siteAloneEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace("This site and Google's translation script set the googtrans cookie", 'This site writes the googtrans cookie')
-const googleAloneEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace("This site and Google's translation script set the googtrans cookie", "Google's translation script sets the googtrans cookie")
+const siteAloneEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace('This site and the Google translation script set the googtrans cookie', 'This site writes the googtrans cookie')
+const googleAloneEn = PORTAL_LEGAL_EN.portal_legal_cookies_third_b.replace('This site and the Google translation script set the googtrans cookie', 'The Google translation script sets the googtrans cookie')
 const siteAloneKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី', 'គេហទំព័រនេះសរសេរខូឃី')
 const googleAloneKm = PORTAL_LEGAL_KM.portal_legal_cookies_third_b.replace('គេហទំព័រនេះ និងស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី', 'ស្គ្រីបបកប្រែរបស់ Google កំណត់ខូឃី')
 assert.notEqual(siteAloneEn, PORTAL_LEGAL_EN.portal_legal_cookies_third_b, 'control: the site-alone EN replacement changed the text')
@@ -139,22 +140,54 @@ assert.match('Google\'s translation script may also write it', EN_HEDGE, 'contro
 assert.match('ក៏អាចសរសេរវាដែរ', KM_CAN_ALSO, 'control: the Khmer can-also pattern catches the retired wording')
 assert.match(PORTAL_LEGAL_EN[googtrans.lifetimeKey], /translation is paused/)
 assert.equal(rowByName.get(AI_CONSENT_STORAGE_KEY)?.kindKey, 'portal_legal_kind_local', 'the assistant-consent key has a local-storage row')
-assert.match(PORTAL_LEGAL_EN[rowByName.get(AI_CONSENT_STORAGE_KEY)!.purposeKey], /agreed on this device to send questions to the assistant/)
+assert.match(PORTAL_LEGAL_EN[rowByName.get(AI_CONSENT_STORAGE_KEY)!.purposeKey], /Stores whether you agreed to send questions to the AI assistant\. It is kept on this device only/)
 assert.match(PORTAL_LEGAL_EN[rowByName.get('business-os-portal-list-images-v1')!.purposeKey], /Pictures for the products in your list, on this device/)
 
 // 3. Every storage key the storefront names in code has a row, and every row names a key that exists.
 const KEY_SHAPE = /^(business-os-portal-[a-z-]+-v1|business-os:portal-[a-z-]+)$/
 const keysInCode = new Map<string, string>()
+const RETIRED_KEYS_REMOVED_AT_FIRST_PAINT = new Set(['business-os-portal-map-consent-v1'])
 for (const file of storefrontModules()) {
   const source = parseSource(file)
   const visit = (node: ts.Node) => {
-    if (ts.isStringLiteral(node) && KEY_SHAPE.test(node.text)) keysInCode.set(node.text, file)
+    // A retired key named only in first paint's removal list is the opposite of storing: nothing writes it, so it gets no row. Exempt by exact key AND file.
+    if (ts.isStringLiteral(node) && KEY_SHAPE.test(node.text)) {
+      // D1 (d15fix2): the exemption holds only while EVERY use of the retired key in this file is a removal. A setItem, a getItem, a second literal or RETIRED_PORTAL_STORAGE_KEYS[1] makes it a stored key that needs a row.
+      const removedOnly = RETIRED_KEYS_REMOVED_AT_FIRST_PAINT.has(node.text) && /publicFirstPaint\.ts$/.test(file) && retiredKeyUseProblems(source).length === 0
+      if (!removedOnly) keysInCode.set(node.text, file)
+    }
     ts.forEachChild(node, visit)
   }
   visit(source)
 }
 for (const [key, file] of keysInCode) {
   assert.ok(rowByName.has(key), `${key} is written by ${file.split('src').pop()} but the cookie table has no row for it`)
+}
+for (const file of storefrontModules()) {
+  assert.deepEqual(retiredKeyUseProblems(parseSource(file)), [], `${file.split('src').pop()} uses a retired storage key for something other than removing it`)
+}
+// Controls: the real first-paint file, with each of the reviewer's surviving mutants added, must be reported. Without these the exemption above could rot back to "exact key and file".
+{
+  const firstPaintFile = storefrontModules().find((file) => /publicFirstPaint\.ts$/.test(file))
+  assert.ok(firstPaintFile, 'control: publicFirstPaint.ts is a storefront module')
+  const real = fs.readFileSync(firstPaintFile, 'utf8')
+  const anchor = 'export function clearRetiredPortalCache(): void {'
+  assert.ok(real.includes(anchor), 'control: the anchor line for the mutants exists')
+  const withExtra = (extra: string) => parseText(real.replace(anchor, `${extra}\n${anchor}`), firstPaintFile)
+  assert.deepEqual(retiredKeyUseProblems(parseText(real, firstPaintFile)), [], 'control: the real file is clean')
+  const mutants: Array<[string, string]> = [
+    ['writes the retired key by its constant', "export function rememberMapChoice(): void {\n  globalThis.window?.localStorage?.setItem(RETIRED_PORTAL_MAP_CONSENT_KEY, 'granted')\n}\n"],
+    ['writes the retired key through RETIRED_PORTAL_STORAGE_KEYS[1]', "export function rememberMapChoice(): void {\n  globalThis.window?.localStorage?.setItem(RETIRED_PORTAL_STORAGE_KEYS[1], 'granted')\n}\n"],
+    ['reads the retired key', "export function mapChosen(): boolean {\n  return globalThis.window?.localStorage?.getItem(RETIRED_PORTAL_MAP_CONSENT_KEY) === 'granted'\n}\n"],
+    ['writes the retired key as a second literal', "export function rememberMapChoice(): void {\n  globalThis.window?.localStorage?.setItem('business-os-portal-map-consent-v1', 'granted')\n}\n"],
+    ['writes the retired key as a template literal', 'export function rememberMapChoice(): void {\n  globalThis.window?.localStorage?.setItem(`business-os-portal-map-consent-v1`, \'granted\')\n}\n'],
+    ['writes the retired key through a copy of the list', "export function rememberMapChoice(): void {\n  const [, consent] = [...RETIRED_PORTAL_STORAGE_KEYS]\n  globalThis.window?.localStorage?.setItem(consent, 'granted')\n}\n"],
+    ['sets a cookie from the retired key', "export function rememberMapChoice(): void {\n  document.cookie = RETIRED_PORTAL_MAP_CONSENT_KEY + '=granted'\n}\n"],
+    ['reads the retired key in the removal loop', "export function peek(): void {\n  for (const key of RETIRED_PORTAL_STORAGE_KEYS) globalThis.window?.localStorage?.getItem(key)\n}\n"],
+  ]
+  for (const [label, extra] of mutants) {
+    assert.ok(retiredKeyUseProblems(withExtra(extra)).length > 0, `control: a first-paint file that ${label} is reported, so the removal-only exemption would not apply`)
+  }
 }
 const CODE_FREE_ROWS = new Set(['bos_portal', 'googtrans', 'Business OS app-shell/static caches', 'businessos_device_settings', 'businessos_public_asset_base_url'])
 const everyKeyInSrc = new Set(keysInCode.keys())

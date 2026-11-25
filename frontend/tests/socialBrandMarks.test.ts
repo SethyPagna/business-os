@@ -27,6 +27,7 @@ const socialLinks = await import('../src/utils/socialLinks.ts') as Record<string
 const socialHandles = await import('../src/utils/socialHandles.ts') as Record<string, any>
 const portalSocialLinks = await import('../src/components/catalog/portalSocialLinks.ts') as Record<string, any>
 const scriptTypography = await import('../src/utils/scriptTypography.ts') as Record<string, any>
+const productSurfaces = await import('../src/components/catalog/portalProductSurfaces.ts') as Record<string, any>
 const socialRow = compile('../src/components/catalog/PortalSocialRow.tsx', (id) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
   if (id.startsWith('lucide-react/')) return { __esModule: true, default: Icon }
@@ -35,6 +36,7 @@ const socialRow = compile('../src/components/catalog/PortalSocialRow.tsx', (id) 
   if (id.endsWith('/scriptTypography.ts')) return scriptTypography
   if (id.endsWith('/socialHandles.ts')) return socialHandles
   if (id.endsWith('/portalSocialLinks.ts')) return portalSocialLinks
+  if (id.endsWith('/portalProductSurfaces.ts')) return productSurfaces
   throw new Error(`PortalSocialRow.tsx imports ${id}, which this harness does not provide`)
 })
 const legal = compile('../src/components/catalog/legal/LegalPages.tsx', (id) => {
@@ -153,7 +155,8 @@ runCase('every surface that shows these two brands takes the marks from BrandIco
 runCase('sibling parity: one network-to-glyph map serves the footer, the Contact menu and About, and it maps facebook and instagram to their marks', () => {
   const owner = read('../src/components/catalog/PortalSocialRow.tsx')
   assert.match(owner, /PORTAL_SOCIAL_ICONS: Record<SocialPlatform, IconComponent> = \{[\s\S]*?facebook: FacebookIcon,\s*instagram: InstagramIcon,\s*telegram: TelegramIcon,/)
-  for (const file of ['legal/LegalPages.tsx', 'PortalContactMenu.tsx']) {
+  assert.match(owner, /PORTAL_SOCIAL_ICONS\[entry\.platform\]/, 'the contact rows (panel, inline, About) take their icon from the same map')
+  for (const file of ['legal/LegalPages.tsx']) {
     assert.match(read(`../src/components/catalog/${file}`), /PORTAL_SOCIAL_ICONS/, `${file} must use the shared map`)
   }
   for (const file of ['PublicCatalogPage.tsx', 'CatalogPage.tsx']) {

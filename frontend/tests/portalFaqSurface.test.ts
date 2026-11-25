@@ -64,14 +64,13 @@ run('no subtitle: the heading stands alone', () => {
   assert.match(section, /<SectionShell title=\{previewConfig\.faqTitle \|\| copy\('faq', 'FAQ'\)\}>/)
 })
 
-run('the closing card is one row: the question and the Contact button, with no second sentence', () => {
-  const row = /<div className=\{`mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-4 py-3 \$\{SURFACE\}`\} data-portal-faq-contact="true">[\s\S]*?<\/div>/.exec(list)?.[0] ?? ''
-  assert.ok(row, 'the one-row closing card')
+run('the closing card is the question and the chat rows themselves, with no second sentence and no Contact button', () => {
+  const row = /<div className=\{`mt-4 space-y-3 rounded-2xl px-4 py-3 \$\{SURFACE\}`\} data-portal-faq-contact="true">[\s\S]*?<\/div>/.exec(list)?.[0] ?? ''
+  assert.ok(row, 'the closing card')
   assert.match(row, /copy\('faqStillHeading', 'Still have a question\?'/)
-  assert.match(row, /<PortalContactButton copy=\{copy\} onOpenContact=\{onOpenContact\} \/>/)
-  assert.doesNotMatch(list, /faqStillBody/, 'the "Ask our team and we will answer." line is gone')
-  assert.match(tabs, /copy\('contactButton', 'Contact', 'ទាក់ទង'\)/)
-  assert.doesNotMatch(tabs, /copy\('contactUs'/, 'the button is the word Contact')
+  assert.match(row, /<PortalContactRows inline entries=\{contactEntries\} copy=\{copy\} className="grid gap-2 sm:grid-cols-2" \/>/)
+  assert.doesNotMatch(list, /faqStillBody|PortalContactButton|onOpenContact/, 'the "Ask our team" line and the button are gone')
+  assert.doesNotMatch(tabs, /copy\('contactUs'/, 'no Contact button text on this page')
 })
 
 run('every FAQ surface is solid: no opacity suffix, no blur, no transparent fill, in light or dark', () => {

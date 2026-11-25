@@ -4,11 +4,13 @@ import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
 import { FacebookIcon, InstagramIcon, MessengerIcon, TelegramIcon, TikTokIcon, WhatsAppIcon } from '../shared/BrandIcons.tsx'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import type { SocialPlatform } from '../../utils/socialHandles.ts'
+import { PRODUCT_INSET_CLASS } from './portalProductSurfaces.ts'
+import type { PortalContactEntry } from './portalSocialLinks.ts'
 
 type IconComponent = ComponentType<{ className?: string }>
+type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
-// The brand marks for every platform a contact row or a footer link can show (the header's chip row and the floating chat buttons are gone:
-// the Contact menu, PortalContactMenu, is the one entry point).
+// The brand marks for every platform a contact row or a footer link can show (the header's chip row and the floating chat buttons are gone).
 export const PORTAL_SOCIAL_ICONS: Record<SocialPlatform, IconComponent> = {
   website: Globe,
   facebook: FacebookIcon,
@@ -25,4 +27,42 @@ export function PortalSocialText({ text, latin, className = '' }: { text: string
   const wrap = `${className} [overflow-wrap:anywhere]`.trim()
   if (latin) return <span translate="no" lang="en" dir="ltr" className={`notranslate ${wrap}`}>{text}</span>
   return <span translate="no" {...getKhmerTextProps(text, `notranslate ${wrap}`)}>{text}</span>
+}
+
+/** One inline contact row: the inset tone with its border, the band tone on hover. The About address row wears the same recipe. */
+const ROW = 'flex min-h-11 items-center gap-3 px-4 py-2 text-sm text-[#23201b] transition hover:bg-[#f6ece0] dark:text-neutral-100 dark:hover:bg-neutral-700'
+export const PORTAL_CONTACT_ROW_INLINE = `${ROW} rounded-xl ${PRODUCT_INSET_CLASS}`
+
+/**
+ * The rows themselves: one tappable 44 px row per entry (brand icon, then the real account name or number; the platform word is only the
+ * accessible name). The Contact panel shows the chat entries (Phone, Messenger, Telegram, WhatsApp); About shows the account entries; the
+ * List page, the FAQ and "Forgot password?" show the chat entries inline where a Contact button used to be (`inline`).
+ */
+export function PortalContactRows({ entries, copy, onNavigate, className = '', inline = false }: { entries: readonly PortalContactEntry[]; copy: CopyFn; onNavigate?: () => void; className?: string; inline?: boolean }) {
+  if (!entries.length) return null
+  const rowClass = inline ? PORTAL_CONTACT_ROW_INLINE : ROW
+  return (
+    <ul className={className} aria-label={copy('contactUs', 'Contact us', 'ទាក់ទងយើង')} data-portal-contact-menu={inline ? undefined : 'true'} data-portal-contact-inline={inline ? 'true' : undefined}>
+      {entries.map((entry) => {
+        const Icon = PORTAL_SOCIAL_ICONS[entry.platform]
+        const external = !/^(?:tel|mailto):/i.test(entry.href)
+        return (
+          <li key={entry.key}>
+            <a
+              href={entry.href}
+              target={external ? '_blank' : undefined}
+              rel={external ? 'noreferrer noopener' : undefined}
+              onClick={onNavigate}
+              aria-label={entry.accessibleName}
+              data-portal-contact-platform={entry.platform}
+              className={rowClass}
+            >
+              <Icon className="h-4 w-4 shrink-0 text-[#9c7a3c] dark:text-amber-300" />
+              <PortalSocialText text={entry.label} latin={entry.latin} />
+            </a>
+          </li>
+        )
+      })}
+    </ul>
+  )
 }

@@ -67,12 +67,16 @@ const render = (language: 'en' | 'km', extra: Record<string, unknown> = {}) =>
 
 for (const language of ['en', 'km'] as const) {
   const copy = copyFor(language)
-  await check(`${language}: the List segment shows the rows, one payment line, and Contact as the main action`, () => {
+  await check(`${language}: the List segment shows the rows, one payment line, and Contact and the chat rows inline`, () => {
     const html = render(language)
     const text = visibleText(html)
     assert.ok(text.includes('Rose Cleanser') && text.includes('ក្រែមលាបមុខ'), 'both rows are there from the first paint')
     assert.equal(text.split(PAYMENT[language]).length - 1, 1, 'the payment line is said once')
-    assert.ok(text.includes(copy('contactButton', 'Contact', 'ទាក់ទង')), 'Contact is icon + word')
+    assert.doesNotMatch(text, /(^|\s)Contact(\s|$)|ទាក់ទង(\s|$)/, 'no Contact button any more')
+    assert.match(html, /data-portal-list-contact=""[\s\S]*?data-portal-contact-inline="true"[\s\S]*?href="tel:012345678"/, 'the chat rows themselves, tappable, under the payment line')
+    assert.ok(html.indexOf('data-portal-list-contact') > html.indexOf(PAYMENT[language]), 'the rows come after the no-payment line')
+    assert.ok(text.includes('012 345 678'), 'the real number is shown')
+    assert.doesNotMatch(render(language, { listItems: [] }), /data-portal-list-contact/, 'control: an empty list shows no rows')
     assert.match(html, /aria-pressed="true"[^>]*data-portal-list-segment="list"|data-portal-list-segment="list"[^>]*aria-pressed="true"/, 'List is the pressed segment')
     const fallbacks: Record<string, string> = { decreaseQty: 'Decrease quantity', increaseQty: 'Increase quantity', removeFromBucket: 'Remove', copyList: 'Copy the list', downloadList: 'Download' }
     for (const [key, fallback] of Object.entries(fallbacks)) {
@@ -121,10 +125,13 @@ await check('remembered pictures keep the newest 300 and ignore empty paths', ()
   assert.equal(images['305'], '/p305.jpg')
 })
 
-await check('the header has the heart for Saved and a list icon for List, both with a tooltip', () => {
+await check('the dock has one shop button for List and a Saved row on the phone menu, both with an accessible name', () => {
   const surface = read('components/catalog/CatalogPreviewSurface.tsx')
-  assert.match(surface, /onClick=\{onOpenWishlist\}[\s\S]{0,120}aria-label=\{copy\('saved', 'Saved'\)\}[\s\S]{0,80}title=\{copy\('saved', 'Saved'\)\}/, 'the heart opens Saved')
-  assert.match(surface, /onClick=\{onOpenList\}[\s\S]{0,120}aria-label=\{copy\('bucketTitle', 'My List'\)\}[\s\S]{0,80}title=\{copy\('bucketTitle', 'My List'\)\}/, 'the list icon opens List')
+  const dock = read('components/catalog/PortalDock.tsx')
+  assert.match(dock, /data-portal-dock-button="shop"[^>]*onClick=\{onOpenList\}[^>]*aria-label=\{copy\('bucketTitle', 'My List'\)\}/, 'the shop button opens List')
+  assert.match(dock, /<MenuRow icon=\{Heart\} label=\{copy\('saved', 'Saved'\)\}[^\n]*onClick=\{run\(props\.onOpenWishlist\)\}/, 'the phone menu Saved row opens Saved')
+  assert.match(surface, /onOpenList=\{onOpenList\}/, 'the surface hands both openers to the dock')
+  assert.match(surface, /onOpenWishlist=\{onOpenWishlist\}/)
   assert.match(surface, /\{listPage \? listPage : \(/, 'the page replaces the tab content while it is open')
 })
 
@@ -133,7 +140,7 @@ await check('the page opens the full page, pushes one history entry, and Back cl
   assert.match(page, /window\.history\.pushState\(\{ \.\.\.\(window\.history\.state \|\| \{\}\), portalListView: true \}/)
   assert.match(page, /window\.addEventListener\('popstate', onPopState\)/)
   assert.match(page, /onOpenWishlist=\{\(\) => openListView\('saved'\)\}/, 'the heart opens Saved')
-  assert.match(page, /onOpenList=\{\(\) => openListView\('list'\)\}/, 'the header list icon opens List')
+  assert.match(page, /onOpenList=\{\(\) => openListView\('list'\)\}/, 'the dock shop button opens List')
   assert.match(page, /listPage=\{listPage\}/)
   const onPop = page.slice(page.indexOf('const onPopState'), page.indexOf("window.addEventListener('popstate'"))
   assert.match(onPop, /setListView\(null\)/)
@@ -141,10 +148,10 @@ await check('the page opens the full page, pushes one history entry, and Back cl
   assert.match(onPop, /opener\.focus/, 'focus goes back to the button that opened it')
 })
 
-await check('the floating List button shows only on the Products tab with a non-empty list', () => {
+await check('there is no separate floating List button: the dock shop button (with the count) is the one way in', () => {
   const page = read('components/catalog/PublicCatalogPage.tsx')
-  assert.match(page, /const bucketFab = activeTab === 'products' && bucket\.count > 0 && !listView \? \(/)
-  assert.match(page, /\{bucketFab\}/)
+  assert.doesNotMatch(page, /bucketFab/, 'the old floating button is gone from the page')
+  assert.match(read('components/catalog/PortalDock.tsx'), /listCount > 0 \? <span translate="no" className=\{COUNT_BADGE\}>\{listCount\}<\/span> : null/, 'the count rides on the dock button')
 })
 
 await check('the three old drawers and their hints are gone from the page', () => {

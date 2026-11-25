@@ -72,10 +72,10 @@ runTest('no backdrop blur and no bg-transparent in any shell file', () => {
   }
 })
 
-runTest('the sticky tab strip is the solid page ground with one line, edge to edge', () => {
+runTest('the tab strip is the solid page ground with one line, edge to edge, and scrolls away', () => {
   const surface = read('components/catalog/CatalogPreviewSurface.tsx')
   assert.match(surface, /portal-nav-shell border-b border-stone-300 bg-\[#f4f1ea\] dark:border-neutral-800 dark:bg-\[#0b0b0c\]/)
-  assert.match(surface, /className=\{publicView \? 'sticky top-0 z-40' : ''\}/, 'it pins at top-0, so nothing shows above it')
+  assert.doesNotMatch(surface, /className=[^\n]*\bsticky\b|position: 'fixed'/, 'owner A60: the header and the tab strip scroll away; nothing is pinned to the top')
   assert.doesNotMatch(surface, /sticky top-1(?![0-9])/, 'the old 4 px gap above the strip is gone')
   assert.match(surface, /NAV_FULL_BLEED_CLASS = '-mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10 xl:-mx-14 xl:px-14'/, 'it runs under the page gutters')
 })

@@ -374,7 +374,7 @@ runTest('the secondary-tabs Suspense fallback paints a dark ground too', () => {
 })
 
 runTest('the language menu has no title row and its active option is legible on both menu surfaces', () => {
-  const surface = read('CatalogPreviewSurface.tsx')
+  const surface = read('CatalogPreviewSurface.tsx') + read('PortalDock.tsx')
   assert.doesNotMatch(surface, /uppercase tracking-\[0\.18em\] text-stone-600/, 'the Language tools heading row is gone')
   assert.match(surface, /font-semibold text-\[#7a5c22\] dark:text-amber-300/, 'the active option is brass text with a check')
   assert.ok(meetsContrast('#7a5c22', '#ffffff', 'text'), 'brass text on the white menu')
@@ -393,7 +393,7 @@ function cssBlock(selectorStart: string): string {
 }
 
 runTest('the design tokens in public-portal.css equal the audited PORTAL_TOKENS', () => {
-  const names: Record<string, string> = { ink: 'ink', ground: 'ground', card: 'card', brass: 'brass', brassText: 'brass-text', onInk: 'on-ink' }
+  const names: Record<string, string> = { ink: 'ink', ground: 'ground', card: 'card', brass: 'brass', brassText: 'brass-text', onInk: 'on-ink', inset: 'inset', insetLine: 'inset-line', band: 'band' }
   const blocks = {
     light: cssBlock("html[data-public-portal='true'],"),
     dark: cssBlock(".dark[data-public-portal='true'],"),

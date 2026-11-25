@@ -189,7 +189,8 @@ const legalEntries = (site: string): StorefrontCopyEntry[] =>
 const DYNAMIC_KEY_SOURCES: Record<string, (file: string, site: string) => StorefrontCopyEntry[]> = {
   'components/catalog/ProductDetailFlyout.tsx copy(meta.labelKey, meta.fallback)': objectLiteralEntries,
   'components/catalog/catalogUi.tsx copy(labelKey, fallback)': keyFallbackTuples,
-  'components/catalog/legal/LegalPages.tsx copy(key, legalText(\'en\', key), legalText(\'km\', key))': (_file, site) => legalEntries(site),
+  // legalCopy: the one resolver the policy reader and the dock's language picker both ask (the call used to sit in LegalPages.tsx).
+  'components/catalog/legal/legalContent.ts copy(key, legalText(\'en\', key), legalText(\'km\', key))': (_file, site) => legalEntries(site),
   'components/catalog/legal/SignupConsentField.tsx copy(key, legalText(\'en\', key), legalText(\'km\', key))': (_file, site) => legalEntries(site),
   // InstallPromptBand's translate wrapper; its calls are scanned under `translate` below.
   'components/catalog/PublicCatalogPage.tsx copy(key, fallback, fallbackKm)': () => [],
