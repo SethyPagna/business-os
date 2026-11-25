@@ -242,10 +242,24 @@ function money(usd: unknown, khr: unknown, separator = ' · '): string {
 // 2026: "No em dash (—) anywhere in Telegram output". Reuses the module's own
 // NOT_APPLICABLE constant (declared further down, beside EMPTY_SECTION); the
 // reference is safe because this function only ever runs after module load.
-function registeredMoney(usdValue: number | null, khrValue: number | null): string {
-  const dollars = usdValue == null ? NOT_APPLICABLE : usd(usdValue)
+//
+// RIEL FIRST, DOLLARS PER SHIFT (owner A72 + Q3b): a pair prints the riel half first, and its dollar half only when the SHIFT has any dollar figure
+// (shiftHasUsdCash below), so every pair row of one message has the same shape and a riel-only shift never prints a "$".
+function registeredMoney(usdValue: number | null, khrValue: number | null, showUsd: boolean): string {
   const rielAmount = khrValue == null ? NOT_APPLICABLE : riel(khrValue)
-  return `${dollars} · ${rielAmount}`
+  if (!showUsd) return rielAmount
+  return `${rielAmount} · ${usdValue == null ? NOT_APPLICABLE : usd(usdValue)}`
+}
+const nonZeroUsd = (value: unknown): boolean => value != null && Number.isFinite(Number(value)) && Number(value) !== 0
+/**
+ * Does this shift hold any dollar figure? The three registered counts, and (the report has it) every dollar half of the drawer reconciliation.
+ * The ONE per-shift test behind the riel-first rule, the Telegram twin of the screen's shiftHasUsd (frontend shiftReportModel.ts).
+ */
+export function shiftHasUsdCash(shift: Pick<ShiftReportSession, 'opening_float_usd' | 'additional_cash_usd' | 'closing_counted_usd'>, recon?: ShiftReconciliation | null): boolean {
+  if ([shift.opening_float_usd, shift.additional_cash_usd, shift.closing_counted_usd].some(nonZeroUsd)) return true
+  if (!recon) return false
+  return [recon.opening, recon.additional_cash, recon.cash_sales, recon.refunds, recon.expenses, recon.courier, recon.expected, recon.counted, recon.difference]
+    .some((pair) => nonZeroUsd(pair?.usd))
 }
 
 // The alerts chat id setting doubles as the COMMAND ALLOW-LIST. A Telegram
@@ -1392,19 +1406,19 @@ export type ShiftReportFigures = {
  * additional used"). It used to print only when non-zero, so a shift that never
  * needed more change showed Opening and Closing with the middle line missing,
  * which read as a figure the message did not have. None added is a fact --
- * `$0.00 · 0៛`, the same money format as the rows around it. A NULL column is
+ * `0៛ · $0.00` (riel alone on a riel-only shift), the same money format as the rows around it. A NULL column is
  * the same fact, not an unknown: it is NOT NULL DEFAULT 0 (migration 0147), so a
  * NULL here is a caller that never set it. Opening stays `N/A` when it was never
  * registered: unknown is not zero.
  *
  * An open shift has taken no count yet, so it has no closing row.
  */
-function registeredCashRows(shift: ShiftReportSession): string[] {
+function registeredCashRows(shift: ShiftReportSession, showUsd: boolean): string[] {
   const rows = [
-    labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr)),
-    labeled('additionalCash', registeredMoney(shift.additional_cash_usd ?? 0, shift.additional_cash_khr ?? 0)),
+    labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr, showUsd)),
+    labeled('additionalCash', registeredMoney(shift.additional_cash_usd ?? 0, shift.additional_cash_khr ?? 0, showUsd)),
   ]
-  if (shift.closed_at) rows.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
+  if (shift.closed_at) rows.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr, showUsd)))
   return rows
 }
 
@@ -1530,7 +1544,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // and closing cash, both currencies. A factual readout, and an open shift
   // (no count taken yet) simply has no closing half. The three rows come from
   // registeredCashRows, the one composer for every message that carries a drawer.
-  const cash = registeredCashRows(shift)
+  // (built below, once the reconciliation is known: the riel-first rule asks whether ANY drawer figure of this shift is in dollars)
 
   // One informational difference line -- not an expected-must-match check.
   // The reconciliation is still computed (ONE shared definition,
@@ -1550,9 +1564,11 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // Expected is shown for both open and closed shifts. An open drawer has no
   // counted value (and therefore no difference), but the employee still needs
   // the current target while trading.
+  const showUsd = shiftHasUsdCash(shift, recon)
+  const cash = registeredCashRows(shift, showUsd)
   const expected = recon.expected.usd == null && recon.expected.khr == null
     ? NOT_APPLICABLE
-    : `${recon.expected.usd == null ? NOT_APPLICABLE : usd(recon.expected.usd)} · ${recon.expected.khr == null ? NOT_APPLICABLE : riel(recon.expected.khr)}`
+    : registeredMoney(recon.expected.usd, recon.expected.khr, showUsd)
   cash.push(labeled('expectedCash', expected))
   // The closing count only exists once the employee has ended the shift by
   // hand, so an open shift shows no difference against a count that was
@@ -1561,7 +1577,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     const signed = (n: number, format: (value: number) => string) => `${n < 0 ? '−' : n > 0 ? '+' : ''}${format(Math.abs(n))}`
     const difference = recon.difference.usd == null && recon.difference.khr == null
       ? NOT_APPLICABLE
-      : `${recon.difference.usd == null ? NOT_APPLICABLE : signed(recon.difference.usd, usd)} · ${recon.difference.khr == null ? NOT_APPLICABLE : signed(recon.difference.khr, riel)}`
+      : [recon.difference.khr == null ? NOT_APPLICABLE : signed(recon.difference.khr, riel), ...(showUsd ? [recon.difference.usd == null ? NOT_APPLICABLE : signed(recon.difference.usd, usd)] : [])].join(' · ')
     cash.push(labeled('difference', difference))
     if (recon.needs_review) cash.push(labeled('cashReview', reviewReasons(recon.review_codes)))
   }
@@ -2119,7 +2135,8 @@ function overviewSections(shift: ShiftReportSession, figures: ShiftOverviewFigur
   // variant, so it is not repeated). Expected and Difference are not repeated
   // either: they are derived from the shift's own sales, and this message reports
   // the whole day.
-  section('cashCount', registeredCashRows(shift))
+  // Riel first; the dollar half only when this shift's own counts hold a dollar (the same rule as the shift report, from the figures this message has).
+  section('cashCount', registeredCashRows(shift, shiftHasUsdCash(shift)))
   if (extra.cashiers?.cashiers) section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60, 4)), showSales)
   if (extra.products) {

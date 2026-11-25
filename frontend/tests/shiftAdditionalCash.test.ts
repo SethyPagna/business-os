@@ -30,6 +30,9 @@ import type { Shift } from '../src/api/shiftTransport.ts'
 import {
   shiftAdditionalCash,
   shiftExpectedWithTypedAdditional,
+  shiftExportRows,
+  shiftHasUsd,
+  shiftMoneyColumns,
   shiftRegisteredRows,
   type ShiftFiguresShape,
 } from '../src/components/shifts/shiftReportModel.ts'
@@ -155,17 +158,16 @@ test('the form label, the report row and the breakdown say one thing, in both pa
     assert.equal(pack.shift_additional_cash, pack.shift_recon_additional_cash,
       `${lang}: the close form and the report/breakdown row must not say different things`)
   }
-  assert.equal(en.shift_additional_cash, 'Additional change used')
-  assert.equal(km.shift_additional_cash, 'ប្រាក់អាប់បន្ថែមដែលបានប្រើ')
-  // The Khmer reuses the packs' own word for change money rather than minting
-  // a rival one, and repeats the label's verb on the two inputs.
-  assert.equal(km.change, 'ប្រាក់អាប់')
-  assert.ok(km.shift_additional_cash.includes(km.change))
-  for (const key of ['shift_additional_usd', 'shift_additional_khr']) {
-    assert.ok(km[key].includes('បានប្រើ'), `km ${key} says used, like its label`)
-  }
-  assert.match(en.shift_additional_usd, /USD/)
-  assert.match(en.shift_additional_khr, /KHR/)
+  assert.equal(en.shift_additional_cash, 'Cash used')
+  // PROVISIONAL Khmer (owner question Q6 is open): candidate 1. A later choice changes the values only.
+  assert.equal(km.shift_additional_cash, 'សាច់ប្រាក់បានប្រើ')
+  // The Khmer reads like the opening and closing cash rows (same first word), and the two inputs are just the
+  // currency: the label already says what the money is.
+  assert.ok(km.shift_additional_cash.startsWith('សាច់ប្រាក់') && km.shift_counted_cash.startsWith('សាច់ប្រាក់'))
+  assert.deepEqual([en.shift_additional_khr, en.shift_additional_usd], ['Riel', 'Dollars'])
+  assert.deepEqual([km.shift_additional_khr, km.shift_additional_usd], ['រៀល', 'ដុល្លារ'])
+  assert.equal(en.shift_additional_cash_hint, 'Change money added during the shift.')
+  assert.equal(km.shift_additional_cash_hint, 'ប្រាក់អាប់ដាក់បន្ថែមក្នុងវេន។')
 })
 
 test('the owner\'s example and the report-only rule live behind the InfoHint, not inline', () => {
@@ -194,7 +196,7 @@ test('the owner\'s example and the report-only rule live behind the InfoHint, no
   }
   assert.match(read('../src/components/shifts/ShiftCountFields.tsx'), /hintDetail \? <InfoHint/, 'the pair renders the detail as an InfoHint')
   // The difference formula names the same term as the field it sums.
-  assert.match(en.shift_difference_hint, /additional change used/)
+  assert.match(en.shift_difference_hint, /cash used/)
   assert.ok(km.shift_difference_hint.includes(km.shift_additional_cash))
 })
 
@@ -264,45 +266,47 @@ const registeredBlock = (shift: Shift): string[] => {
 test('the on-screen report prints Open -> Additional change used -> End, with $0 when nothing was added (EN and KM)', () => {
   pack = en
   assert.deepEqual(registeredBlock(closedShiftRow({ usd: 0, khr: 0 })), [
-    `${en.shift_registered_open}: $10.00 · 10,000៛`,
-    `${en.shift_recon_additional_cash}: $0.00 · 0៛`,
-    `${en.shift_registered_end}: $120.00 · 50,000៛`,
+    `${en.shift_registered_open}: 10,000៛ · $10.00`,
+    `${en.shift_recon_additional_cash}: 0៛ · $0.00`,
+    `${en.shift_registered_end}: 50,000៛ · $120.00`,
   ])
   assert.deepEqual(registeredBlock(closedShiftRow({ usd: 12.5, khr: 8000 })).map((row) => row.replace(/^[^:]*: /, '')), [
-    '$10.00 · 10,000៛', '+ $12.50 · 8,000៛', '$120.00 · 50,000៛',
+    '10,000៛ · $10.00', '+ 8,000៛ · $12.50', '50,000៛ · $120.00',
   ], 'an amount keeps its (+) and its own figures')
   pack = km
   try {
     const rows = registeredBlock(closedShiftRow({ usd: 0, khr: 0 }))
     assert.equal(rows.length, 3, 'the Khmer report has all three rows too')
-    assert.equal(rows[1], `${km.shift_recon_additional_cash}: $0.00 · 0៛`)
-    assert.match(rows[1], /ប្រាក់អាប់បន្ថែមដែលបានប្រើ/)
+    assert.equal(rows[1], `${km.shift_recon_additional_cash}: 0៛ · $0.00`)
+    assert.match(rows[1], /សាច់ប្រាក់បានប្រើ/)
   } finally { pack = en }
 })
 
 test('the CSV and the print carry the additional row as a zero line', () => {
   // ShiftReport.tsx builds one `rows` list for both exports from shiftRegisteredRows.
-  // `row.usd ?? ''` keeps a 0 as 0 -- the same expression is asserted in the source below.
+  // shiftMoneyColumns keeps a 0 as 0 (KHR first, USD when the shift has any dollar) -- the spread is asserted in the source below.
   const source = read('../src/components/sales/reports/ShiftReport.tsx')
-  assert.match(source, /\.\.\.shiftRegisteredRows\(shift\)\.map\(\(row\) => \(\{[\s\S]*?USD: row\.usd \?\? '',[\s\S]*?KHR: row\.khr \?\? '',/, 'a zero stays a zero in the export rows')
-  const rows = shiftRegisteredRows(closedShiftRow({ usd: 0, khr: 0 })).map((row) => ({
-    Section: 'Registered cash', Line: en[row.key] ?? row.fallback, USD: row.usd ?? '', KHR: row.khr ?? '',
-  }))
+  assert.match(source, /\.\.\.shiftRegisteredRows\(shift\)\.map\(\(row\) => \(\{[\s\S]*?\.\.\.shiftMoneyColumns\(row, showUsd\),/, 'a zero stays a zero in the export rows')
+  const registeredShift = closedShiftRow({ usd: 0, khr: 0 })
+  const table = shiftExportRows(shiftRegisteredRows(registeredShift).map((row) => ({
+    Section: 'Registered cash', Line: en[row.key] ?? row.fallback, ...shiftMoneyColumns(row, shiftHasUsd(registeredShift)),
+  })))
+  const rows = table.rows
   const csv = buildCSV(rows).split('\n')
   assert.deepEqual(csv, [
-    'Section,Line,USD,KHR',
-    `Registered cash,${en.shift_registered_open},10,10000`,
-    'Registered cash,Additional change used,0,0',
-    `Registered cash,${en.shift_registered_end},120,50000`,
+    'Section,Line,KHR,USD',
+    `Registered cash,${en.shift_registered_open},10000,10`,
+    'Registered cash,Cash used,0,0',
+    `Registered cash,${en.shift_registered_end},50000,120`,
   ])
   // The print goes through the SAME rows into the real document builder: a 0 must
   // survive as a printed 0 in its own table row, not be dropped or blanked.
-  const html = buildPrintDocument({ title: 'Shift Report · S-20261013-0807-Za', headers: ['Section', 'Line', 'USD', 'KHR'], rows, autoPrint: false })
+  const html = buildPrintDocument({ title: 'Shift Report · S-20261013-0807-Za', headers: table.headers, rows, autoPrint: false })
   const tableRows = [...html.matchAll(/<tr>(.*?)<\/tr>/g)].map((match) => [...match[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((cell) => cell[1])).filter((cells) => cells.length)
   assert.deepEqual(tableRows, [
-    ['Registered cash', en.shift_registered_open, '10', '10000'],
-    ['Registered cash', 'Additional change used', '0', '0'],
-    ['Registered cash', en.shift_registered_end, '120', '50000'],
+    ['Registered cash', en.shift_registered_open, '10000', '10'],
+    ['Registered cash', 'Cash used', '0', '0'],
+    ['Registered cash', en.shift_registered_end, '50000', '120'],
   ], 'the printed table carries the Additional change used row as 0 / 0')
 })
 

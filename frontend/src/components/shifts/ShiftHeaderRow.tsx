@@ -21,19 +21,23 @@ type Props = {
   shift: Pick<Shift, 'business_date' | 'shift_code' | 'user_name' | 'branch_name' | 'branch_active'>
   /** The tags and the status pill, at the right edge of the first line. */
   children?: ReactNode
+  /** Inline elements only (spans), for a place that allows phrasing content, such as a picker option's button. Same row, same classes. */
+  inline?: boolean
 }
 
 /** One compact row: date · ID · cashier · branch (then the retired-branch tag), pills at the right. */
-export default function ShiftHeaderRow({ shift, children }: Props) {
+export default function ShiftHeaderRow({ shift, children, inline = false }: Props) {
+  // A span lays out exactly like the div here (every wrapper is a flex or block box by its classes), and is valid inside a button.
+  const Box = inline ? 'span' : 'div'
   const { t } = useApp() as { t: (key: string) => string }
   const tr = (key: string, fallback: string) => {
     const value = t(key)
     return value && value !== key ? value : fallback
   }
   return (
-    <div className="flex min-w-0 items-start justify-between gap-3">
-      <div className="-my-1 min-w-0 flex-1 overflow-hidden py-1">
-      <div className="-ml-3 flex min-w-0 flex-wrap items-baseline gap-y-0.5">
+    <Box className="flex min-w-0 items-start justify-between gap-3">
+      <Box className="-my-1 block min-w-0 flex-1 overflow-hidden py-1">
+      <Box className="-ml-3 flex min-w-0 flex-wrap items-baseline gap-y-0.5">
         <span className="shift-hdr-item text-sm font-semibold text-gray-900 dark:text-white">{fmtDateOnly(shift.business_date)}</span>
         {shift.shift_code ? <span className="shift-hdr-item dense-id break-all text-[10px] text-gray-400 dark:text-gray-500">{shift.shift_code}</span> : null}
         <span title={t('shift_opened_by')} className="shift-hdr-item break-words text-xs text-gray-500 dark:text-gray-400">{shift.user_name || tr('shift_staff', 'Staff')}</span>
@@ -48,9 +52,9 @@ export default function ShiftHeaderRow({ shift, children }: Props) {
             </span>
           </span>
         ) : null}
-      </div>
-      </div>
-      {children ? <div className="flex shrink-0 items-center gap-1.5">{children}</div> : null}
-    </div>
+      </Box>
+      </Box>
+      {children ? <Box className="flex shrink-0 items-center gap-1.5">{children}</Box> : null}
+    </Box>
   )
 }

@@ -14,8 +14,8 @@ import { shiftCountIssue, shiftRielCountInvalid } from '../shifts/shiftCountRule
 import { TimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftHeaderRow from '../shifts/ShiftHeaderRow.tsx'
-import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
-import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional } from '../shifts/shiftReportModel.ts'
+import ShiftCountPair, { ShiftSubmitRow, shiftCashUsedLabels, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
+import { shiftAdditionalCash, shiftExpectedWithTypedAdditional, shiftFiguresForViewer, shiftHasUsd, shiftMoneyText, shiftTypedHasUsd } from '../shifts/shiftReportModel.ts'
 import { retiredBranchNotice } from '../shifts/retiredBranchNotice.ts'
 import { shiftCloseTimeRefusalText } from '../shifts/shiftCloseTimeError.ts'
 
@@ -432,7 +432,7 @@ function useCarryOverClose(shift: Shift | null, closeBefore: string | null | und
       // the cashier gets: it names the drawer that was written and the moment
       // it was FILED UNDER, not a bare "done".
       notify(result.shift
-        ? `${t('shift_close_saved')} ${shiftCountedPairText(result.shift.closing_counted_usd, result.shift.closing_counted_khr, fmtUSD, fmtKHR)}`
+        ? `${t('shift_close_saved')} ${shiftMoneyText({ usd: result.shift.closing_counted_usd, khr: result.shift.closing_counted_khr }, shiftHasUsd(result.shift), fmtUSD, fmtKHR)}`
           + (result.shift.closed_at ? ` · ${fmtDateTime24(result.shift.closed_at)}` : '')
         : t('shift_close_saved'))
     } catch (e) {
@@ -488,7 +488,7 @@ function CarryOverIntro({ shift, closeBefore }: { shift: Shift; closeBefore?: st
       <ShiftHeaderRow shift={shift} />
       <ShiftFactStrip facts={[
         { label: t('shift_opened_at'), value: fmtDateTime24(shift.opened_at) },
-        { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },
+        { label: t('shift_opened_with'), value: shiftMoneyText({ usd: shift.opening_float_usd, khr: shift.opening_float_khr }, shiftHasUsd(shift), fmtUSD, fmtKHR) },
         !!closeBefore && { label: t('shift_previous_open_close_before'), value: fmtDateTime24(closeBefore) },
       ]}
       />
@@ -517,7 +517,7 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
           never counted two ways. */}
       <ShiftCountPair
         dense disabled={frozen}
-        label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
+        label={t('shift_additional_cash')} {...shiftCashUsedLabels(t)}
         hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')}
         usd={form.draft.additionalUsd} khr={form.draft.additionalKhr}
         onUsd={(value) => form.set({ additionalUsd: value })}
@@ -800,8 +800,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
 
   const now = useWallClock(open && !closed)
   const receivedShift = closed || target || state?.shift || null
-  const shift = receivedShift && !isAdminControlUser(user)
-    ? { ...receivedShift, reconciliation: null, figures: null } : receivedShift
+  const shift = shiftFiguresForViewer(receivedShift, user)
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
   // The same earlier-day row the gate offers, for the case where TODAY is
   // already registered so the gate's prompt is gone. Offered whenever the
@@ -917,10 +916,12 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   // server's EXPECTED figure so the two are compared before the close is
   // written. The difference itself is NOT computed here: that is the server's
   // one reconciliation, and it appears on the summary once the close returns.
+  // Riel first; the dollar half on every pair of this summary when the shift has any dollar figure, or once a dollar amount is typed (owner A72 + Q3).
+  const showUsd = (!!shift && shiftHasUsd(shift)) || (!closed && shiftTypedHasUsd(countedUsd, additionalUsd))
   const typedCounts = shiftClosingCounts(countedUsd, countedKhr)
   const typedDrawer = endBlocker === 'invalid'
     ? '—'
-    : shiftCountedPairText(typedCounts.usd, typedCounts.khr, fmtUSD, fmtKHR)
+    : shiftMoneyText(typedCounts, showUsd, fmtUSD, fmtKHR)
   const closedAdditional = closed ? shiftAdditionalCash(closed) : null
 
   // ---- EXPECTED, before the close is written -----------------------------
@@ -1021,7 +1022,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 // about to be stamped; after it, the moment that was.
                 { label: closed ? t('shift_closed_at') : t('shift_ends_at'), value: fmtDateTime24(closed?.closed_at || now) },
                 { label: closed ? t('shift_duration') : t('shift_open_for'), value: formatShiftDuration(shift.opened_at, parseServerTimestampMs(closed?.closed_at) || now, t) },
-                { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },
+                { label: t('shift_opened_with'), value: shiftMoneyText({ usd: shift.opening_float_usd, khr: shift.opening_float_khr }, showUsd, fmtUSD, fmtKHR) },
                 // The rest of the chain, in the order the drawer moved: the
                 // extra change put in when the float ran out, then what was
                 // counted out of it at the close -- on the same cell shape as
@@ -1030,9 +1031,9 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 // rows and the Reports export use (shiftAdditionalCash; owner,
                 // 13 Oct 2026: Opening -> Additional -> Closing, $0 included).
                 // The (+) of an inflow only marks an amount: a shift that needed
-                // no more change reads "$0.00 · 0៛", not "+ $0.00 · 0៛".
-                !!closedAdditional && { label: t('shift_recon_additional_cash'), value: `${closedAdditional.usd || closedAdditional.khr ? '+ ' : ''}${shiftCountedPairText(closedAdditional.usd, closedAdditional.khr, fmtUSD, fmtKHR)}` },
-                !!closed && { label: t('shift_counted_close'), value: shiftCountedPairText(closed.closing_counted_usd, closed.closing_counted_khr, fmtUSD, fmtKHR) },
+                // no more change reads "0៛ · $0.00" (riel first, owner A72), not "+ 0៛ · $0.00".
+                !!closedAdditional && { label: t('shift_recon_additional_cash'), value: `${closedAdditional.usd || closedAdditional.khr ? '+ ' : ''}${shiftMoneyText(closedAdditional, showUsd, fmtUSD, fmtKHR)}` },
+                !!closed && { label: t('shift_counted_close'), value: shiftMoneyText({ usd: closed.closing_counted_usd, khr: closed.closing_counted_khr }, showUsd, fmtUSD, fmtKHR) },
                 !!closed?.closing_note && { label: t('note'), value: closed.closing_note },
               ]}
               />
@@ -1045,7 +1046,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 difference is stated rather than left to be worked out. */}
             {drawerBreakdown && (
               <div className="rounded-lg border border-black/10 px-3 py-2 dark:border-white/10">
-                <ShiftCashBreakdown reconciliation={drawerBreakdown} />
+                <ShiftCashBreakdown reconciliation={drawerBreakdown} showUsd={showUsd} />
               </div>
             )}
 
@@ -1059,7 +1060,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                     other -- the server's one reconciliation reads both. */}
                 <ShiftCountPair
                   dense autoFocus disabled={busy || pending}
-                  label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')}
+                  label={t('shift_additional_cash')} {...shiftCashUsedLabels(t)}
                   hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')}
                   usd={additionalUsd} khr={additionalKhr} onUsd={setAdditionalUsd} onKhr={setAdditionalKhr}
                 />
@@ -1072,7 +1073,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
                 {shift?.reconciliation && (
                   <ShiftFactStrip accent facts={[
                     { label: t('shift_drawer_total_typed'), value: typedDrawer },
-                    { label: t('shift_recon_expected'), value: shiftCountedPairText(expectedNow.usd, expectedNow.khr, fmtUSD, fmtKHR) },
+                    { label: t('shift_recon_expected'), value: shiftMoneyText(expectedNow, showUsd, fmtUSD, fmtKHR) },
                   ]}
                   />
                 )}

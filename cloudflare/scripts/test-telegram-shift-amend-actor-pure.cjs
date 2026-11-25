@@ -14,7 +14,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //   3. the route passes the account USERNAME (lib/actorSnapshot.ts) and no other
 //      send passes one -- never a phone number or an email, even when the
 //      session user carries both;
-//   4. the three shift cash rows (Opening, Additional change used, Closing) are
+//   4. the three shift cash rows (Opening, Cash used, Closing) are
 //      still all there on an amended report, in order.
 //
 // Run (from cloudflare/): node scripts/test-telegram-shift-amend-actor-pure.cjs
@@ -139,7 +139,7 @@ const NOW = Date.parse('2026-09-20T12:00:00Z')
 const ENV = { TELEGRAM_BOT_TOKEN: 'TEST-TOKEN' }
 const KHMER = /[ក-៿]/
 
-// One closed shift, fake numbers: opening $50.00 · 100,000៛, counted $182.50 · 240,000៛,
+// One closed shift, fake numbers: opening 100,000៛ · $50.00, counted 240,000៛ · $182.50,
 // nothing added. Cashier Za; the amender in these tests is a different account, Sok.
 let nextId = 0
 function seed(extra = {}) {
@@ -249,12 +249,12 @@ const idLabel = (mode) => (mode === 'en' ? lang.TELEGRAM_LABELS.shift.en : mode 
     setLanguage('both')
     const text = await sent(shift.id, { amendedBy: 'sok' })
     const rows = text.split('\n')
-    const at = rows.indexOf(`· ${packLabel('both', 'shift_opening_cash')}: $50.00 · 100,000៛`)
+    const at = rows.indexOf(`· ${packLabel('both', 'shift_opening_cash')}: 100,000៛ · $50.00`)
     assert.ok(at >= 0, text)
     assert.deepEqual(rows.slice(at, at + 3), [
-      `· ${packLabel('both', 'shift_opening_cash')}: $50.00 · 100,000៛`,
-      `· ${packLabel('both', 'shift_additional_cash')}: $0.00 · 0៛`,
-      `· ${packLabel('both', 'shift_counted_cash')}: $182.50 · 240,000៛`,
+      `· ${packLabel('both', 'shift_opening_cash')}: 100,000៛ · $50.00`,
+      `· ${packLabel('both', 'shift_additional_cash')}: 0៛ · $0.00`,
+      `· ${packLabel('both', 'shift_counted_cash')}: 240,000៛ · $182.50`,
     ])
   })
 

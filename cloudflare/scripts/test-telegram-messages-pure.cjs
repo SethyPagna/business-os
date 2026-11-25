@@ -303,10 +303,10 @@ const closedCancelledReport = telegram.formatShiftReport('Shop', closedThenCance
 assert.equal(telegram.shiftFilters(closedThenCancelled, Date.parse('2026-09-05T12:00:00.000Z')).createdTo, closedThenCancelled.closed_at)
 assert.ok(closedCancelledReport.split('\n').includes('· Close/បិទ: 04/09/2026 17:02'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Cancelled at/បោះបង់នៅ: 05/09/2026 09:30'), closedCancelledReport)
-assert.ok(closedCancelledReport.includes('Closing cash/សាច់ប្រាក់បិទវេន: $75.00 · 100,000៛'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('Closing cash/សាច់ប្រាក់បិទវេន: 100,000៛ · $75.00'), closedCancelledReport)
 assert.ok(!closedCancelledReport.includes('Counted cash/សាច់ប្រាក់បានរាប់:'), closedCancelledReport)
 // ... beside the OPENING count, which is the half the owner said was missing.
-assert.ok(closedCancelledReport.includes('Opening cash/សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('Opening cash/សាច់ប្រាក់ដើមវេន: 100,000៛ · $50.00'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('=====Invoices/វិក្កយបត្រ=====\n· Total/សរុប: 3'), closedCancelledReport)
 const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 assert.match(telegramSource, /WHERE business_date = @date\s+ORDER BY/, 'dated /shift history must retain cancelled shifts')

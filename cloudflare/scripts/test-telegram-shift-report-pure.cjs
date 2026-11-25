@@ -191,7 +191,7 @@ const rowsOf = (text) => text.split('\n').filter((line) => !line.startsWith(tele
 // and the two discount rows the owner's reference reinstated, and from 38 to
 // 32 on Sep 23 2026, when the six drawn rules came off the sections (their
 // titles are one dashed line each now), and from 32 to 33 on 13 Oct 2026, when
-// the Additional change used row became a permanent row of the Cash count
+// the Cash used row became a permanent row of the Cash count
 // section (owner: "we have the opening closing and additional used"). It is
 // still a ceiling with the same one row of slack: this fixture, with every
 // optional block on, renders in 32.
@@ -245,15 +245,15 @@ assert.deepEqual(lines, [
   // a side, not five: five would push this title onto a second row (owner,
   // Sep 23 2026: "you can use less header marks if it pushes to next row").
   '====Cash count/ការរាប់សាច់ប្រាក់====',
-  '· Opening cash/សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
+  '· Opening cash/សាច់ប្រាក់ដើមវេន: 100,000៛ · $50.00',
   // Always a row, in the order the drawer moves (opening -> additional ->
   // closing; owner, 14 Sep 2026), even at zero: this fixture added no change,
   // and the message says so instead of leaving the line out (owner, 13 Oct
   // 2026: "for the shift i don't see additional used in telegram").
-  '· Additional change used/ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛',
-  '· Closing cash/សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
-  '· Expected cash/សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
-  '· Difference/ភាពខុសគ្នា: +$4.50 · 0៛',
+  '· Cash used/សាច់ប្រាក់បានប្រើ: 0៛ · $0.00',
+  '· Closing cash/សាច់ប្រាក់បិទវេន: 240,000៛ · $182.50',
+  '· Expected cash/សាច់ប្រាក់ត្រូវមាន: 240,000៛ · $178.00',
+  '· Difference/ភាពខុសគ្នា: 0៛ · +$4.50',
   // Every row inside a section is a `·` row, the lists included (Sep 23
   // 2026: "for inside each section do bullet points ·"). No em dash anywhere
   // (owner, 25 Sep 2026): "name: count · money", a colon glued to the name.
@@ -305,11 +305,11 @@ assert.deepEqual(englishReport.split('\n'), [
   '· Still owed: $38.00',
   '· Refunds: $15.00',
   '=====Cash count=====',
-  '· Opening cash: $50.00 · 100,000៛',
-  '· Additional change used: $0.00 · 0៛',
-  '· Closing cash: $182.50 · 240,000៛',
-  '· Expected cash: $178.00 · 240,000៛',
-  '· Difference: +$4.50 · 0៛',
+  '· Opening cash: 100,000៛ · $50.00',
+  '· Cash used: 0៛ · $0.00',
+  '· Closing cash: 240,000៛ · $182.50',
+  '· Expected cash: 240,000៛ · $178.00',
+  '· Difference: 0៛ · +$4.50',
   '=====Payment methods=====',
   '· Cash: 18 · $300.0000',
   '· ABA: 6 · $186.2500',
@@ -349,11 +349,11 @@ assert.deepEqual(khmerReport.split('\n'), [
   '· ប្រាក់នៅជំពាក់: $38.00',
   '· ការសងប្រាក់: $15.00',
   '=====ការរាប់សាច់ប្រាក់=====',
-  '· សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
-  '· ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛',
-  '· សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
-  '· សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
-  '· ភាពខុសគ្នា: +$4.50 · 0៛',
+  '· សាច់ប្រាក់ដើមវេន: 100,000៛ · $50.00',
+  '· សាច់ប្រាក់បានប្រើ: 0៛ · $0.00',
+  '· សាច់ប្រាក់បិទវេន: 240,000៛ · $182.50',
+  '· សាច់ប្រាក់ត្រូវមាន: 240,000៛ · $178.00',
+  '· ភាពខុសគ្នា: 0៛ · +$4.50',
   '=====វិធីទូទាត់=====',
   '· Cash: 18 · $300.0000',
   '· ABA: 6 · $186.2500',
@@ -430,7 +430,7 @@ assert.deepEqual(sectionTitles(openReport), SIX_SECTIONS, openReport)
 check('an open shift shows the opening count and no difference against a count nobody took',
   openReport.startsWith('🧑‍💼 Shift report/របាយការណ៍វេន: Open/បើក · 06/09/2026')
   && !openReport.includes('កំពុងបើក')
-  && openReport.includes('· Opening cash/សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛')
+  && openReport.includes('· Opening cash/សាច់ប្រាក់ដើមវេន: 100,000៛ · $50.00')
   && !openReport.includes('Closing cash')
   && !openReport.includes('Difference'), openReport)
 // A CLOSED shift's title takes the short Khmer too (Sep 24 2026), like the
@@ -518,7 +518,7 @@ const partiallyRegistered = render('both', () => telegram.formatShiftReport('Sun
   ...openShift, opening_float_usd: null, opening_float_khr: 0,
 }, figures, NOW))
 check('blank opening cash stays unknown while explicit zero stays measured',
-  partiallyRegistered.includes('Opening cash/សាច់ប្រាក់ដើមវេន: N/A · 0៛'), partiallyRegistered)
+  partiallyRegistered.includes('Opening cash/សាច់ប្រាក់ដើមវេន: 0៛ · N/A'), partiallyRegistered)
 
 // A cancelled shift is terminal, and says when, by whom and why it was
 // cancelled. The state is in the title; the three provenance rows sit under
@@ -572,9 +572,9 @@ assert.deepEqual(quiet.split('\n'), [
   '· Revenue/ចំណូល: $0.00',
   '· Profit/ចំណេញ: $0.00',
   '====Cash count/ការរាប់សាច់ប្រាក់====',
-  '· Opening cash/សាច់ប្រាក់ដើមវេន: $0.00 · 0៛',
-  '· Additional change used/ប្រាក់អាប់បន្ថែមដែលបានប្រើ: $0.00 · 0៛',
-  '· Expected cash/សាច់ប្រាក់ត្រូវមាន: $0.00 · 0៛',
+  '· Opening cash/សាច់ប្រាក់ដើមវេន: 0៛',
+  '· Cash used/សាច់ប្រាក់បានប្រើ: 0៛',
+  '· Expected cash/សាច់ប្រាក់ត្រូវមាន: 0៛',
   '=====Payment methods/វិធីទូទាត់=====',
   // `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced
   // read as a value that failed to render rather than as "nothing here".

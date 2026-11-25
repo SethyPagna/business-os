@@ -117,7 +117,7 @@ test('the date shows in the Close cell only when it differs from the shift day',
 test('the five cells keep their order', () => {
   const html = render(shiftRow())
   const labels = [...html.matchAll(/<dt[^>]*>([^<]*)<\/dt>/g)].map((m) => m[1])
-  assert.deepEqual(labels, [en.shift_open_time, en.shift_close_time, en.shift_before, en.shift_additional_short, en.shift_after])
+  assert.deepEqual(labels, [en.shift_open_time, en.shift_close_time, en.shift_before, en.shift_recon_additional_cash, en.shift_after])
 })
 
 test('a late close shows its Closed late tag beside Edited on the card', () => {

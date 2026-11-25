@@ -1,6 +1,6 @@
 import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftCountedPairText, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from './shiftReportModel.ts'
+import { shiftFigureRows, shiftFiguresOf, shiftHasUsd, shiftMoneyText, shiftRegisteredRows, shiftRowNotCounted } from './shiftReportModel.ts'
 import type { Shift } from '../../api/shiftTransport.ts'
 
 /**
@@ -31,10 +31,12 @@ import type { Shift } from '../../api/shiftTransport.ts'
 
 type Props = {
   shift: Shift
+  /** Closed late: an empty closing count reads "Not counted (closed late)". */
+  closedLate?: boolean
   className?: string
 }
 
-export default function ShiftReportFigures({ shift, className = '' }: Props) {
+export default function ShiftReportFigures({ shift, closedLate = false, className = '' }: Props) {
   const { t, fmtUSD, fmtKHR } = useApp() as {
     t: (key: string) => string
     fmtUSD: (value: unknown) => string
@@ -44,6 +46,7 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
     const value = t(key)
     return value && value !== key ? value : fallback
   }
+  const showUsd = shiftHasUsd(shift)
   const registered = shiftRegisteredRows(shift)
   const rows = shiftFigureRows(shiftFiguresOf(shift))
 
@@ -61,7 +64,7 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
           {registered.map((row) => (
             <div key={row.key} className="flex min-w-0 items-baseline justify-between gap-3">
               <span className="shrink-0 font-medium text-gray-500 dark:text-gray-400">{tr(row.key, row.fallback)}</span>
-              <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">{row.added ? '+ ' : ''}{shiftCountedPairText(row.usd, row.khr, fmtUSD, fmtKHR)}</span>
+              <span className="min-w-0 break-words text-right font-medium text-gray-800 dark:text-gray-100">{shiftRowNotCounted(row, shift, closedLate) ? tr('shift_late_not_counted', 'Not counted (closed late)') : <>{row.added ? '+ ' : ''}{shiftMoneyText(row, showUsd, fmtUSD, fmtKHR)}</>}</span>
             </div>
           ))}
         </div>
@@ -82,7 +85,8 @@ export default function ShiftReportFigures({ shift, className = '' }: Props) {
                     : row.tone === 'negative' ? 'text-red-600 dark:text-red-400'
                       : 'text-gray-800 dark:text-gray-100'
                 }`}>
-                  {row.khr == null ? fmtUSD(row.usd) : `${fmtUSD(row.usd)} · ${fmtKHR(row.khr)}`}
+                  {/* Business results are dollars (canonical revenue); only the two pairs (delivery cost, other expenses) follow the per-shift riel-first rule. */}
+                  {row.khr == null ? fmtUSD(row.usd) : shiftMoneyText({ usd: row.usd, khr: row.khr }, showUsd, fmtUSD, fmtKHR)}
                   {row.unvaluedCount ? (
                     <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400">
                       {tr('rpt_note_removal_unvalued', '{count} removed row(s) had no recorded cost').replace('{count}', String(row.unvaluedCount))}

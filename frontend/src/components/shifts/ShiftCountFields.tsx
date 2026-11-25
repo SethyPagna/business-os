@@ -17,6 +17,7 @@ import { shiftRielCountInvalid, type ShiftCountIssue } from './shiftCountRules.t
  *     count from an explicit measured zero.
  *   - The currency sits INSIDE the field as a suffix, so the label above can
  *     be one short phrase for the pair ("Opening cash") instead of two.
+ *   - Riel first, then dollars (owner A72: riel is the shop's money, the order every shift surface prints).
  *   - Side by side from 640px up, stacked below it (a 375px till still fits
  *     the whole form on one screen).
  *
@@ -26,6 +27,17 @@ import { shiftRielCountInvalid, type ShiftCountIssue } from './shiftCountRules.t
  * breakpoint classes, which is what keeps iOS Safari from zooming the page.
  */
 type ShiftGateContext = { t: (key: string) => string }
+
+/**
+ * The accessible names of the cash-used pair: the field and the currency joined from the two labels the packs already
+ * hold ("Cash used, Riel"), so a screen reader never announces a bare "Dollars" or "Riel".
+ */
+export function shiftCashUsedLabels(t: (key: string) => string): { usdLabel: string; khrLabel: string } {
+  return {
+    usdLabel: `${t('shift_additional_cash')}, ${t('shift_additional_usd')}`,
+    khrLabel: `${t('shift_additional_cash')}, ${t('shift_additional_khr')}`,
+  }
+}
 
 type PairProps = {
   label: string
@@ -69,21 +81,21 @@ export default function ShiftCountPair({ label, usd, khr, onUsd, onKhr, usdLabel
       <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <span className="relative block min-w-0">
           <input
-            type="number" inputMode="decimal" min="0" step="0.01" placeholder="0"
-            aria-label={usdLabel} title={usdLabel}
-            className={inputClass} disabled={disabled} autoFocus={autoFocus}
-            value={usd} onChange={(event) => onUsd(event.target.value)}
-          />
-          <span className={suffixClass} aria-hidden="true">USD</span>
-        </span>
-        <span className="relative block min-w-0">
-          <input
             type="number" inputMode="numeric" min="0" step="100" placeholder="0"
             aria-label={khrLabel} title={khrLabel} aria-invalid={rielInvalid || undefined}
-            className={inputClass} disabled={disabled}
+            className={inputClass} disabled={disabled} autoFocus={autoFocus}
             value={khr} onChange={(event) => onKhr(event.target.value)}
           />
           <span className={suffixClass} aria-hidden="true">KHR</span>
+        </span>
+        <span className="relative block min-w-0">
+          <input
+            type="number" inputMode="decimal" min="0" step="0.01" placeholder="0"
+            aria-label={usdLabel} title={usdLabel}
+            className={inputClass} disabled={disabled}
+            value={usd} onChange={(event) => onUsd(event.target.value)}
+          />
+          <span className={suffixClass} aria-hidden="true">USD</span>
         </span>
       </div>
       {rielInvalid ? <p className="mt-1 text-right text-[11px] font-medium text-red-600 dark:text-red-400" role="alert" data-riel-cash-error>{t('riel_cash_not_hundreds')}</p> : null}

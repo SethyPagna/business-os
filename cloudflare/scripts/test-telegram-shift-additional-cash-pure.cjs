@@ -3,7 +3,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 // have the opening closing and additional used."
 //
 // The drawer has THREE registered cash figures, in this order (owner, 14 Sep
-// 2026: opening -> additional -> closing): Opening, Additional change used (the
+// 2026: opening -> additional -> closing): Opening, Cash used (the
 // extra change money put in mid-shift and spent), and Closing counted. The shift
 // report printed the additional row ONLY when it was non-zero, so every shift
 // that never needed more change showed Opening and Closing with the middle line
@@ -15,7 +15,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //
 // This pins, for every shift report the chat receives:
 //   * the three rows are ALWAYS there, in that order, in the existing money
-//     format -- an additional of 0 reads `$0.00 · 0៛`, never a missing line;
+//     format -- an additional of 0 reads `0៛ · $0.00`, never a missing line;
 //   * an OPEN shift still has no closing row (no count was taken);
 //   * a non-zero additional shows its own amounts, per currency;
 //   * the labels are the app's own words (frontend lang packs), in en, km, both.
@@ -153,7 +153,7 @@ const ENV = { TELEGRAM_BOT_TOKEN: 'TEST-TOKEN' }
 
 // ---- the fixture ---------------------------------------------------------------
 // One shift per business day so `/shift <day>` answers exactly one block.
-// Fake numbers throughout: opening $50.00 · 100,000៛, counted $182.50 · 240,000៛.
+// Fake numbers throughout: opening 100,000៛ · $50.00, counted 240,000៛ · $182.50.
 let nextId = 0
 function seed(extra = {}) {
   nextId += 1
@@ -238,48 +238,51 @@ function registeredRowsOk(text, { closing, mode } = {}) {
         { en: pack.en.shift_additional_cash, km: pack.km.shift_additional_cash },
         { en: pack.en.shift_counted_cash, km: pack.km.shift_counted_cash },
       ])
+    // A70: the words themselves, so a pack and a Telegram label that drift together still fail. The Khmer is PROVISIONAL
+    // (owner question Q6); a later choice changes this value and the two packs' values, nothing else.
+    assert.deepEqual(lang.TELEGRAM_LABELS.additionalCash, { en: 'Cash used', km: 'សាច់ប្រាក់បានប្រើ' })
     assert.equal(pack.en.shift_additional_cash, pack.en.shift_recon_additional_cash)
     assert.equal(pack.km.shift_additional_cash, pack.km.shift_recon_additional_cash)
   })
 
-  await section('1. close push, additional = 0: three rows in order, middle reads $0.00 · 0៛', async () => {
+  await section('1. close push, additional = 0: three rows in order, middle reads 0៛ · $0.00', async () => {
     const text = await sentShiftReport(zero.id)
     console.log(`--- closed shift, additional 0 ---\n${text}\n---`)
     assert.ok(registeredRowsOk(text, { closing: true }), text)
-    assert.equal(valueOf(text, 'cashOpen'), '$50.00 · 100,000៛')
-    assert.equal(valueOf(text, 'additionalCash'), '$0.00 · 0៛')
-    assert.equal(valueOf(text, 'cashEnd'), '$182.50 · 240,000៛')
+    assert.equal(valueOf(text, 'cashOpen'), '100,000៛ · $50.00')
+    assert.equal(valueOf(text, 'additionalCash'), '0៛ · $0.00')
+    assert.equal(valueOf(text, 'cashEnd'), '240,000៛ · $182.50')
   })
 
   await section('2. close push, additional > 0: the exact amounts per currency', async () => {
     const text = await sentShiftReport(some.id)
     assert.ok(registeredRowsOk(text, { closing: true }), text)
-    assert.equal(valueOf(text, 'additionalCash'), '$12.50 · 8,000៛')
+    assert.equal(valueOf(text, 'additionalCash'), '8,000៛ · $12.50')
     const usdOnly = await sentShiftReport(usdOnlyShift.id)
-    assert.equal(valueOf(usdOnly, 'additionalCash'), '$7.50 · 0៛')
+    assert.equal(valueOf(usdOnly, 'additionalCash'), '0៛ · $7.50')
     const khrOnly = await sentShiftReport(khrOnlyShift.id)
-    assert.equal(valueOf(khrOnly, 'additionalCash'), '$0.00 · 20,000៛')
+    assert.equal(valueOf(khrOnly, 'additionalCash'), '20,000៛ · $0.00')
     assert.ok(registeredRowsOk(usdOnly, { closing: true }) && registeredRowsOk(khrOnly, { closing: true }))
     // The same figure moves the expected drawer (no sales in this fixture): 50 -> 62.50.
-    assert.equal(valueOf(text, 'expectedCash'), '$62.50 · 108,000៛', text)
+    assert.equal(valueOf(text, 'expectedCash'), '108,000៛ · $62.50', text)
   })
 
   await section('3. shift-open push: opening + additional (0), still no closing row', async () => {
     const text = await sentShiftReport(open.id)
     console.log(`--- open shift ---\n${text}\n---`)
     assert.ok(registeredRowsOk(text, { closing: false }), text)
-    assert.equal(valueOf(text, 'additionalCash'), '$0.00 · 0៛')
+    assert.equal(valueOf(text, 'additionalCash'), '0៛ · $0.00')
     assert.ok(indexOfRow(text, 'additionalCash') < indexOfRow(text, 'expectedCash'), 'additional comes before the expected drawer')
   })
 
   await section('4. data path: NULL columns read as 0; unregistered opening stays N/A; cancel push has all three', async () => {
     // A column that is NULL (a row from a caller that never set it) is "none was added", not "unknown".
     const nullText = await sentShiftReport(nullShift.id)
-    assert.equal(valueOf(nullText, 'additionalCash'), '$0.00 · 0៛')
+    assert.equal(valueOf(nullText, 'additionalCash'), '0៛ · $0.00')
     // An opening nobody registered stays N/A (unknown is not zero); the additional row is independent of it.
     const unregistered = await sentShiftReport(unregisteredShift.id)
     assert.equal(valueOf(unregistered, 'cashOpen'), 'N/A · N/A')
-    assert.equal(valueOf(unregistered, 'additionalCash'), '$0.00 · 0៛')
+    assert.equal(valueOf(unregistered, 'additionalCash'), '0៛ · $0.00')
     assert.ok(registeredRowsOk(unregistered, { closing: true }))
     const cancelled = await sentShiftReport(cancelledShift.id)
     assert.ok(registeredRowsOk(cancelled, { closing: true }), cancelled)
@@ -289,21 +292,22 @@ function registeredRowsOk(text, { closing, mode } = {}) {
   // back, and then calls sendTelegramShiftReport(saved.id) -- the same call as above.
   await section('5. amend and reopen: the re-sent report carries the saved additional', async () => {
     const beforeAmend = await sentShiftReport(amended.id)
-    assert.equal(valueOf(beforeAmend, 'additionalCash'), '$0.00 · 0៛')
+    assert.equal(valueOf(beforeAmend, 'additionalCash'), '0៛ · $0.00')
     sql.prepare('UPDATE shift_sessions SET additional_cash_usd = 15, additional_cash_khr = 30000 WHERE id = ?').run(amended.id)
     const afterAmend = await sentShiftReport(amended.id)
-    assert.equal(valueOf(afterAmend, 'additionalCash'), '$15.00 · 30,000៛')
+    assert.equal(valueOf(afterAmend, 'additionalCash'), '30,000៛ · $15.00')
     assert.ok(registeredRowsOk(afterAmend, { closing: true }))
     // A reopened shift is a NEW segment row: a fresh opening, additional 0, no count yet.
     const reopenReport = await sentShiftReport(reopened.id)
     assert.ok(registeredRowsOk(reopenReport, { closing: false }), reopenReport)
-    assert.equal(valueOf(reopenReport, 'additionalCash'), '$0.00 · 0៛')
+    // A segment with no dollar anywhere (zero opening, no count) is riel only: no "$" half (owner A72).
+    assert.equal(valueOf(reopenReport, 'additionalCash'), '0៛')
   })
 
   await section('6. /shift [date]: the same three rows and the same text as the close push', async () => {
     const viaCommand = await shiftCommand(zero)
     assert.ok(registeredRowsOk(viaCommand, { closing: true }), viaCommand)
-    assert.equal(valueOf(viaCommand, 'additionalCash'), '$0.00 · 0៛')
+    assert.equal(valueOf(viaCommand, 'additionalCash'), '0៛ · $0.00')
     assert.ok(registeredRowsOk(await shiftCommand(open), { closing: false }))
     assert.equal(viaCommand, await sentShiftReport(zero.id), '`/shift` and the close push are the same composer for the same row')
   })
@@ -312,9 +316,9 @@ function registeredRowsOk(text, { closing, mode } = {}) {
   const expectedRows = (mode) => {
     const word = (entry) => (mode === 'en' ? entry.en : mode === 'km' ? entry.km : `${entry.en}${lang.BILINGUAL_SEPARATOR}${entry.km}`)
     return [
-      `· ${word({ en: pack.en.shift_opening_cash, km: pack.km.shift_opening_cash })}: $50.00 · 100,000៛`,
-      `· ${word({ en: pack.en.shift_additional_cash, km: pack.km.shift_additional_cash })}: $0.00 · 0៛`,
-      `· ${word({ en: pack.en.shift_counted_cash, km: pack.km.shift_counted_cash })}: $182.50 · 240,000៛`,
+      `· ${word({ en: pack.en.shift_opening_cash, km: pack.km.shift_opening_cash })}: 100,000៛ · $50.00`,
+      `· ${word({ en: pack.en.shift_additional_cash, km: pack.km.shift_additional_cash })}: 0៛ · $0.00`,
+      `· ${word({ en: pack.en.shift_counted_cash, km: pack.km.shift_counted_cash })}: 240,000៛ · $182.50`,
     ]
   }
   await section('7. shift report in en, km and both: three adjacent rows with the packs\' words', async () => {
@@ -327,7 +331,7 @@ function registeredRowsOk(text, { closing, mode } = {}) {
         assert.ok(at >= 0, `[${mode}] no opening row:\n${text}`)
         assert.deepEqual(rows.slice(at, at + 3), expectedRows(mode), `[${mode}] the three rows, adjacent and in order:\n${text}`)
         if (mode === 'en') assert.ok(!/[ក-៿]/.test(text.replace(/៛/g, '')), 'en mode carries no Khmer word')
-        if (mode === 'km') assert.ok(!/Additional change used|Opening cash|Closing cash/.test(text), 'km mode carries no English label')
+        if (mode === 'km') assert.ok(!/Cash used|Opening cash|Closing cash/.test(text), 'km mode carries no English label')
       }
     } finally { setLanguage('both') }
   })

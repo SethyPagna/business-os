@@ -7,8 +7,8 @@ import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
 import ShiftReportFigures from './ShiftReportFigures.tsx'
 import ShiftCloseDriftNote from './ShiftCloseDriftNote.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftAdditionalCash, shiftCountedPairText, shiftDrawerSourceBadge } from './shiftReportModel.ts'
-import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
+import { shiftAdditionalCash, shiftDrawerSourceBadge, shiftFiguresForViewer, shiftHasUsd, shiftMoneyText, shiftNotCounted } from './shiftReportModel.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 
 type Props = {
   shift: Shift
@@ -28,7 +28,7 @@ function duration(shift: Shift, t: (key: string) => string): string {
 
 export default function ShiftSummary({ shift: receivedShift, detail = false, closedLate = false, className = '' }: Props) {
   const { user } = useApp() as { user: PermissionUser }
-  const shift = isAdminControlUser(user) ? receivedShift : { ...receivedShift, reconciliation: null, figures: null, close_drift: null }
+  const shift = shiftFiguresForViewer(receivedShift, user)
   const { t, fmtUSD, fmtKHR } = useApp() as {
     t: (key: string) => string
     fmtUSD: (value: unknown) => string
@@ -42,18 +42,22 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
     ? tr('shift_status_cancelled', 'Cancelled / closed out')
     : shift.closed_at ? tr('shift_status_closed', 'Closed') : tr('shift_status_open', 'Open')
   const closeTime = shift.closed_at ? `${shiftCellTime(shift.closed_at, shift.business_date)}${detail ? ` · ${duration(shift, t)}` : ''}` : status
-  const before = shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR)
+  // Riel first; the dollar half only when this shift has any dollar figure, on every pair row of it (owner A72 + Q3).
+  const showUsd = shiftHasUsd(shift)
+  const before = shiftMoneyText({ usd: shift.opening_float_usd, khr: shift.opening_float_khr }, showUsd, fmtUSD, fmtKHR)
   // Per currency, through the shared rule. A drawer counted in dollars and
   // left blank in riel used to print a bare "—" for BOTH, hiding a number the
   // cashier actually wrote; now only the uncounted half is a dash, and a
   // wholly uncounted drawer is still one dash.
-  const after = shiftCountedPairText(shift.closing_counted_usd, shift.closing_counted_khr, fmtUSD, fmtKHR)
+  const afterText = shiftMoneyText({ usd: shift.closing_counted_usd, khr: shift.closing_counted_khr }, showUsd, fmtUSD, fmtKHR)
+  // A shift closed late with no count says so, instead of a bare dash (same-day closes keep the dash).
+  const after = shiftNotCounted(shift, closedLate) ? tr('shift_late_not_counted', 'Not counted (closed late)') : afterText
   // Between the two: the extra change put in mid-shift (owner, 13 Oct 2026, item 14:
   // Opening -> Additional -> Closing everywhere, $0 included). The shared rule answers
   // the figure, zero when none; the (+) of an inflow marks only an amount, as in the
   // report block and the POS summary.
   const additional = shiftAdditionalCash(shift)
-  const between = `${additional.usd || additional.khr ? '+ ' : ''}${shiftCountedPairText(additional.usd, additional.khr, fmtUSD, fmtKHR)}`
+  const between = `${additional.usd || additional.khr ? '+ ' : ''}${shiftMoneyText(additional, showUsd, fmtUSD, fmtKHR)}`
   const sourceBadge = shiftDrawerSourceBadge(shift)
 
   return (
@@ -82,13 +86,12 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
       {/* Six units on a phone: Open and Close take three each, then Before, Additional and
           After take two each, so the card stays two short rows at 360px (the cash values
           wrap inside their cell instead of widening it). From sm the five cells are one
-          row. The label is the short pack word; the full "Additional change used" is its
-          tooltip. */}
+          row. The label is the full "Cash used", the same word the report and the form use. */}
       <dl className="mt-2 grid min-w-0 grid-cols-6 gap-x-3 gap-y-2 text-xs sm:grid-cols-5">
         <div className="col-span-3 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_open_time', 'Open')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{shiftCellTime(shift.opened_at, shift.business_date)}</dd></div>
         <div className="col-span-3 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_close_time', 'Close')}</dt><dd className="mt-0.5 font-medium text-gray-800 dark:text-gray-100">{closeTime}</dd></div>
         <div className="col-span-2 min-w-0 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{before}</dd></div>
-        <div className="col-span-2 min-w-0 sm:col-span-1" title={tr('shift_recon_additional_cash', 'Additional change used')}><dt className="text-gray-500 dark:text-gray-400">{tr('shift_additional_short', 'Additional')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{between}</dd></div>
+        <div className="col-span-2 min-w-0 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_recon_additional_cash', 'Cash used')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{between}</dd></div>
         <div className="col-span-2 min-w-0 sm:col-span-1"><dt className="text-gray-500 dark:text-gray-400">{tr('shift_after', 'After')}</dt><dd className="mt-0.5 break-words font-medium text-gray-800 dark:text-gray-100">{after}</dd></div>
       </dl>
 
@@ -98,7 +101,7 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
               both currencies, then the money. The drawer chain below it stays
               where it was -- it answers a different question (what should be
               in the till), and only an admin's response carries `figures`. */}
-          <ShiftReportFigures shift={shift} />
+          <ShiftReportFigures shift={shift} closedLate={closedLate} />
           <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-zinc-800/70">
             <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-gray-100">
               <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{tr('shift_cash_breakdown', 'Cash breakdown')}
@@ -118,7 +121,7 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, clo
                 Telegram shift report prints. When the server sent no breakdown
                 (an old row, or a list read) the before/after pair still stands. */}
             {shift.reconciliation
-              ? <ShiftCashBreakdown className="mt-2" reconciliation={shift.reconciliation} />
+              ? <ShiftCashBreakdown className="mt-2" reconciliation={shift.reconciliation} showUsd={showUsd} notCounted={shiftNotCounted(shift, closedLate)} />
               : (
                 <dl className="mt-2 grid gap-2 text-xs sm:grid-cols-2">
                   <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_before', 'Before')}</dt><dd className="font-medium">{before}</dd></div>

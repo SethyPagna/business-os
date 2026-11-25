@@ -225,9 +225,12 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name.includes('shiftTransport')) return { fetchCurrentShift: async () => currentShift, pendingShiftMutation: () => null,
     shiftClosingCounts: (usd: string, khr: string) => ({ usd: usd === '' ? null : Number(usd), khr: khr === '' ? null : Number(khr) }),
     closeShift: (input: any) => { submitted = input; return new Promise((resolve) => { resolveClose = resolve }) } }
-  if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
+  if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker, shiftCashUsedLabels: (t: (key: string) => string) => ({ usdLabel: t('shift_additional_usd'), khrLabel: t('shift_additional_khr') }) }
   if (name.includes('shiftReportModel')) return {
-    shiftCountedPairText: () => '—',
+    shiftMoneyText: () => '—',
+    shiftHasUsd: () => false,
+    shiftTypedHasUsd: () => false,
+    shiftFiguresForViewer: (shift: unknown) => shift,
     // The real rule never answers null (owner, 13 Oct 2026, item 14: the additional row is always there, $0 included).
     shiftAdditionalCash: () => ({ usd: 0, khr: 0 }),
     shiftExpectedWithTypedAdditional: () => ({ usd: null, khr: null }),
@@ -272,6 +275,8 @@ try {
   slots.length = 0
   effectQueue.length = 0
   const actualTransport = await import('../src/api/shiftTransport.ts')
+  // The popup reads the closed_late review through the shared model (lateCloseReview), as the Reports shift report does.
+  const actualReportModel = await import('../src/components/shifts/shiftReportModel.ts')
   const historyShift: any = { ...currentShift.shift, id: 81, revision: 2, business_date: new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10), shift_code: 'SHIFT-81',
     opened_at: '2026-09-05T01:00:00.000Z', closed_at: null, capabilities: { can_edit: true, can_close: true, can_cancel: true } }
   let historyResult = historyShift
@@ -290,10 +295,11 @@ try {
     if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
     if (name.includes('shiftCountRules')) return { shiftCountIssue, shiftRielCountInvalid }
     if (name.includes('shiftLateClose')) return shiftLateClose
+    if (name.includes('shiftReportModel')) return actualReportModel
     if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
       listShifts: async () => ({ shifts: [historyShift], scope: 'own' }), fetchShiftHistory: async () => ({ shift: historyResult, amendments: [] }),
       closeShiftById: () => new Promise((resolve) => { resolveHistoryClose = resolve }) }
-    if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker }
+    if (name.includes('ShiftCountFields')) return { default: () => null, ShiftSubmitRow: SubmitMarker, shiftCashUsedLabels: (t: (key: string) => string) => ({ usdLabel: t('shift_additional_usd'), khrLabel: t('shift_additional_khr') }) }
     return { default: () => null }
   }, historyModule, historyModule.exports)
   const renderHistory = () => {
@@ -357,6 +363,7 @@ try {
       if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
       if (name.includes('shiftCountRules')) return { shiftCountIssue, shiftRielCountInvalid }
       if (name.includes('shiftLateClose')) return shiftLateClose
+      if (name.includes('shiftReportModel')) return actualReportModel
       if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
         listShifts: async () => ({ shifts: [], total: 0, page: 1, scope: 'own' }),
         fetchShiftHistory: async () => { detailReads++; return { shift: fixture, amendments: [] } },

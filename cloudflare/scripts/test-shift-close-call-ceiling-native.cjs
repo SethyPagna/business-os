@@ -380,6 +380,29 @@ const figuresWithoutLateFacts = (json) => {
   if (figures && figures.window) delete figures.window.closed_at
   return JSON.stringify(figures, (key, val) => key === 'needs_review' ? undefined : key === 'review_codes' && Array.isArray(val) ? val.filter((code) => code !== LATE_REVIEW_CODE) : val)
 }
+// 6.0.2993 (owner A70) renamed the cash-used row's label, words only. The base commit still prints the old pair, so the BASE side's text maps exactly that
+// one en/km pair to the new one before it is compared; the lane's own text is never mapped (it is pinned to the new pair by its own check below).
+const OLD_CASH_USED_LABEL = 'Additional change used/ប្រាក់អាប់បន្ថែមដែលបានប្រើ'
+const NEW_CASH_USED_LABEL = 'Cash used/សាច់ប្រាក់បានប្រើ'
+const baseLabelRenamed = (text) => String(text).split(OLD_CASH_USED_LABEL).join(NEW_CASH_USED_LABEL)
+// 6.0.3070 (owner A72 + Q3b) put the Cash count rows riel first, and the dollar half only when the shift has any dollar figure. The base commit prints dollars first on every
+// pair row, so the BASE side's Cash count section is mapped by that one rule (money order only, nothing else) before it is compared: each "$A · B៛" row becomes "B៛ · $A", and
+// the dollar half is dropped when no row of the section holds a non-zero dollar. The lane's own text is never mapped; it is pinned riel-first by its own check below.
+const MONEY_PAIR_ROW = /^(.*: )([+−-]?\$\d[\d,.]*|N\/A) · ([+−-]?\d[\d,]*៛|N\/A)$/
+const baseMoneyRielFirst = (text) => {
+  const rows = String(text).split(String.fromCharCode(10))
+  const start = rows.findIndex((row) => row.includes('Cash count/'))
+  if (start < 0) return String(text)
+  let end = rows.length
+  for (let index = start + 1; index < rows.length; index += 1) if (/^=+[^=]/.test(rows[index])) { end = index; break }
+  const parsed = rows.slice(start + 1, end).map((row) => MONEY_PAIR_ROW.exec(row))
+  const anyDollar = parsed.some((match) => match && /\d/.test(match[2]) && Number(match[2].replace(/[^0-9.]/g, '')) !== 0)
+  for (let index = start + 1; index < end; index += 1) {
+    const match = parsed[index - start - 1]
+    if (match) rows[index] = anyDollar ? `${match[1]}${match[3]} · ${match[2]}` : `${match[1]}${match[3]}`
+  }
+  return rows.join(String.fromCharCode(10))
+}
 const NL = String.fromCharCode(10)
 const CLOSED_LATE_ROW = new RegExp('Closed late|បិទយឺត')
 // Rows start with the bullet "· ". The close-time row is "· Close/បិទ: <date time>".
@@ -398,6 +421,7 @@ async function main() {
     const options = { shopWide: scenario.shopWide, hours: scenario.hours, telegramOn: scenario.telegramOn, hook: scenario.hook, afterClose: scenario.afterClose, now: scenario.now }
     const requestId = 'req-close-0000000001'
     const oldRun = await runClose(base, { ...options, requestId })
+    oldRun.telegram = oldRun.telegram.map(baseLabelRenamed).map(baseMoneyRielFirst)
     const newRun = await runClose(head, { ...options, requestId, refuse: 50 })
     runs.push({ scenario, oldRun, newRun })
   }
@@ -430,6 +454,38 @@ async function main() {
       assert.equal(newRun.telegram.length > 0, scenario.telegramOn !== false, `${scenario.name}: the report was sent exactly when Telegram is on`)
     }
   })
+  await check('THE RENAME (A70, 6.0.2993): the lane\'s queued report prints "Cash used" and never the old "Additional change used" pair; the base is the one that still prints the old pair', () => {
+    const lane = runs.filter(({ scenario }) => scenario.telegramOn !== false)
+    assert.ok(lane.length > 0, 'a scenario sent a report')
+    for (const { scenario, newRun } of lane) {
+      const all = newRun.telegram.join(NL)
+      assert.ok(!all.includes('Additional change used'), `${scenario.name}: the old en label is gone`)
+      assert.ok(!all.includes('ប្រាក់អាប់បន្ថែមដែលបានប្រើ'), `${scenario.name}: the old km label is gone`)
+    }
+    assert.ok(lane.some(({ newRun }) => newRun.telegram.some((text) => text.includes(NEW_CASH_USED_LABEL))), 'a lane report holds the new Cash used pair')
+  })
+
+  await check('THE MONEY ORDER (A72 + Q3b, 6.0.3070): the lane\'s queued report prints every Cash count pair riel first, and the dollar half on all of a shift\'s rows or on none', () => {
+    const lane = runs.filter(({ scenario }) => scenario.telegramOn !== false)
+    assert.ok(lane.length > 0, 'a scenario sent a report')
+    let pairRows = 0
+    for (const { scenario, newRun } of lane) {
+      for (const text of newRun.telegram) {
+        const rows = text.split(NL)
+        const start = rows.findIndex((row) => row.includes('Cash count/'))
+        if (start < 0) continue
+        let end = rows.length
+        for (let index = start + 1; index < rows.length; index += 1) if (/^=+[^=]/.test(rows[index])) { end = index; break }
+        const pairs = rows.slice(start + 1, end).filter((row) => /៛/.test(row) && !/^\W*Cash review/.test(row))
+        const dollarRows = pairs.filter((row) => row.includes('$'))
+        assert.ok(dollarRows.length === 0 || dollarRows.length === pairs.length, `${scenario.name}: the dollar half is on every cash pair row or on none\n${pairs.join(NL)}`)
+        for (const row of dollarRows) assert.ok(!/: [+−-]?\$/.test(row), `${scenario.name}: dollars never come first: ${row}`)
+        pairRows += pairs.length
+      }
+    }
+    assert.ok(pairRows > 0, 'the lane printed Cash count pair rows')
+  })
+
   await check('A LATE CLOSE (overnight 50 h): closed_at is 23:59:59 Cambodia of its business day and the review says closed_late', () => {
     const late = runs.filter(({ scenario }) => scenario.lateClose)
     assert.ok(late.length > 0, 'a late-close scenario exists')
@@ -499,7 +555,7 @@ async function main() {
       assert.equal(newLife[name].result.status, oldLife[name].result.status, `${name}: the answer`)
       assert.equal(oldLife[name].sent.length, 1, `${name}: the base sends one message`)
       assert.equal(newLife[name].sent.length, 1, `${name}: the queued report is sent once (it was delivered twice)`)
-      assert.equal(scrub(newLife[name].sent[0]), scrub(oldLife[name].sent[0]), `${name}: the report text`)
+      assert.equal(scrub(newLife[name].sent[0]), scrub(baseMoneyRielFirst(baseLabelRenamed(oldLife[name].sent[0]))), `${name}: the report text`)
       assert.equal(newLife[name].keys.length, 1, `${name}: one recorded report`)
       assert.match(newLife[name].keys[0], new RegExp(`^shift-report:\\d+:r\\d+:${name}$`), `${name}: the key names the shift, the revision and the action`)
     }

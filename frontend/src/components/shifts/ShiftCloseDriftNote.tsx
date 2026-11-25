@@ -2,7 +2,7 @@ import History from 'lucide-react/dist/esm/icons/history.js'
 import { useApp } from '../../AppContext.tsx'
 import EntityLink from '../shared/EntityLink.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftCloseDriftView, type ShiftDriftSaleView } from './shiftReportModel.ts'
+import { shiftCloseDriftView, shiftHasUsd, shiftMoneyText, type ShiftDriftSaleView } from './shiftReportModel.ts'
 import type { Shift } from '../../api/shiftTransport.ts'
 
 /**
@@ -32,12 +32,9 @@ export default function ShiftCloseDriftNote({ shift, className = '' }: Props) {
     const value = t(key)
     return value && value !== key ? value : fallback
   }
-  // Riel only where it is not zero: most lines are dollars only.
-  const pair = (value: Pair) => {
-    if (!value) return '—'
-    const usd = value.usd == null ? '—' : fmtUSD(value.usd)
-    return value.khr ? `${usd} · ${fmtKHR(value.khr)}` : usd
-  }
+  // Riel first, dollars only when this shift has any (the same rule as the rows above this note).
+  const showUsd = shiftHasUsd(shift)
+  const pair = (value: Pair) => (value ? shiftMoneyText(value, showUsd, fmtUSD, fmtKHR) : '—')
   const moved = (label: string, before: Pair, after: Pair) =>
     JSON.stringify(before) === JSON.stringify(after) ? null : `${label} ${pair(before)} → ${pair(after)}`
   const saleText = (sale: ShiftDriftSaleView) => {

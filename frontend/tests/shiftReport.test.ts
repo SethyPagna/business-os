@@ -5,7 +5,7 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { transformSync } from 'esbuild'
 import type { Shift } from '../src/api/shiftTransport.ts'
 import {
-  shiftCountedPairText,
+  shiftMoneyText,
   shiftComparisonRows,
   shiftFigureRows,
   shiftFiguresOf,
@@ -133,7 +133,8 @@ test('Reports uses authorized selection/detail and shared comparison rows rather
   assert.doesNotMatch(report, /fetchCurrentShift/)
   assert.match(report, /shiftComparisonRows\(shift\)/)
   assert.match(breakdown, /shiftComparisonRows\(\{ reconciliation \}\)/)
-  assert.match(report, /isAdminControlUser\(user\)/, 'cached admin response is gated after permission revocation')
+  assert.match(report, /shiftFiguresForViewer\(receivedShift, user\)/, 'cached admin response is gated after permission revocation, through the one viewer rule')
+  assert.match(fs.readFileSync(new URL('../src/components/shifts/shiftReportModel.ts', import.meta.url), 'utf8'), /if \(!isAdminControlUser\(user\)\) return \{ \.\.\.shift, reconciliation: null, figures: null, close_drift: null \}/, 'and that rule drops the block and the drawer from a non-administrator')
 })
 
 const figures: ShiftFiguresShape = {
@@ -163,8 +164,9 @@ test('registered OPEN and END prefer the report payload and preserve unknown cou
     open: { usd: 10, khr: 40000 },
     end: { usd: null, khr: 81000 },
   })
-  assert.equal(shiftCountedPairText(null, null, String, String), '—')
-  assert.equal(shiftCountedPairText(null, 81000, String, String), '— · 81000')
+  assert.equal(shiftMoneyText({ usd: null, khr: null }, true, String, String), '—')
+  assert.equal(shiftMoneyText({ usd: null, khr: 81000 }, true, String, String), '81000 · —', 'an uncounted half is a dash, riel first')
+  assert.equal(shiftMoneyText({ usd: null, khr: 81000 }, false, String, String), '81000', 'a riel-only shift has no dollar half')
 })
 
 test('business rows exclude drawer counts and keep Credit positive once', () => {
@@ -256,7 +258,7 @@ test('blank closing counts do not disable POS close or print an invented zero dr
   assert.match(gate, /shiftClosingCounts\(countedUsd, countedKhr\)/)
   assert.match(gate, /const endBlocker = closingCountInvalid\(countedUsd\)/)
   assert.doesNotMatch(gate, /const endBlocker = shiftCountPairBlocker\(countedUsd, countedKhr\)/)
-  assert.match(gate, /shiftCountedPairText\(closed\.closing_counted_usd, closed\.closing_counted_khr, fmtUSD, fmtKHR\)/)
+  assert.match(gate, /shiftMoneyText\(\{ usd: closed\.closing_counted_usd, khr: closed\.closing_counted_khr \}, showUsd, fmtUSD, fmtKHR\)/)
   assert.doesNotMatch(gate, /value: money\(closed\.closing_counted_usd/)
 })
 test('a figures block without the cost keys (a reader without View product costs) draws no cost row and keeps everything else', () => {
