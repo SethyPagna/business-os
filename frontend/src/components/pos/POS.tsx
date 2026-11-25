@@ -86,7 +86,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { isCashPaymentMethod, parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 import { posExactRielTender, posRielCashRowIds } from './posRielCash.ts'
-import { CART_FIT_LG_BREAKPOINT_PX, cartProductsMinPx, dragCartWidth, fitCartWidth } from './posCartFit.ts'
+import { CART_FIT_LG_BREAKPOINT_PX, beginCartDrag, cartDragSavedWidth, cartProductsMinPx, dragCartWidth, fitCartWidth, moveCartDrag } from './posCartFit.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import {
@@ -1211,12 +1211,11 @@ export default function POS() {
     document.body.style.userSelect = 'none'
     document.body.style.cursor = 'col-resize'
 
-    let applied = false
+    let session = beginCartDrag(clientX)
     const handleMove = (moveClientX: number) => {
-      const next = clampCartWidth(containerRect.right - moveClientX)
-      if (next === null) return
-      applied = true
-      setCartWidthPx(next)
+      const step = moveCartDrag(session, moveClientX, (x) => clampCartWidth(containerRect.right - x))
+      session = step.session
+      if (step.apply !== null) setCartWidthPx(step.apply)
     }
     const onMouseMove = (event: MouseEvent) => handleMove(event.clientX)
     const onTouchMove = (event: TouchEvent) => {
@@ -1230,17 +1229,14 @@ export default function POS() {
       document.body.style.userSelect = previousUserSelect
       document.body.style.cursor = previousCursor
       setCartResizing(false)
-      if (!applied) return
-      setCartWidthPx((current) => {
-        writePosStorage('local', CART_WIDTH_STORAGE_KEY, String(current))
-        return current
-      })
+      const savedWidth = cartDragSavedWidth(session)
+      if (savedWidth === null) return
+      writePosStorage('local', CART_WIDTH_STORAGE_KEY, String(savedWidth))
     }
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', stop)
     window.addEventListener('touchmove', onTouchMove, { passive: true })
     window.addEventListener('touchend', stop)
-    handleMove(clientX)
   }, [clampCartWidth])
 
   const resetCartWidth = useCallback(() => {

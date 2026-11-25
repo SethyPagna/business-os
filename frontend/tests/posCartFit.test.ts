@@ -5,14 +5,19 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { transformSync } from '../node_modules/esbuild/lib/main.js'
 import {
+  CART_DRAG_THRESHOLD_PX,
   CART_FIT_DIVIDER_PX,
   CART_FIT_FLOOR_PX,
   CART_FIT_LG_BREAKPOINT_PX,
   CART_FIT_PRODUCTS_MIN_LG_PX,
   CART_FIT_PRODUCTS_MIN_MD_PX,
+  beginCartDrag,
+  cartDragSavedWidth,
   cartProductsMinPx,
   dragCartWidth,
+  moveCartDrag,
   fitCartWidth,
 } from '../src/components/pos/posCartFit.ts'
 
@@ -113,8 +118,90 @@ assert.match(clampBody, /dragCartWidth\(mainPanelsRef\.current\.getBoundingClien
 assert.doesNotMatch(clampBody, /PRODUCTS_MIN_PX|- 280/, 'the drag clamp carries no private minimum')
 const dragStart = posSource.indexOf('const startCartResize')
 const drag = posSource.slice(dragStart, posSource.indexOf('const resetCartWidth', dragStart))
-assert.match(drag, /if \(next === null\) return/, 'a drag the fit refuses does not move the divider')
-assert.match(drag, /if \(!applied\) return/, 'a click that moved nothing saves nothing')
-assert.match(drag, /let applied = false/, 'a drag remembers whether it moved the divider')
+assert.match(drag, /if \(step\.apply !== null\) setCartWidthPx\(step\.apply\)/, 'only an applied step moves the divider: a refused or sub-threshold move does not')
+assert.match(drag, /beginCartDrag\(clientX\)/, 'a press opens a drag session')
+assert.match(drag, /moveCartDrag\(session, moveClientX, \(x\) => clampCartWidth\(containerRect\.right - x\)\)/, 'every move goes through the session helper and the drag clamp')
+assert.match(drag, /const savedWidth = cartDragSavedWidth\(session\)\r?\n\s*if \(savedWidth === null\) return/, 'release saves nothing when no move was applied')
+assert.match(drag, /String\(savedWidth\)/, 'release saves exactly the last width the drag showed')
+assert.doesNotMatch(drag, /handleMove\(clientX\)/, 'pressing the divider applies nothing: only a move does')
+assert.doesNotMatch(drag, /setCartWidthPx\(\(current\)/, 'release never saves whatever the width state happens to be')
+
+// The session helper: a press that does not move is a click and changes and saves nothing; only a real drag applies and saves.
+assert.equal(CART_DRAG_THRESHOLD_PX, 3)
+const wide = (x: number) => 1000 - x
+const s0 = beginCartDrag(500)
+assert.equal(cartDragSavedWidth(s0), null, 'a press alone saves nothing')
+let step = moveCartDrag(s0, 500, wide)
+assert.equal(step.apply, null, 'a move of 0 px applies nothing')
+assert.equal(cartDragSavedWidth(step.session), null, 'a click saves nothing')
+step = moveCartDrag(s0, 502, wide)
+assert.equal(step.apply, null, 'a 2 px wobble applies nothing')
+assert.equal(cartDragSavedWidth(step.session), null, 'a 2 px wobble saves nothing')
+step = moveCartDrag(s0, 498, wide)
+assert.equal(step.apply, null, 'a 2 px wobble to the left applies nothing')
+step = moveCartDrag(s0, 503, wide)
+assert.equal(step.apply, 497, 'a 3 px move is a drag and applies the clamp width')
+assert.equal(cartDragSavedWidth(step.session), 497, 'a drag saves the width it showed')
+step = moveCartDrag(step.session, 400, wide)
+assert.equal(step.apply, 600, 'the drag keeps following the pointer')
+assert.equal(cartDragSavedWidth(step.session), 600, 'the saved width is the last shown width')
+step = moveCartDrag(step.session, 500, wide)
+assert.equal(step.apply, 500, 'once a drag, coming back to the press point still applies')
+assert.equal(cartDragSavedWidth(step.session), 500)
+const refused = moveCartDrag(step.session, 300, () => null)
+assert.equal(refused.apply, null, 'a width the fit refuses is not applied')
+assert.equal(cartDragSavedWidth(refused.session), 500, 'a refused move keeps the last shown width as the one to save')
+const neverShown = moveCartDrag(beginCartDrag(500), 100, () => null)
+assert.equal(neverShown.apply, null)
+assert.equal(cartDragSavedWidth(neverShown.session), null, 'a drag the fit always refuses (768 wide) saves nothing')
+
+// The real clampCartWidth and startCartResize from POS.tsx, run against a fake window: click and drag at 853 and 1366 wide.
+const lf = posSource.replace(/\r\n/g, '\n')
+const sStart = lf.indexOf('const startCartResize = useCallback(')
+const sEnd = lf.indexOf('}, [clampCartWidth])', sStart) + '}, [clampCartWidth])'.length
+assert.ok(sStart > 0 && sEnd > sStart, 'startCartResize must be found')
+const cStart = lf.indexOf('const clampCartWidth = useCallback(')
+const cEnd = lf.indexOf('}, [])', cStart) + '}, [])'.length
+assert.ok(cStart > 0 && cEnd > cStart, 'clampCartWidth must be found')
+const js = transformSync(lf.slice(cStart, cEnd) + '\n' + lf.slice(sStart, sEnd) + '\nreturn startCartResize', { loader: 'ts' }).code
+const build = new Function(
+  'useCallback', 'mainPanelsRef', 'window', 'document', 'dragCartWidth', 'cartProductsMinPx', 'CART_FIT_LG_BREAKPOINT_PX', 'CART_WIDTH_MIN_PX',
+  'CART_WIDTH_MAX_PX', 'CART_WIDTH_STORAGE_KEY', 'setCartResizing', 'setCartWidthPx', 'writePosStorage', 'beginCartDrag', 'moveCartDrag',
+  'cartDragSavedWidth', 'viewportProductsMinPx', js,
+) as (...a: unknown[]) => (x: number) => void
+
+function runDrag(viewport: number, rowWidth: number, pressX: number, moves: number[]) {
+  const listeners: Record<string, (e: unknown) => void> = {}
+  const writes: string[] = []
+  const shown: number[] = []
+  const lgQuery = `(min-width: ${CART_FIT_LG_BREAKPOINT_PX}px)`
+  const fakeWindow = {
+    get innerWidth(): number { throw new Error('the drag must read the row and matchMedia, never window.innerWidth') },
+    matchMedia: (q: string) => ({ matches: q === lgQuery && viewport >= CART_FIT_LG_BREAKPOINT_PX }),
+    addEventListener: (n: string, f: (e: unknown) => void) => { listeners[n] = f },
+    removeEventListener: (n: string) => { delete listeners[n] },
+  }
+  const fakeDocument = { body: { style: { userSelect: '', cursor: '' } } }
+  const row = { getBoundingClientRect: () => ({ width: rowWidth, right: rowWidth }) }
+  const start = build(
+    (f: unknown) => f, { current: row }, fakeWindow, fakeDocument, dragCartWidth, cartProductsMinPx, CART_FIT_LG_BREAKPOINT_PX, 300, 860, 'k',
+    () => {}, (v: unknown) => { if (typeof v === 'number') shown.push(v) }, (_a: string, _k: string, v: string) => { writes.push(v) },
+    beginCartDrag, moveCartDrag, cartDragSavedWidth, undefined,
+  )
+  start(pressX)
+  for (const x of moves) listeners.mousemove({ clientX: x })
+  listeners.mouseup({})
+  return { writes, shown }
+}
+for (const rowWidth of [853, 1366]) {
+  const press = rowWidth - 400
+  assert.deepEqual(runDrag(rowWidth, rowWidth, press, []), { writes: [], shown: [] }, `${rowWidth}: a click on the divider changes and saves nothing`)
+  assert.deepEqual(runDrag(rowWidth, rowWidth, press, [press - 2]), { writes: [], shown: [] }, `${rowWidth}: a 2 px wobble changes and saves nothing`)
+  const dragged = runDrag(rowWidth, rowWidth, press, [press - 20, press - 50])
+  assert.equal(dragged.writes.length, 1, `${rowWidth}: a real drag saves once`)
+  assert.equal(dragged.writes[0], String(dragged.shown[dragged.shown.length - 1]), `${rowWidth}: the saved width is the shown width`)
+  assert.equal(dragged.shown[dragged.shown.length - 1], 450)
+}
+assert.deepEqual(runDrag(768, 548, 148, [128, 100]), { writes: [], shown: [] }, '768 wide (row 548): the fit refuses every width, nothing moves, nothing saves')
 
 console.log('posCartFit tests passed')
