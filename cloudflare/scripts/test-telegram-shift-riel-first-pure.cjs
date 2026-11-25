@@ -156,4 +156,38 @@ const rowOf = (rows, label) => rows.find((row) => row.startsWith(`· ${label}:`)
   for (const key of ['cash_sales', 'refunds', 'expenses', 'courier', 'expected', 'counted', 'difference']) check(`shiftHasUsdCash: a dollar ${key} makes it a dollar shift`, telegram.shiftHasUsdCash(base, recon({ [key]: pair(0.5, 0) })))
 }
 
+// ---- 7. Expenses follow the same per-shift rule as the Cash count rows (riel first, dollar half on every row or on none) ------------
+{
+  const sectionRows = (text, name) => {
+    const rows = text.split('\n')
+    const start = rows.findIndex((row) => row === `=====${name}=====`)
+    assert.ok(start >= 0, `the message has an ${name} section\n` + text)
+    const rest = rows.slice(start + 1)
+    const end = rest.findIndex((row) => /^=+.*=+$/.test(row))
+    return end < 0 ? rest : rest.slice(0, end)
+  }
+  const ice = (usd, khr) => ({ otherExpenseUsd: usd, otherExpenseKhr: khr, expenseDetails: [{ label: 'Ice', usd, khr }] })
+
+  const dollars = report(shiftOf({ closing_counted_usd: 5 }), figuresOf(ice(2, 8000)))
+  const dollarRows = sectionRows(dollars, 'Expenses')
+  check('a dollar shift with a $2 + 8,000៛ expense: the row reads riel first, then dollars', rowOf(dollarRows, 'Ice') === '· Ice: 8,000៛ · $2.00', dollarRows.join('\n'))
+  check('a dollar shift with a $2 + 8,000៛ expense: the total reads riel first, then dollars', rowOf(dollarRows, 'Total') === '· Total: 8,000៛ · $2.00', dollarRows.join('\n'))
+  check('the Closing cash row of the same shift is the same shape', rowOf(cashRows(dollars), 'Closing cash') === '· Closing cash: 240,000៛ · $5.00', cashRows(dollars).join('\n'))
+
+  const rielExpense = report(shiftOf({ closing_counted_usd: 5 }), figuresOf(ice(0, 8000)))
+  const rielExpenseRows = sectionRows(rielExpense, 'Expenses')
+  check('a dollar shift with a riel-only expense: the row keeps its dollar half (per shift, not per line), as the Cash count rows do', rowOf(rielExpenseRows, 'Ice') === '· Ice: 8,000៛ · $0.00' && rowOf(rielExpenseRows, 'Total') === '· Total: 8,000៛ · $0.00' && rowOf(cashRows(rielExpense), 'Opening cash') === '· Opening cash: 100,000៛ · $0.00', rielExpenseRows.join('\n'))
+
+  const rielOnly = report(shiftOf({}), figuresOf(ice(0, 8000)))
+  const rielOnlyRows = sectionRows(rielOnly, 'Expenses')
+  check('a riel-only shift with a riel expense: the row and the total print the riel alone', rowOf(rielOnlyRows, 'Ice') === '· Ice: 8,000៛' && rowOf(rielOnlyRows, 'Total') === '· Total: 8,000៛', rielOnlyRows.join('\n'))
+  check('a riel-only shift: no "$" anywhere in the Expenses section', !rielOnlyRows.join('\n').includes('$'), rielOnlyRows.join('\n'))
+
+  const delivery = sectionRows(report(shiftOf({ closing_counted_usd: 5 }), figuresOf({ ...ice(2, 8000), deliveryCostUsd: 1, deliveryCostRecorded: 1 })), 'Expenses')
+  check('the delivery cost row and the total follow the same rule', rowOf(delivery, 'Actual delivery cost') === '· Actual delivery cost: 0៛ · $1.00' && rowOf(delivery, 'Total') === '· Total: 8,000៛ · $3.00', delivery.join('\n'))
+  const noDetails = sectionRows(report(shiftOf({ closing_counted_usd: 5 }), figuresOf({ otherExpenseUsd: 0, otherExpenseKhr: 8000 })), 'Expenses')
+  check('with no per-expense rows the single other-expenses row follows the same rule', noDetails.length === 2 && noDetails.every((row) => /^· [^:]+: 8,000៛ · \$0\.00$/.test(row)), noDetails.join('\n'))
+  check('dollars are never first on an Expenses row', ![dollarRows, rielExpenseRows, delivery].some((rows) => rows.some((row) => /^· [^:]+: [+−]?\$/.test(row))))
+}
+
 console.log(`PASS ${passed} Telegram riel-first checks`)
