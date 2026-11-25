@@ -86,7 +86,7 @@ import { normalizePriceValue } from '../../utils/pricing.ts'
 import { cashierCollectKhr, cashierChangeKhr } from '../../utils/rielRounding.ts'
 import { isCashPaymentMethod, parsePaymentMethodKinds } from '../../utils/paymentMethodKind.ts'
 import { posExactRielTender, posRielCashRowIds } from './posRielCash.ts'
-import { CART_FIT_LG_BREAKPOINT_PX, beginCartDrag, cartDragSavedWidth, cartProductsMinPx, dragCartWidth, fitCartWidth, moveCartDrag } from './posCartFit.ts'
+import { beginCartDrag, cartDragSavedWidth, cartProductsMinPx, dragCartWidth, fitCartWidth, measurePanelsRow, moveCartDrag, viewportProductsMinPx } from './posCartFit.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import {
@@ -1184,9 +1184,8 @@ export default function POS() {
     const row = mainPanelsRef.current
     if (!row) return
     const measure = () => {
-      const productsMinPx = cartProductsMinPx(window.matchMedia(`(min-width: ${CART_FIT_LG_BREAKPOINT_PX}px)`).matches)
-      const rowPx = row.getBoundingClientRect().width
-      setPanelsRowFit((prev) => (prev.rowPx === rowPx && prev.productsMinPx === productsMinPx ? prev : { rowPx, productsMinPx }))
+      const next = measurePanelsRow(row, (q) => window.matchMedia(q))
+      setPanelsRowFit((prev) => (prev.rowPx === next.rowPx && prev.productsMinPx === next.productsMinPx ? prev : next))
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -1198,7 +1197,7 @@ export default function POS() {
   useBottomActionBar({ visible: isActive && (isDesktopViewport || mobileView === 'cart'), actionRef: completeSaleRef })
   const clampCartWidth = useCallback((px: number) => {
     if (!mainPanelsRef.current) return Math.min(CART_WIDTH_MAX_PX, Math.max(CART_WIDTH_MIN_PX, px))
-    const productsMinPx = cartProductsMinPx(window.matchMedia(`(min-width: ${CART_FIT_LG_BREAKPOINT_PX}px)`).matches)
+    const productsMinPx = viewportProductsMinPx((q) => window.matchMedia(q))
     return dragCartWidth(mainPanelsRef.current.getBoundingClientRect().width, px, productsMinPx, CART_WIDTH_MIN_PX, CART_WIDTH_MAX_PX)
   }, [])
 
