@@ -75,3 +75,15 @@ export function cartDragSavedWidth(session: CartDragSession): number | null {
   return session.widthPx
 }
 
+/** The one place the products column's minimum is chosen from the viewport; the render measure and the drag clamp both call it. */
+export function viewportProductsMinPx(matchMedia: (query: string) => { matches: boolean }): number {
+  return cartProductsMinPx(matchMedia(`(min-width: ${CART_FIT_LG_BREAKPOINT_PX}px)`).matches)
+}
+
+/** What the render fit needs from the panels row: its own width and the products minimum for this viewport. */
+export function measurePanelsRow(
+  row: { getBoundingClientRect(): { width: number } },
+  matchMedia: (query: string) => { matches: boolean },
+): { rowPx: number; productsMinPx: number } {
+  return { rowPx: row.getBoundingClientRect().width, productsMinPx: viewportProductsMinPx(matchMedia) }
+}

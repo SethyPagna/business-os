@@ -19,6 +19,8 @@ import {
   dragCartWidth,
   moveCartDrag,
   fitCartWidth,
+  measurePanelsRow,
+  viewportProductsMinPx,
 } from '../src/components/pos/posCartFit.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -63,7 +65,8 @@ assert.ok(productsClass, 'products column keeps its md/lg min-width classes')
 assert.equal(Number(productsClass[1]) * 16, CART_FIT_PRODUCTS_MIN_MD_PX, 'md minimum matches the CSS')
 assert.equal(Number(productsClass[2]) * 16, CART_FIT_PRODUCTS_MIN_LG_PX, 'lg minimum matches the CSS')
 assert.match(posSource, /relative w-2 flex-shrink-0 cursor-col-resize/, 'divider is w-2 = 8 px')
-assert.match(posSource, /matchMedia\(`\(min-width: \$\{CART_FIT_LG_BREAKPOINT_PX\}px\)`\)\.matches/, 'POS reads the lg breakpoint from the named export')
+assert.doesNotMatch(posSource, /matchMedia\(`/, 'POS builds no media query of its own: viewportProductsMinPx owns the lg query')
+assert.doesNotMatch(posSource, /CART_FIT_LG_BREAKPOINT_PX/, 'POS names no breakpoint')
 assert.doesNotMatch(posSource, /\? 352 : 288/, 'POS carries no private copy of the minimums')
 
 const stylePos = posSource.indexOf('ref={cartPanelRef}')
@@ -82,7 +85,8 @@ assert.doesNotMatch(effect, /writePosStorage|localStorage|setItem/, 'measuring n
 assert.match(effect, /new ResizeObserver\(measure\)/, 'the row is watched with a ResizeObserver')
 assert.match(effect, /observer\.observe\(row\)/, 'the row is actually observed')
 assert.match(effect, /\r?\n\s*measure\(\)\r?\n/, 'the row is measured once on mount')
-assert.match(effect, /cartProductsMinPx\(/, 'measure takes the products minimum from the shared helper')
+assert.match(effect, /const next = measurePanelsRow\(row, \(q\) => window\.matchMedia\(q\)\)/, 'the measure reads the row and the viewport through the one helper')
+assert.doesNotMatch(effect, /innerWidth|cartProductsMinPx|getBoundingClientRect/, 'the measure carries no width or minimum of its own')
 assert.doesNotMatch(posSource, /setCartWidthPx\(\(current\) => clampCartWidth\(current\)\)/, 'a window resize no longer overwrites the stored width state with a clamped one')
 
 const groupPos = posSource.indexOf('<ShiftHistoryPanel branchId={primaryBranchFilterId}')
@@ -113,7 +117,7 @@ assert.equal(dragCartWidth(3000, 5000, 352, 300, 860), 860, 'a drag never passes
 const clampStart = posSource.indexOf('const clampCartWidth')
 const clampBody = posSource.slice(clampStart, posSource.indexOf('const startCartResize', clampStart))
 assert.match(clampBody, /dragCartWidth\(/, 'the drag clamp is the shared fit')
-assert.match(clampBody, /cartProductsMinPx\(/, 'the drag clamp uses the shared products minimum')
+assert.match(clampBody, /const productsMinPx = viewportProductsMinPx\(\(q\) => window\.matchMedia\(q\)\)/, 'the drag clamp takes the products minimum from the same helper as the measure')
 assert.match(clampBody, /dragCartWidth\(mainPanelsRef\.current\.getBoundingClientRect\(\)\.width, px, productsMinPx, CART_WIDTH_MIN_PX, CART_WIDTH_MAX_PX\)/, 'the clamp passes the shared products minimum and the cart limits')
 assert.doesNotMatch(clampBody, /PRODUCTS_MIN_PX|- 280/, 'the drag clamp carries no private minimum')
 const dragStart = posSource.indexOf('const startCartResize')
@@ -186,7 +190,7 @@ function runDrag(viewport: number, rowWidth: number, pressX: number, moves: numb
   const start = build(
     (f: unknown) => f, { current: row }, fakeWindow, fakeDocument, dragCartWidth, cartProductsMinPx, CART_FIT_LG_BREAKPOINT_PX, 300, 860, 'k',
     () => {}, (v: unknown) => { if (typeof v === 'number') shown.push(v) }, (_a: string, _k: string, v: string) => { writes.push(v) },
-    beginCartDrag, moveCartDrag, cartDragSavedWidth, undefined,
+    beginCartDrag, moveCartDrag, cartDragSavedWidth, viewportProductsMinPx,
   )
   start(pressX)
   for (const x of moves) listeners.mousemove({ clientX: x })
@@ -203,5 +207,43 @@ for (const rowWidth of [853, 1366]) {
   assert.equal(dragged.shown[dragged.shown.length - 1], 450)
 }
 assert.deepEqual(runDrag(768, 548, 148, [128, 100]), { writes: [], shown: [] }, '768 wide (row 548): the fit refuses every width, nothing moves, nothing saves')
+
+
+// One helper chooses the products minimum from the viewport; the render measure and the drag clamp both call it.
+const lgQ = `(min-width: ${CART_FIT_LG_BREAKPOINT_PX}px)`
+const mm = (viewport: number) => (q: string) => ({ matches: q === lgQ && viewport >= CART_FIT_LG_BREAKPOINT_PX })
+assert.equal(viewportProductsMinPx(mm(1023)), 288, 'below lg the products column needs 288')
+assert.equal(viewportProductsMinPx(mm(1024)), 352, 'from lg it needs 352')
+assert.equal(viewportProductsMinPx(mm(1366)), 352)
+assert.equal(viewportProductsMinPx(mm(768)), 288)
+const fakeRow = (width: number) => ({ getBoundingClientRect: () => ({ width }) })
+assert.deepEqual(measurePanelsRow(fakeRow(1060), mm(1280)), { rowPx: 1060, productsMinPx: 352 }, 'at 1280 the row is 1060 and the minimum 352')
+assert.deepEqual(measurePanelsRow(fakeRow(548), mm(768)), { rowPx: 548, productsMinPx: 288 })
+
+// The real measure from POS.tsx, run against a fake window whose innerWidth is poisoned: it reads the row and matchMedia only.
+const mStart = lf.indexOf('const measure = () => {')
+const mEnd = lf.indexOf('\n    measure()', mStart)
+assert.ok(mStart > 0 && mEnd > mStart, 'measure must be found')
+const measureJs = transformSync(lf.slice(mStart, mEnd) + '\nreturn measure', { loader: 'ts' }).code
+const buildMeasure = new Function('row', 'window', 'setPanelsRowFit', 'measurePanelsRow', measureJs) as (...a: unknown[]) => () => void
+function runMeasure(viewport: number, rowWidth: number) {
+  let current: { rowPx: number; productsMinPx: number } = { rowPx: 0, productsMinPx: 288 }
+  const fakeWindow = {
+    get innerWidth(): number { throw new Error('the measure must read the row and matchMedia, never window.innerWidth') },
+    matchMedia: mm(viewport),
+  }
+  const setter = (f: (prev: typeof current) => typeof current) => { current = f(current) }
+  buildMeasure(fakeRow(rowWidth), fakeWindow, setter, measurePanelsRow)()
+  return current
+}
+assert.deepEqual(runMeasure(1280, 1060), { rowPx: 1060, productsMinPx: 352 }, 'POS measure at 1280, row 1060: the lg minimum')
+assert.deepEqual(runMeasure(1023, 900), { rowPx: 900, productsMinPx: 288 }, 'POS measure at 1023: the md minimum')
+assert.deepEqual(runMeasure(853, 853), { rowPx: 853, productsMinPx: 288 })
+assert.equal(fitCartWidth(1060, 860, runMeasure(1280, 1060).productsMinPx), 700, 'the cart leaves the lg products column its 352 at 1280 with stored 860')
+
+// And the drag clamp at lg uses the same minimum: at 1280 (row 1060) a wish of 860 is held to 700, not to the md 764.
+const lgDrag = runDrag(1280, 1060, 200, [190, 100])
+assert.equal(lgDrag.shown[lgDrag.shown.length - 1], 700, 'the drag clamp at lg holds the products column its 352')
+assert.equal(lgDrag.writes[0], '700')
 
 console.log('posCartFit tests passed')
