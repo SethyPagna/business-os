@@ -1622,20 +1622,21 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     return { deliveryCost: derived.delivery_cost, otherExpenses: derived.other_expenses }
   })()
   const expenseRows: string[] = []
-  if (split.deliveryCost.usd || split.deliveryCost.khr) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}:`, [money(split.deliveryCost.usd, split.deliveryCost.khr)]))
+  if (split.deliveryCost.usd || split.deliveryCost.khr) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}:`, [registeredMoney(split.deliveryCost.usd, split.deliveryCost.khr, showUsd)]))
   const details = figures.expenseDetails || []
   if (details.length) {
-    for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}:`, [money(detail.usd, detail.khr)]))
+    for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}:`, [registeredMoney(detail.usd, detail.khr, showUsd)]))
   } else if (split.otherExpenses.usd || split.otherExpenses.khr) {
     // A caller that has the total but no per-expense rows still shows where
     // the money is, under the same word the day summary uses for it.
-    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}:`, [money(split.otherExpenses.usd, split.otherExpenses.khr)]))
+    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}:`, [registeredMoney(split.otherExpenses.usd, split.otherExpenses.khr, showUsd)]))
   }
   lines.push(sectionHeader('expenses', SHIFT_SECTION_EDGE))
   lines.push(...(expenseRows.length
-    ? [...expenseRows, labeled('total', money(
+    ? [...expenseRows, labeled('total', registeredMoney(
       round2(split.deliveryCost.usd + split.otherExpenses.usd),
       split.deliveryCost.khr + split.otherExpenses.khr,
+      showUsd,
     ))]
     : [EMPTY_SECTION]))
 
