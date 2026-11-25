@@ -190,4 +190,30 @@ const rowOf = (rows, label) => rows.find((row) => row.startsWith(`· ${label}:`)
   check('dollars are never first on an Expenses row', ![dollarRows, rielExpenseRows, delivery].some((rows) => rows.some((row) => /^· [^:]+: [+−]?\$/.test(row))))
 }
 
+// ---- 8. the dollar decision reads the Expenses figures it prints, as the screen's does (shiftReportModel.ts shiftHasUsd) -----------------
+{
+  const sectionRows = (text) => {
+    const rows = text.split('\n')
+    const start = rows.findIndex((row) => row === '=====Expenses=====')
+    assert.ok(start >= 0, 'the message has an Expenses section\n' + text)
+    return rows.slice(start + 1)
+  }
+  const none = { usd: 0, khr: 0 }
+  // The drawer (otherExpense*, the courier) holds no dollar; the printed split and rows carry one: a stored close read after a fee edit.
+  const drawerFree = { otherExpenseUsd: 0, otherExpenseKhr: 8000, deliveryCostUsd: 0, deliveryCostRecorded: 0 }
+
+  const detailOnly = sectionRows(report(shiftOf({}), figuresOf({ ...drawerFree, expenseDetails: [{ label: 'Ice', usd: 1, khr: 0 }], expenseSplit: { deliveryCost: none, otherExpenses: { usd: 0, khr: 8000 } } })))
+  check('a dollar-free drawer with an expense row carrying $1: the row reads 0៛ · $1.00 as on the screen', rowOf(detailOnly, 'Ice') === '· Ice: 0៛ · $1.00', detailOnly.join('\n'))
+  check('...and the total keeps the same shape (per shift, not per line)', rowOf(detailOnly, 'Total') === '· Total: 8,000៛ · $0.00', detailOnly.join('\n'))
+
+  const splitOnly = sectionRows(report(shiftOf({}), figuresOf({ ...drawerFree, expenseDetails: [{ label: 'Ice', usd: 0, khr: 8000 }], expenseSplit: { deliveryCost: { usd: 1, khr: 0 }, otherExpenses: { usd: 0, khr: 8000 } } })))
+  check('a dollar-free drawer whose delivery cost split carries $1: every Expenses row prints the dollar half', rowOf(splitOnly, 'Actual delivery cost') === '· Actual delivery cost: 0៛ · $1.00' && rowOf(splitOnly, 'Ice') === '· Ice: 8,000៛ · $0.00' && rowOf(splitOnly, 'Total') === '· Total: 8,000៛ · $1.00', splitOnly.join('\n'))
+
+  const otherSplit = sectionRows(report(shiftOf({}), figuresOf({ ...drawerFree, expenseDetails: [], expenseSplit: { deliveryCost: none, otherExpenses: { usd: 1, khr: 8000 } } })))
+  check('a dollar-free drawer whose other-expenses split carries $1: the single row prints the dollar half', rowOf(otherSplit, 'Other expenses') === '· Other expenses: 8,000៛ · $1.00', otherSplit.join('\n'))
+
+  const quiet = sectionRows(report(shiftOf({}), figuresOf({ ...drawerFree, expenseDetails: [{ label: 'Ice', usd: 0, khr: 8000 }], expenseSplit: { deliveryCost: none, otherExpenses: { usd: 0, khr: 8000 } } })))
+  check('CONTROL: the same rows with no dollar anywhere stay riel alone', rowOf(quiet, 'Ice') === '· Ice: 8,000៛' && !quiet.join('\n').includes('$'), quiet.join('\n'))
+}
+
 console.log(`PASS ${passed} Telegram riel-first checks`)
