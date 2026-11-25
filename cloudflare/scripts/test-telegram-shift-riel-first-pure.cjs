@@ -216,4 +216,16 @@ const rowOf = (rows, label) => rows.find((row) => row.startsWith(`· ${label}:`)
   check('CONTROL: the same rows with no dollar anywhere stay riel alone', rowOf(quiet, 'Ice') === '· Ice: 8,000៛' && !quiet.join('\n').includes('$'), quiet.join('\n'))
 }
 
+// ---- 9. per shift, never per line: a riel-only delivery cost on a dollar shift keeps its dollar half --------------------------------
+{
+  const rows = report(shiftOf({ closing_counted_usd: 5 }), figuresOf({
+    otherExpenseUsd: 0, otherExpenseKhr: 0, expenseDetails: [], deliveryCostUsd: 0, deliveryCostRecorded: 1,
+    expenseSplit: { deliveryCost: { usd: 0, khr: 4100 }, otherExpenses: { usd: 0, khr: 0 } },
+  })).split('\n')
+  // a row too wide for a phone continues on the hanging indent: join it back to its label
+  const expenses = rows.slice(rows.findIndex((row) => row === '=====Expenses=====') + 1).join('\n').replace(/:\n\s+/g, ': ').split('\n')
+  check('a dollar shift with a riel-only delivery cost: the row reads 4,100៛ · $0.00, not the riel alone', rowOf(expenses, 'Actual delivery cost') === '· Actual delivery cost: 4,100៛ · $0.00', expenses.join('\n'))
+  check('...and the total keeps the dollar half too', rowOf(expenses, 'Total') === '· Total: 4,100៛ · $0.00', expenses.join('\n'))
+}
+
 console.log(`PASS ${passed} Telegram riel-first checks`)
