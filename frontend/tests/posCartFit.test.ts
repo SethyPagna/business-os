@@ -103,6 +103,33 @@ const tabsTag = posSource.slice(rowStart, groupStart)
 assert.match(tabsTag, /flex min-w-\[7rem\] flex-1 items-center gap-1 px-2 py-1\.5 overflow-x-auto/, 'order tabs keep a 7rem floor, flex-1 and scroll: a shift button wraps to the next line when tabs plus buttons do not fit')
 assert.doesNotMatch(tabsTag, /whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer[^]*truncate/, 'no label is hidden')
 
+// F1 pins read the real class lists exactly: a class added to the row, the tab strip, the group or a shift button changes the layout.
+const classOf = (src: string, from: number) => {
+  const found = src.slice(from).match(/className="([^"]*)"/)
+  assert.ok(found, 'a className must follow')
+  return found[1]
+}
+const shiftGateSource = fs.readFileSync(path.join(here, '../src/components/pos/ShiftGate.tsx'), 'utf8')
+const shiftPanelSource = fs.readFileSync(path.join(here, '../src/components/shifts/ShiftHistoryPanel.tsx'), 'utf8')
+const rowClass = classOf(posSource, rowStart)
+const tabsClass = classOf(posSource, posSource.indexOf('>', rowStart))
+const groupClass = classOf(groupTag, 0)
+const endClass = classOf(shiftGateSource, shiftGateSource.indexOf('onClick={beginClose}'))
+const amberClass = classOf(shiftGateSource, shiftGateSource.indexOf('onClick={beginCarryOverClose}'))
+assert.equal(rowClass, 'flex-shrink-0 flex flex-wrap justify-end gap-x-1 w-full min-w-0 items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900', 'the top row wraps at every width')
+assert.equal(tabsClass, 'flex min-w-[7rem] flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x', 'the order tabs keep their floor, flex-1 and scroll at every width')
+assert.equal(groupClass, 'contents [&>*]:my-1.5 [&>*:last-child]:mr-1', 'the shift group is not a box')
+assert.equal(endClass, 'rounded border px-3 py-1.5 text-sm font-medium', 'End shift button')
+assert.equal(amberClass, 'whitespace-nowrap rounded border border-amber-500 px-3 py-1.5 text-sm font-medium leading-relaxed text-amber-700 dark:border-amber-400 dark:text-amber-200', 'amber earlier-day button')
+assert.ok(shiftPanelSource.includes("buttonClassName={compact ? 'btn-secondary min-h-11 px-3 text-xs' : undefined}"), 'the Shift button class')
+const hiding = /(^|:)(truncate|overflow-hidden|overflow-clip|text-ellipsis|flex-nowrap|min-w-0|max-w-.*|w-.*)$/
+for (const [name, cls] of [['group', groupClass], ['End shift', endClass], ['amber earlier-day', amberClass]] as const) {
+  for (const token of cls.split(' ')) assert.ok(!hiding.test(token), `${name} button or group: ${token} can clip or hide a label`)
+}
+for (const token of rowClass.split(' ').filter((x) => x.includes(':') && !x.startsWith('dark:'))) assert.fail(`the top row carries a breakpoint class (${token}): its wrap must not change by width`)
+for (const token of tabsClass.split(' ').filter((x) => x.includes(':'))) assert.fail(`the order tabs carry a breakpoint class (${token}): their floor must not change by width`)
+assert.doesNotMatch(tabsTag, /truncate|overflow-hidden|text-ellipsis|max-w-/, 'no order tab label is hidden')
+
 // Dragging uses the SAME fit as the render, so the divider follows the pointer and the saved width is the one shown.
 assert.equal(dragCartWidth(1146, 700, 352, 300, 860), 700, 'a wide row follows the pointer')
 assert.equal(dragCartWidth(1146, 900, 352, 300, 860), 786, 'held at row - divider - lg products minimum')
