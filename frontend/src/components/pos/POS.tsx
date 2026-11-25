@@ -3868,9 +3868,11 @@ export default function POS() {
               the row overflows, `ml-auto` stops pushing anything, and that
               group is carried off the right edge -- on a phone the controls
               were reachable only by swiping the tab strip sideways. The
-              scroller now holds only the order tabs; the group is its own
-              non-scrolling cell pinned beside it. */}
-          <div className="flex-shrink-0 flex flex-wrap w-full min-w-0 items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+              scroller now holds only the order tabs; the shift buttons are its
+              siblings in one wrapping row (the group is display: contents), so
+              a third button drops alone to a second line right-aligned instead
+              of the whole group wrapping into a third. */}
+          <div className="flex-shrink-0 flex flex-wrap justify-end gap-x-1 w-full min-w-0 items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
           <div className="flex min-w-[7rem] flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x">
             {orders.map((order, orderIndex) => (
               <div key={order.id} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer
@@ -3905,7 +3907,7 @@ export default function POS() {
               close, and for shift-exempt administrators. End Shift remains
               the current-day compatible action and appears only while the
               current row can actually be closed. */}
-          <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1 px-2 py-1.5 pl-0">
+          <div className="contents [&>*]:my-1.5 [&>*:last-child]:mr-1">
             <ShiftHistoryPanel branchId={primaryBranchFilterId} compact label={t('shift_code')} />
             <EndShiftButton branchId={primaryBranchFilterId} />
           </div>

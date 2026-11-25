@@ -262,7 +262,7 @@ runTest('POS shift controls sit beside the order-tab scroller, not inside it', (
   const outer = classNear(source, '<div className="flex min-w-[7rem] flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x">')
   assert.doesNotMatch(outer, /overflow-x-auto/, 'the outer row must not scroll')
   assert.ok(
-    rowIsBounded(outer, ['flex min-w-[7rem] flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x', 'ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1 px-2 py-1.5 pl-0']),
+    rowIsBounded(outer, ['flex min-w-[7rem] flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x', 'contents [&>*]:my-1.5 [&>*:last-child]:mr-1']),
     `unbounded outer row: ${outer}`,
   )
 })
