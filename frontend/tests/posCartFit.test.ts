@@ -83,15 +83,15 @@ assert.doesNotMatch(posSource, /setCartWidthPx\(\(current\) => clampCartWidth\(c
 const groupPos = posSource.indexOf('<ShiftHistoryPanel branchId={primaryBranchFilterId}')
 const groupStart = posSource.lastIndexOf('<div', groupPos)
 const groupTag = posSource.slice(groupStart, groupPos)
-assert.match(groupTag, /shrink-0/, 'shift group keeps shrink-0: it never leaves the cart box and wraps its own buttons last')
-assert.match(groupTag, /ml-auto/, 'shift group keeps ml-auto: it never leaves the cart box and wraps its own buttons last')
-assert.match(groupTag, /max-w-full/, 'shift group keeps max-w-full: it never leaves the cart box and wraps its own buttons last')
-assert.match(groupTag, /flex-wrap/, 'shift group keeps flex-wrap: it never leaves the cart box and wraps its own buttons last')
-assert.match(groupTag, /justify-end/, 'shift group keeps justify-end: it never leaves the cart box and wraps its own buttons last')
-const rowStart = posSource.lastIndexOf('<div className="flex-shrink-0 flex flex-wrap w-full min-w-0 items-center border-b', groupStart)
-assert.ok(rowStart > 0, 'top row must be found')
+const groupClasses = (groupTag.match(/className="([^"]*)"/)?.[1] ?? '').split(' ')
+assert.ok(groupClasses.includes('contents'), 'the shift group is display: contents, so its buttons are siblings of the order tabs in the one wrapping row')
+for (const gone of ['ml-auto', 'shrink-0', 'max-w-full', 'flex', 'flex-wrap', 'overflow-hidden']) {
+  assert.ok(!groupClasses.includes(gone), `the shift group is not a box (${gone}): a box wraps its buttons into a third line`)
+}
+const rowStart = posSource.lastIndexOf('<div className="flex-shrink-0 flex flex-wrap justify-end gap-x-1 w-full min-w-0 items-center border-b', groupStart)
+assert.ok(rowStart > 0, 'top row must be found: wrapping, right-aligned, with a 4 px column gap')
 const tabsTag = posSource.slice(rowStart, groupStart)
-assert.match(tabsTag, /flex min-w-\[7rem\] flex-1 items-center gap-1 px-2 py-1\.5 overflow-x-auto/, 'order tabs keep a 7rem floor, flex-1 and scroll: the group drops to its own line when tabs plus group do not fit')
+assert.match(tabsTag, /flex min-w-\[7rem\] flex-1 items-center gap-1 px-2 py-1\.5 overflow-x-auto/, 'order tabs keep a 7rem floor, flex-1 and scroll: a shift button wraps to the next line when tabs plus buttons do not fit')
 assert.doesNotMatch(tabsTag, /whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer[^]*truncate/, 'no label is hidden')
 
 // Dragging uses the SAME fit as the render, so the divider follows the pointer and the saved width is the one shown.
