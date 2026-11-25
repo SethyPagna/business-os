@@ -385,24 +385,11 @@ const figuresWithoutLateFacts = (json) => {
 const OLD_CASH_USED_LABEL = 'Additional change used/ប្រាក់អាប់បន្ថែមដែលបានប្រើ'
 const NEW_CASH_USED_LABEL = 'Cash used/សាច់ប្រាក់បានប្រើ'
 const baseLabelRenamed = (text) => String(text).split(OLD_CASH_USED_LABEL).join(NEW_CASH_USED_LABEL)
-// 6.0.3070 (owner A72 + Q3b) put the Cash count rows riel first, and the dollar half only when the shift has any dollar figure. The base commit prints dollars first on every
-// pair row, so the BASE side's Cash count section is mapped by that one rule (money order only, nothing else) before it is compared: each "$A · B៛" row becomes "B៛ · $A", and
-// the dollar half is dropped when no row of the section holds a non-zero dollar. The lane's own text is never mapped; it is pinned riel-first by its own check below.
-const MONEY_PAIR_ROW = /^(.*: )([+−-]?\$\d[\d,.]*|N\/A) · ([+−-]?\d[\d,]*៛|N\/A)$/
-const baseMoneyRielFirst = (text) => {
-  const rows = String(text).split(String.fromCharCode(10))
-  const start = rows.findIndex((row) => row.includes('Cash count/'))
-  if (start < 0) return String(text)
-  let end = rows.length
-  for (let index = start + 1; index < rows.length; index += 1) if (/^=+[^=]/.test(rows[index])) { end = index; break }
-  const parsed = rows.slice(start + 1, end).map((row) => MONEY_PAIR_ROW.exec(row))
-  const anyDollar = parsed.some((match) => match && /\d/.test(match[2]) && Number(match[2].replace(/[^0-9.]/g, '')) !== 0)
-  for (let index = start + 1; index < end; index += 1) {
-    const match = parsed[index - start - 1]
-    if (match) rows[index] = anyDollar ? `${match[1]}${match[3]} · ${match[2]}` : `${match[1]}${match[3]}`
-  }
-  return rows.join(String.fromCharCode(10))
-}
+// 6.0.3070 (owner A72 + Q3b) put the Cash count rows riel first, and 6.0.3090 the shift report's Expenses rows, the dollar half only when the SHIFT has any dollar figure. The base
+// commit prints dollars first on every pair row, so the BASE side's Cash count section and the Expenses section of its shift report message are mapped by that one rule (money
+// order and the per-shift dollar half, nothing else) before they are compared: each "$A · B៛", "$A", "B៛" or "$0.00" becomes "B៛ · $A" when the message has any dollar, else "B៛".
+// The lane's own text is never mapped; it is pinned riel-first by its own check below. The mapping lives in harness/shift_base_text_map.cjs, proven by test-shift-close-base-text-map-pure.cjs.
+const { baseMoneyRielFirst } = require('./harness/shift_base_text_map.cjs')
 const NL = String.fromCharCode(10)
 const CLOSED_LATE_ROW = new RegExp('Closed late|បិទយឺត')
 // Rows start with the bullet "· ". The close-time row is "· Close/បិទ: <date time>".
@@ -465,10 +452,11 @@ async function main() {
     assert.ok(lane.some(({ newRun }) => newRun.telegram.some((text) => text.includes(NEW_CASH_USED_LABEL))), 'a lane report holds the new Cash used pair')
   })
 
-  await check('THE MONEY ORDER (A72 + Q3b, 6.0.3070): the lane\'s queued report prints every Cash count pair riel first, and the dollar half on all of a shift\'s rows or on none', () => {
+  await check('THE MONEY ORDER (A72 + Q3b, 6.0.3070 + 6.0.3090): the lane\'s queued report prints every Cash count and Expenses pair riel first, and the dollar half on all of a shift\'s rows or on none', () => {
     const lane = runs.filter(({ scenario }) => scenario.telegramOn !== false)
     assert.ok(lane.length > 0, 'a scenario sent a report')
     let pairRows = 0
+    let expensePairRows = 0
     for (const { scenario, newRun } of lane) {
       for (const text of newRun.telegram) {
         const rows = text.split(NL)
@@ -477,13 +465,26 @@ async function main() {
         let end = rows.length
         for (let index = start + 1; index < rows.length; index += 1) if (/^=+[^=]/.test(rows[index])) { end = index; break }
         const pairs = rows.slice(start + 1, end).filter((row) => /៛/.test(row) && !/^\W*Cash review/.test(row))
+        // 6.0.3090: the shift report's Expenses rows (the delivery cost's value may sit alone on its hanging-indent row) are pair rows of the same message, so ONE dollar decision covers them.
+        if (rows[0].includes('Shift report/')) {
+          const expensesStart = rows.findIndex((row) => /^=+[^=]/.test(row) && row.includes('Expenses/'))
+          if (expensesStart >= 0) {
+            let expensesEnd = rows.length
+            for (let index = expensesStart + 1; index < rows.length; index += 1) if (/^=+[^=]/.test(rows[index])) { expensesEnd = index; break }
+            const expenseRows = rows.slice(expensesStart + 1, expensesEnd).filter((row) => /៛/.test(row))
+            for (const row of expenseRows) assert.ok(!/^(\W*[^:]*: |\s+)[+−-]?\$/.test(row), `${scenario.name}: Expenses riel comes first: ${row}`)
+            pairs.push(...expenseRows)
+            expensePairRows += expenseRows.length
+          }
+        }
         const dollarRows = pairs.filter((row) => row.includes('$'))
-        assert.ok(dollarRows.length === 0 || dollarRows.length === pairs.length, `${scenario.name}: the dollar half is on every cash pair row or on none\n${pairs.join(NL)}`)
-        for (const row of dollarRows) assert.ok(!/: [+−-]?\$/.test(row), `${scenario.name}: dollars never come first: ${row}`)
+        assert.ok(dollarRows.length === 0 || dollarRows.length === pairs.length, `${scenario.name}: the dollar half is on every cash and expense pair row of the message or on none\n${pairs.join(NL)}`)
+        for (const row of dollarRows) assert.ok(!/: [+−-]?\$/.test(row) && !/^\s+[+−-]?\$/.test(row), `${scenario.name}: dollars never come first: ${row}`)
         pairRows += pairs.length
       }
     }
     assert.ok(pairRows > 0, 'the lane printed Cash count pair rows')
+    assert.ok(expensePairRows > 0, 'the lane printed Expenses pair rows')
   })
 
   await check('A LATE CLOSE (overnight 50 h): closed_at is 23:59:59 Cambodia of its business day and the review says closed_late', () => {
