@@ -3870,8 +3870,8 @@ export default function POS() {
               were reachable only by swiping the tab strip sideways. The
               scroller now holds only the order tabs; the group is its own
               non-scrolling cell pinned beside it. */}
-          <div className="flex-shrink-0 flex w-full min-w-0 items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-          <div className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x">
+          <div className="flex-shrink-0 flex flex-wrap w-full min-w-0 items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+          <div className="flex min-w-[7rem] flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x">
             {orders.map((order, orderIndex) => (
               <div key={order.id} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer
                 ${resolvedActiveId === order.id ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
@@ -3905,7 +3905,7 @@ export default function POS() {
               close, and for shift-exempt administrators. End Shift remains
               the current-day compatible action and appears only while the
               current row can actually be closed. */}
-          <div className="flex shrink-0 items-center gap-1 px-2 py-1.5 pl-0">
+          <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1 px-2 py-1.5 pl-0">
             <ShiftHistoryPanel branchId={primaryBranchFilterId} compact label={t('shift_code')} />
             <EndShiftButton branchId={primaryBranchFilterId} />
           </div>
