@@ -1,0 +1,40 @@
+{
+  "note": "R40 rule table: one table read by the Worker and the frontend tests. cash = cash taken (or given back, direction out) by the event; row = today's current shift row facts or null; canReopen = the cashier is the opener or an administrator.",
+  "verdicts": [
+    { "name": "no cash, no shift", "cash": { "usd": 0, "khr": 0 }, "exempt": false, "row": null, "direction": "in", "allowed": true },
+    { "name": "no cash, closed", "cash": { "usd": 0, "khr": 0 }, "exempt": false, "row": { "closed": true, "cancelled": false }, "direction": "in", "allowed": true },
+    { "name": "cash, exempt admin, no shift", "cash": { "usd": 5, "khr": 0 }, "exempt": true, "row": null, "direction": "in", "allowed": true },
+    { "name": "cash usd, open", "cash": { "usd": 5, "khr": 0 }, "exempt": false, "row": { "closed": false, "cancelled": false }, "direction": "in", "allowed": true },
+    { "name": "cash khr, open", "cash": { "usd": 0, "khr": 4000 }, "exempt": false, "row": { "closed": false, "cancelled": false }, "direction": "in", "allowed": true },
+    { "name": "cash usd, closed", "cash": { "usd": 5, "khr": 0 }, "exempt": false, "row": { "closed": true, "cancelled": false }, "direction": "in", "allowed": false, "shift_state": "closed" },
+    { "name": "cash khr, closed", "cash": { "usd": 0, "khr": 4000 }, "exempt": false, "row": { "closed": true, "cancelled": false }, "direction": "in", "allowed": false, "shift_state": "closed" },
+    { "name": "cash, cancelled", "cash": { "usd": 5, "khr": 0 }, "exempt": false, "row": { "closed": false, "cancelled": true }, "direction": "in", "allowed": false, "shift_state": "cancelled" },
+    { "name": "cash, no row", "cash": { "usd": 5, "khr": 4000 }, "exempt": false, "row": null, "direction": "in", "allowed": false, "shift_state": "none" },
+    { "name": "refund cash out, no row", "cash": { "usd": 3, "khr": 0 }, "exempt": false, "row": null, "direction": "out", "allowed": false, "shift_state": "none" },
+    { "name": "refund cash out, closed", "cash": { "usd": 0, "khr": 8000 }, "exempt": false, "row": { "closed": true, "cancelled": false }, "direction": "out", "allowed": false, "shift_state": "closed" },
+    { "name": "refund cash out, open", "cash": { "usd": 3, "khr": 0 }, "exempt": false, "row": { "closed": false, "cancelled": false }, "direction": "out", "allowed": true },
+    { "name": "refund cash out, exempt admin", "cash": { "usd": 3, "khr": 0 }, "exempt": true, "row": null, "direction": "out", "allowed": true },
+    { "name": "refund with no cash share (debt only)", "cash": { "usd": 0, "khr": 0 }, "exempt": false, "row": null, "direction": "out", "allowed": true }
+  ],
+  "reopenWho": [
+    { "state": "open", "canReopen": true, "who": null },
+    { "state": "open", "canReopen": false, "who": null },
+    { "state": "none", "canReopen": false, "who": "open" },
+    { "state": "cancelled", "canReopen": true, "who": "open" },
+    { "state": "closed", "canReopen": true, "who": "reopen" },
+    { "state": "closed", "canReopen": false, "who": "ask_reopen" }
+  ],
+  "cashTakenNow": [
+    { "name": "cash row usd", "before": [], "after": [{ "method": "Cash", "amount_usd": 5, "amount_khr": 0 }], "cash": { "usd": 5, "khr": 0 } },
+    { "name": "cash row riel", "before": [], "after": [{ "method": "Cash", "amount_usd": 0, "amount_khr": 8000 }], "cash": { "usd": 0, "khr": 8000 } },
+    { "name": "zero cash row (giveaway)", "before": [], "after": [{ "method": "Cash", "amount_usd": 0, "amount_khr": 0 }], "cash": { "usd": 0, "khr": 0 } },
+    { "name": "digital row", "before": [], "after": [{ "method": "ABA", "amount_usd": 9, "amount_khr": 0 }], "cash": { "usd": 0, "khr": 0 } },
+    { "name": "mixed tender takes the cash part", "before": [], "after": [{ "method": "Cash", "amount_usd": 2, "amount_khr": 0 }, { "method": "ABA", "amount_usd": 7, "amount_khr": 0 }], "cash": { "usd": 2, "khr": 0 } },
+    { "name": "khmer cash name", "before": [], "after": [{ "method": "សាច់ប្រាក់", "amount_usd": 1, "amount_khr": 0 }], "cash": { "usd": 1, "khr": 0 } },
+    { "name": "renamed cash pinned by kind", "kinds": { "till": "cash" }, "before": [], "after": [{ "method": "Till", "amount_usd": 4, "amount_khr": 0 }], "cash": { "usd": 4, "khr": 0 } },
+    { "name": "name with cash pinned digital", "kinds": { "cash card": "digital" }, "before": [], "after": [{ "method": "Cash Card", "amount_usd": 4, "amount_khr": 0 }], "cash": { "usd": 0, "khr": 0 } },
+    { "name": "settlement keeps earlier cash, adds none", "before": [{ "method": "Cash", "amount_usd": 3, "amount_khr": 0 }], "after": [{ "method": "Cash", "amount_usd": 3, "amount_khr": 0 }, { "method": "ABA", "amount_usd": 6, "amount_khr": 0 }], "cash": { "usd": 0, "khr": 0 } },
+    { "name": "settlement adds cash", "before": [{ "method": "Cash", "amount_usd": 3, "amount_khr": 0 }], "after": [{ "method": "Cash", "amount_usd": 9, "amount_khr": 0 }], "cash": { "usd": 6, "khr": 0 } },
+    { "name": "correction that lowers cash takes none", "before": [{ "method": "Cash", "amount_usd": 9, "amount_khr": 0 }], "after": [{ "method": "Cash", "amount_usd": 3, "amount_khr": 0 }], "cash": { "usd": 0, "khr": 0 } }
+  ]
+}
