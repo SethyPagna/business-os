@@ -16,6 +16,8 @@
 //  * sale_payment_rows_mismatch - payment rows that do not add up to the paid total the request states (MONEY-1 review, 4 Nov 2026): the
 //    till builds both from one set of rows, so this only answers a stale or foreign client; nothing was recorded.
 //  * delivery_contact_missing - the delivery person picked for the sale was deleted before it was saved (409): nothing was recorded; pick another.
+//  * shift_required_for_cash - cash needs an open shift today (owner R40, 26 + 27 Nov 2026): the sale, later payment or refund moved cash with no
+//    open shift; nothing was recorded. The text names who can reopen a closed shift: its opener or an administrator.
 // sale_created_at_too_old is the one code with a different key: a queued sale older than the Worker's window (B1-R) is refused and kept on
 // the device for the owner (server_sale_kept_on_device).
 const SALE_SUBMIT_REFUSAL_OWN_KEY: readonly string[] = [
@@ -35,8 +37,23 @@ const SALE_SUBMIT_REFUSAL_OWN_KEY: readonly string[] = [
  */
 export function saleSubmitRefusalText(error: unknown, t: (key: string) => string | undefined): string | null {
   const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : null
+  if (code === 'shift_required_for_cash') return cashShiftRefusalText(error as CashShiftRefusalFields, t)
   // includes() is false for anything that is not one of the listed strings, so a missing or non-string code needs no separate check.
   const key = code === 'sale_created_at_too_old' ? 'server_sale_kept_on_device' : SALE_SUBMIT_REFUSAL_OWN_KEY.includes(code as string) ? code as string : null
   const text = key ? t(key) : null
   return typeof text === 'string' && text.trim() ? text : null
+}
+
+type CashShiftRefusalFields = { shift_state?: unknown; direction?: unknown; who?: unknown; opener_name?: unknown }
+
+/** The pack sentence for the Worker's shift_required_for_cash refusal: what is missing, then who may reopen a closed shift. */
+export function cashShiftRefusalText(refusal: CashShiftRefusalFields, t: (key: string) => string | undefined): string | null {
+  const give = refusal.direction === 'out'
+  const closed = refusal.shift_state === 'closed'
+  const first = t(give ? 'shift_required_for_refund' : closed ? 'shift_closed_for_cash' : 'shift_required_for_cash')
+  if (typeof first !== 'string' || !first.trim()) return null
+  if (!closed || refusal.who !== 'ask_reopen') return first
+  const name = typeof refusal.opener_name === 'string' ? refusal.opener_name.trim() : ''
+  const ask = name ? t('shift_reopen_ask')?.replace('{name}', name) : t('shift_reopen_ask_admin')
+  return ask ? `${first} ${ask}` : first
 }

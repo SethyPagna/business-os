@@ -40,7 +40,7 @@ import ProductCard, { type ProductCardProduct } from './ProductCard.tsx'
 import { createPosTrackingOwner, posTrackingFingerprint } from './posProductTracking.ts'
 import CartItem     from './CartItem'
 import ShiftGate, { EndShiftButton } from './ShiftGate'
-import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
+import { SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from './ShiftGate'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
@@ -3324,6 +3324,7 @@ export default function POS() {
       } catch (error) {
         if (isActorReadScopeCurrent(checkoutScope)) {
           if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
+          if ((error as { code?: string })?.code === 'shift_required_for_cash') releaseCashShiftRefusal(pendingId)
           notify(saleSubmitRefusalText(error, t) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
         }
       } finally { checkoutInFlightRef.current = false; setLoading(false) }
@@ -3550,6 +3551,7 @@ export default function POS() {
       }
     } catch (e) {
       if (!isActorReadScopeCurrent(checkoutScope)) return
+      if (submittedRequestId && (e as { code?: string })?.code === 'shift_required_for_cash') releaseCashShiftRefusal(submittedRequestId)
       if (submittedRequestId && (e as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
       // Y2: a timeout is NOT a confirmed failure -- the request keeps
       // running server-side and may commit. Say so, and say that retrying
@@ -3567,6 +3569,14 @@ export default function POS() {
       checkoutInFlightRef.current = false
       setLoading(false)
     }
+  }
+
+  // R40: the Worker refused cash for want of an open shift BEFORE writing anything (and after its duplicate lookup, so this request never committed): the
+  // frozen checkout is released so the cart stays editable and the tender can change, and the shift gate re-reads the till's shift (opening prompt or closed state).
+  const releaseCashShiftRefusal = (requestId: string) => {
+    const orderId = resolvedActiveId
+    setOrders(previous => previous.map(order => order.id === orderId && order.checkoutRequestId === requestId ? { ...order, checkoutRequestId: '', checkoutPayload: undefined, checkoutReviewRequestId: undefined } : order))
+    window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
   }
 
   const reviewCheckoutPrices = async () => {

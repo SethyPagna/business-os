@@ -148,6 +148,30 @@ await runCase('both POS checkout paths restate the refusal before their own fall
   assert.equal(pos.match(/notify\(saleSubmitRefusalText\(result, t\) \?\? \(localizeBranchRuleError\(result\.error, t\) \|\| t\('error'\)\), 'error'\)/g)?.length, 2)
 })
 
+// R40 (owner, 26 + 27 Nov 2026): cash needs an open shift. The refusal reads from the pack in both languages, and a closed shift names who can reopen it.
+for (const [language, pack] of [['en', EN], ['km', KM]] as const) {
+  await runCase(`${language}: shift_required_for_cash is restated from the pack, with who may reopen a closed shift`, () => {
+    assert.ok(!helper.loadError, String(helper.loadError))
+    const t = translator(pack)
+    const refusal = (fields: Record<string, unknown>) => Object.assign(new Error('Open a shift to take cash.'), { status: 409, code: 'shift_required_for_cash', ...fields })
+    const none = helper.saleSubmitRefusalText(refusal({ shift_state: 'none', direction: 'in', who: 'open' }), t)
+    assert.equal(none, pack.shift_required_for_cash)
+    assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'none', direction: 'out' }), t), pack.shift_required_for_refund)
+    assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'closed', direction: 'in', who: 'reopen', opener_name: 'Dara' }), t), pack.shift_closed_for_cash)
+    const ask = helper.saleSubmitRefusalText(refusal({ shift_state: 'closed', direction: 'in', who: 'ask_reopen', opener_name: 'Dara' }), t)
+    assert.equal(ask, `${pack.shift_closed_for_cash} ${String(pack.shift_reopen_ask).replace('{name}', 'Dara')}`)
+    assert.ok(!ask.includes('{name}'))
+    assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'closed', who: 'ask_reopen', opener_name: null }), t), `${pack.shift_closed_for_cash} ${pack.shift_reopen_ask_admin}`)
+    assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'none' }), () => undefined), null)
+  })
+}
+
+await runCase('the POS releases the frozen checkout when the Worker refuses cash for want of a shift, so the tender can change', () => {
+  const pos = fs.readFileSync(path.join(FRONTEND, 'src', 'components', 'pos', 'POS.tsx'), 'utf8')
+  assert.match(pos, /shift_required_for_cash/)
+  assert.match(pos, /SHIFT_STATE_CHANGED_EVENT/)
+})
+
 if (failures.length) {
   console.error(`\n${failures.length} check(s) failed.`)
   process.exit(1)
