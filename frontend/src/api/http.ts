@@ -646,6 +646,13 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // return_restore_over_capacity: product, returned, sold), so the restated
   // sentence keeps them -- see returns/helpers/returnRefusalError.ts.
   error.params = parsed?.params && typeof parsed.params === 'object' && !Array.isArray(parsed.params) ? parsed.params : null
+  // R40: a cash refusal says which shift state refused, which way the cash was going, and who can reopen it (the opener or an administrator).
+  if (parsed?.code === 'shift_required_for_cash') {
+    error.shift_state = parsed.shift_state
+    error.direction = parsed.direction
+    error.who = parsed.who
+    error.opener_name = parsed.opener_name ?? null
+  }
   // POST /api/returns/bulk's 409 return_cancel_replacement_choice_required lists, per cancelled exchange return, the replacement lines still
   // with the customer, so the cancel dialog can ask about exactly those (components/returns/helpers/returnReplacementCancel.ts).
   error.replacements = Array.isArray(parsed?.replacements) ? parsed.replacements : null

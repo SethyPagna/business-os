@@ -125,3 +125,9 @@ function ReopenForm({ shift, onDone }: { shift: NonNullable<ShiftState['shift']>
     </Modal>
   )
 }
+
+/** The cash a return hands back needs an open shift at the branch it leaves from (owner, 27 Nov 2026). Mount it only when cash goes out. */
+export function CashOutShiftNote({ branchId, branchName = null, usd, className = '' }: { branchId: number | null; branchName?: string | null; usd: number; className?: string }) {
+  const { gate, state } = useCashShiftGate(branchId, [{ method: 'Cash', amount_usd: usd, amount_khr: 0 }])
+  return <CashShiftNote gate={gate} state={state} branchId={branchId} branchName={branchName} direction="out" className={className} />
+}

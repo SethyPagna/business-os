@@ -51,6 +51,8 @@ import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import type { ExchangeQuoteV1, PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
 import SaleSettlementEditor from '../sales/SaleSettlementEditor.tsx'
+import { CashOutShiftNote } from '../shifts/CashShiftNote.tsx'
+import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { configuredSettlementMethods, type SettlementRow } from '../sales/saleSettlement.ts'
 import {
   changeRielRoundedDown, exchangeDue, exchangeOverpaymentUsd, exchangePaymentBody, exchangePaymentIssue, exchangeReplacementItems, initialExchangePayRows,
@@ -190,6 +192,7 @@ interface SaleRow {
   receipt_number?: string | null
   customer_name?: string | null
   branch_id?: number | string | null
+  sale_status?: string | null
   exchange_rate?: number | string | null
   total_usd?: number | string | null
   created_at?: string | number | Date | null
@@ -1109,7 +1112,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       // Unknown, permission and capability failures never rewrite/remove the
       // frozen request: an earlier timed-out attempt could already be committed.
       setPendingQuoteRejected((error as { returnV1QuoteRejected?: boolean })?.returnV1QuoteRejected === true)
-      notify(T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
+      notify(saleSubmitRefusalText(error, (key) => T(key, '')) ?? T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       if (current()) setSubmitting(false)
@@ -1721,6 +1724,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 <span>{T('total_refunded', 'Total Refund')}</span>
                 <span>{fmtUSD(totalRefund)}</span>
               </div>
+              {replacements.length === 0 && totalRefund > 0 && foundSale?.sale_status !== 'awaiting_payment' ? (
+                <CashOutShiftNote branchId={foundSale?.branch_id ? Number(foundSale.branch_id) : null} usd={totalRefund} className="mt-2" />
+              ) : null}
             </div>
 
             {replacements.length > 0 && (
@@ -1777,6 +1783,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       error=""
                       recordedIssue={null}
                       methodKinds={methodKinds}
+                      cashShift={{ branchId: foundSale?.branch_id ? Number(foundSale.branch_id) : null }}
                       translate={tr}
                       fmtUSD={fmtUSD}
                       fmtKHR={(value) => typeof fmtKHR === 'function' ? fmtKHR(value) : `${value}៛`}
