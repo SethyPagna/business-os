@@ -36,6 +36,7 @@ async function main() {
     await H.seedProduct(h, 9809, 'RV K', 10, 200, 2)
     await H.seedProduct(h, 9810, 'RV L', 5, 1, 1)
     const returnsOnly = await h.addEmployee(1991, 'rv-returns-only', { returns: true })
+    await H.openShift(h, 1991)
 
     let seq = 0
     const makeSale = async (lines) => {

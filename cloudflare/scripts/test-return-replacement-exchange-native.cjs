@@ -29,6 +29,8 @@ const assert = require('node:assert/strict')
 const H = require('./harness/al_money_native.cjs')
 
 const MUTANTS = {
+  'refund-shift-check-off': { file: 'src/routes/returns.ts', from: 'if (refundShiftRefused) return c.json(refundShiftRefused, 409)', to: 'if (refundShiftRefused && false) return c.json(refundShiftRefused, 409)' },
+  'replacement-shift-check-off': { file: 'src/routes/returns.ts', from: 'if (replacementShiftRefused) return c.json(replacementShiftRefused, 409)', to: 'if (replacementShiftRefused && false) return c.json(replacementShiftRefused, 409)' },
   'edit-guard-off': { file: 'src/routes/returns.ts', from: 'if (Array.isArray(body.items) && !canSetSalePrice(user)) {', to: 'if (false) {' },
   'edit-refuses-already-under': { file: 'src/routes/returns.ts', from: 'if (await firstDisallowedReplacementPrice(db, linesFor(input.before), input.exchangeRate)) return null', to: '' },
   // 6.0.958 (P3-B): an unposted legacy line takes the catalog price read now; a mutant that takes a remembered figure is the stale-snapshot defect.
@@ -48,6 +50,7 @@ async function main() {
     await H.seedProduct(h, 9311, 'EX TwoPrice', 5, 400, 1)
     await H.seedProduct(h, 9321, 'EX Moved', 5, 100, 1)
     const returnsOnly = await h.addEmployee(1941, 'ex-returns-only', { returns: true })
+    await H.openShift(h, 1941)
     const sold = await H.importSale(h, 901, 'completed', [{ productId: 9301, name: 'EX Lipstick', quantity: 20, price: 3 }], { jobId: 'ex-job' })
     const line = sold.items[0]
     // The import writes no riel price on a line; record the $3 line's riel price (12000) so the riel refund and the riel leg of the floor read a recorded figure.
@@ -299,6 +302,45 @@ async function main() {
         assert.equal(Number(fellRows.sale.total_usd), 11)
         assert.equal(Number(fellRows.sale.total_khr), 44000)
       })
+    }
+
+    // ---- R40 (owner, 26 + 27 Nov 2026): cash handed back, or taken for a legacy replacement, needs today's open shift ------------------------------
+    // The real route, nothing stubbed. Mutants -> test: MUTANT=refund-shift-check-off turns the cash-refund check red; MUTANT=replacement-shift-check-off
+    // turns the replacement-only check red. A refusal is 409 shift_required_for_cash and writes no return, line, sale, movement or audit line.
+    {
+      const shiftRow = await h.one('SELECT id FROM shift_sessions WHERE user_id=1941')
+      await H.dropShift(h, shiftRow.id)
+      const tally = async () => ({ ...(await counts()), audit: Number((await h.one('SELECT COUNT(*) AS n FROM audit_logs')).n), stock9301: await stock(9301), stock9302: await stock(9302) })
+      const paidSale = await H.importSale(h, 951, 'completed', [{ productId: 9301, name: 'EX Lipstick', quantity: 3, price: 3 }], { jobId: 'ex-job-r40' })
+      const freeSale = await H.importSale(h, 952, 'completed', [{ productId: 9301, name: 'EX Lipstick', quantity: 5, price: 0 }], { jobId: 'ex-job-r40', paidUsd: 0 })
+      const unpaidSale2 = await H.importSale(h, 953, 'awaiting_payment', [{ productId: 9301, name: 'EX Lipstick', quantity: 5, price: 3 }], { jobId: 'ex-job-r40', paidUsd: 0 })
+
+      let before = await tally()
+      const cashRefundOnly = await post('r40-refund', paidSale, [], 'R40 cash refund with no shift')
+      const afterRefund = await tally()
+      r.check(`R40 a $3 cash refund with no shift is refused (409 shift_required_for_cash, out) and nothing is written -- ${cashRefundOnly.status} ${cashRefundOnly.body?.code}`, () => {
+        assert.equal(cashRefundOnly.status, 409, JSON.stringify(cashRefundOnly.body))
+        assert.equal(cashRefundOnly.body.code, 'shift_required_for_cash')
+        assert.equal(cashRefundOnly.body.direction, 'out')
+        assert.deepEqual(afterRefund, before)
+      })
+
+      before = await tally()
+      const replacementOnly = await post('r40-replacement', freeSale, [out(9302, 1, 4)], 'R40 default-Cash replacement with no shift')
+      const afterReplacement = await tally()
+      r.check(`R40 a legacy replacement paid by the default Cash with no shift is refused (409, in) when the returned unit was sold for $0 (no cash refund) and nothing is written -- ${replacementOnly.status} ${replacementOnly.body?.code}`, () => {
+        assert.equal(replacementOnly.status, 409, JSON.stringify(replacementOnly.body))
+        assert.equal(replacementOnly.body.code, 'shift_required_for_cash')
+        assert.equal(replacementOnly.body.direction, 'in')
+        assert.deepEqual(afterReplacement, before)
+      })
+
+      const debtOnly = await post('r40-debt-only', unpaidSale2, [], 'R40 debt-only return with no shift')
+      r.check(`R40 a return that only lowers a Not Paid debt has no cash share and is recorded with no shift -- ${debtOnly.status}`, () => assert.equal(debtOnly.status, 200, JSON.stringify(debtOnly.body)))
+
+      await H.openShift(h, 1941)
+      const control = await post('r40-refund-open', paidSale, [], 'R40 cash refund with the shift open')
+      r.check(`R40 control: with the shift open the same cash refund is recorded -- ${control.status}`, () => assert.equal(control.status, 200, JSON.stringify(control.body)))
     }
   } finally {
     await h.mf.dispose()

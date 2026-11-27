@@ -248,6 +248,10 @@ async function migrate(db) {
       ]),
     ])
 
+    // R40: cash needs an open shift, so every till of this fixture is the one cashier with today's shift open at the Shop (setup only).
+    await native.prepare(`INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at,scope_mode)
+                          VALUES('RACE-S1',?,?,1,'Shop',date('now','+7 hours'),datetime('now'),'per_account')`).bind(USER.id, USER.name).run()
+
     assert.deepEqual((await native.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results,[],'synthetic stock setup releases its permit')
     const rawState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,(await native.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()).results])))
     const beforeRawMutation = await rawState()

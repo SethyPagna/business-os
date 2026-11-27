@@ -348,5 +348,20 @@ function basePatches(commit) {
     .map(name => ({ name: `base:${name}`, file: name.replace(/^cloudflare\//, ''), whole: git('show', `${commit}:${name}`) }))
 }
 
-module.exports = { basePatches, startWorker, setReturnIdFloor, fresh, recorder, budgetLine, seedProduct, createSale, customerReturn, amendSale, addSaleItems, bulkReturnStatus,
+// R40: cash needs an open shift. A fixture account that posts cash (a sale, an exchange top-up, a refund or give-back) must hold
+// today's open shift at the branch, so setup adds that row directly (the Worker's own rule is untouched and no assertion changes).
+// Per_account policy: one row per account, branch and day. Returns the shift id; dropShift removes it again for a test that opens its own.
+async function openShift(h, userId, { branchId = 1, branchName = 'Shop', userName = null } = {}) {
+  const name = userName || (await h.one('SELECT name FROM users WHERE id=?', userId))?.name || `user ${userId}`
+  const code = `FIX-${userId}-${branchId}`
+  await h.db.prepare(`INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at,scope_mode)
+    VALUES(?,?,?,?,?,date('now','+7 hours'),datetime('now'),'per_account')`).bind(code, userId, name, branchId, branchName).run()
+  return (await h.one('SELECT id FROM shift_sessions WHERE shift_code=?', code)).id
+}
+
+async function dropShift(h, shiftId) {
+  await h.db.prepare('DELETE FROM shift_sessions WHERE id=?').bind(shiftId).run()
+}
+
+module.exports = { basePatches, startWorker, openShift, dropShift, setReturnIdFloor, fresh, recorder, budgetLine, seedProduct, createSale, customerReturn, amendSale, addSaleItems, bulkReturnStatus,
   historyStep, importSale, FREE_QUERY_LIMIT, PAID_QUERY_LIMIT }

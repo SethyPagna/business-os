@@ -34,6 +34,7 @@ const MUTANTS = {
   'unposted-uses-stale-price': { file: 'src/lib/returnExchange.ts', from: "    const catalog = sellingPriceCeilCent(money(line.product.selling_price_usd ?? 0, 'return_exchange_price_invalid'))", to: '    const catalog = 10' },
   // The exchange answers through the returns router's cost projection (cost visibility matrix); without it a returns-only caller would read acquisition costs.
   'cost-projection-off': { file: 'src/routes/returns.ts', from: "app.use('*', acquisitionCostResponses)", to: "app.use('*', async (_c, next) => next())" },
+  'exchange-shift-check-off': { file: 'src/lib/returnExchangeCreate.ts', from: 'if (cashShiftRefused) return reply(409, cashShiftRefused)', to: 'if (cashShiftRefused && false) return reply(409, cashShiftRefused)' },
   'credit-is-whole-refund': { file: 'src/lib/returnExchange.ts', from: 'credit_usd: credit,', to: 'credit_usd: input.refundUsd,' },
 }
 
@@ -53,6 +54,7 @@ async function main() {
     await H.seedProduct(h, 9506, 'EX1 Primer', 10, 200, 4)
     const returnsOnly = await h.addEmployee(1951, 'ex1-returns-only', { returns: true })
     const withPrice = await h.addEmployee(1952, 'ex1-returns-pos', { returns: true, pos: true })
+    for (const id of [1951, 1952]) await H.openShift(h, id)
 
     let seq = 0
     const makeSale = async (lines, status = 'completed') => {
@@ -407,6 +409,45 @@ async function main() {
         assert.equal(withRule.status, 200, JSON.stringify(withRule.body))
         assert.equal(withRule.body.exchange.total_usd, 21)
       })
+    }
+
+    // ---- 5b. R40 (owner 26 + 27 Nov 2026): cash into or out of the drawer by an exchange needs today's open shift ---------------------------------------
+    // The real route, nothing stubbed. A returns-only account with NO shift: a cash top-up and a cash give-back are refused with 409 and no row, no
+    // stock move and no audit line; a bank top-up goes through; with the shift open the same cash top-up is recorded. The mutant that drops the
+    // check in lib/returnExchangeCreate.ts (MUTANT=exchange-shift-check-off) turns the refusals red.
+    {
+      const shiftRow = await h.one('SELECT id FROM shift_sessions WHERE user_id=1951')
+      await H.dropShift(h, shiftRow.id)
+      const tally = async () => ({
+        returns: Number((await h.one('SELECT COUNT(*) AS n FROM returns')).n), items: Number((await h.one('SELECT COUNT(*) AS n FROM return_items')).n),
+        sales: Number((await h.one('SELECT COUNT(*) AS n FROM sales')).n), movements: Number((await h.one('SELECT COUNT(*) AS n FROM inventory_movements')).n),
+        audit: Number((await h.one('SELECT COUNT(*) AS n FROM audit_logs')).n), stock: await stockOf(9502),
+      })
+      const refused = async (label, outId, payment, direction) => {
+        const sale = await makeSale([{ productId: 9501, quantity: 1, price: 10 }])
+        const before = await tally()
+        const result = await exchange(sale, [{ item: 0, quantity: 1 }], [{ product_id: outId, quantity: 1 }], { cookie: returnsOnly, payment })
+        const after = await tally()
+        r.check(`R40 ${label}: no shift -> 409 shift_required_for_cash (${direction}) and nothing is written -- ${result.created.status} ${result.created.body?.code}`, () => {
+          assert.equal(result.created.status, 409, JSON.stringify(result.created.body))
+          assert.equal(result.created.body.code, 'shift_required_for_cash')
+          assert.equal(result.created.body.direction, direction)
+          assert.deepEqual(after, before)
+        })
+      }
+      await refused('cash top-up', 9502, { details: [{ method: 'Cash', amount_usd: 6, amount_khr: 0 }], change_currency: 'USD' }, 'in')
+      await refused('cash give-back only', 9503, { details: [], change_currency: 'USD' }, 'out')
+      {
+        const sale = await makeSale([{ productId: 9501, quantity: 1, price: 10 }])
+        const bank = await exchange(sale, [{ item: 0, quantity: 1 }], [{ product_id: 9502, quantity: 1 }], { cookie: returnsOnly, payment: { details: [{ method: 'ABA', amount_usd: 6, amount_khr: 0 }], change_currency: 'USD' } })
+        r.check(`R40 bank top-up with no shift is recorded -- ${bank.created.status}`, () => assert.equal(bank.created.status, 200, JSON.stringify(bank.created.body)))
+      }
+      await H.openShift(h, 1951)
+      {
+        const sale = await makeSale([{ productId: 9501, quantity: 1, price: 10 }])
+        const cash = await exchange(sale, [{ item: 0, quantity: 1 }], [{ product_id: 9502, quantity: 1 }], { cookie: returnsOnly, payment: { details: [{ method: 'Cash', amount_usd: 6, amount_khr: 0 }], change_currency: 'USD' } })
+        r.check(`R40 control: with the shift open the same cash top-up is recorded -- ${cash.created.status}`, () => assert.equal(cash.created.status, 200, JSON.stringify(cash.created.body)))
+      }
     }
 
     // ---- 6. the shift drawer, the reports and the ledgers agree --------------------------------------------------------------------------------

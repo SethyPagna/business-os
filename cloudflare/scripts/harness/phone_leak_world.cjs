@@ -294,6 +294,9 @@ async function placeSale(world, { as = 'manager', customerId, customerName, cust
     world.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?)').bind(lot, sell, 20),
   ])
   const actor = await world.first('SELECT id, organization_id FROM users WHERE username = ?', as)
+  // R40: cash needs an open shift, so the selling account holds today's shift at this branch (setup only; one row per account, branch and day).
+  await world.run(`INSERT OR IGNORE INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at,scope_mode)
+    VALUES(?,?,?,?,'Fixture branch',date('now','+7 hours'),datetime('now'),'per_account')`, `FIX-${actor.id}-${sell}`, actor.id, as, sell)
   const key = `p28-sale-${id}`
   const body = {
     branch_id: sell, money_precision_version: 1, sale_status: 'completed', exchange_rate: 4000, payment_currency: 'USD', client_request_id: key,
