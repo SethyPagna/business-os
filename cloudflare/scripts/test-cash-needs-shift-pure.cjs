@@ -258,6 +258,35 @@ async function refused(f, body, state) {
     console.log("PASS later payment on a retired branch's sale uses the active successor's shift")
   }
   {
+    // r40build3 step 1: an exchange where the customer only RECEIVES cash change is cash out and follows the same rule as a refund.
+    // Mutants -> test: give-back ignored -> "give-back with no shift"; direction inverted -> "direction is out".
+    const f = h.fixture()
+    const probe = h.load('lib/shiftCurrentProbe.ts')
+    const rows = () => f.raw.prepare(`SELECT id, ${probe.branchCashShiftColumnsSql()} FROM branches`).all({ shiftUserId: 71 })
+    const employee = { ...h.USER, role_code: 'employee', permissions: '{"sales":true}' }
+    const ask = (user, change, details = [{ method: 'ABA', amount_usd: 0, amount_khr: 0 }]) => probe.exchangeCashShiftRefusal({
+      probe: probe.pickCashShiftProbe(rows(), 1), user, details, kinds: {}, change, branchId: 1,
+    })
+    const give = { changeUsd: 2, changeKhr: 0 }
+    f.raw.prepare('DELETE FROM shift_sessions').run()
+    const refusal = ask(employee, give)
+    assert.ok(refusal, 'give-back with no shift is refused')
+    assert.equal(refusal.direction, 'out', 'direction is out')
+    assert.equal(refusal.error, 'Open a shift to give cash back.')
+    assert.equal(refusal.code, 'shift_required_for_cash')
+    assert.ok(ask(employee, { changeUsd: 0, changeKhr: 8000 }), 'riel give-back with no shift is refused')
+    assert.equal(ask(employee, { changeUsd: 0, changeKhr: 0 }), null, 'no change handed back: nothing to refuse')
+    assert.equal(ask(ADMIN, give), null, 'an exempt administrator is never refused')
+    const topUp = ask(employee, { changeUsd: 0, changeKhr: 0 }, [{ method: 'Cash', amount_usd: 5, amount_khr: 0 }])
+    assert.equal(topUp.direction, 'in', 'a cash top-up keeps direction in')
+    f.raw.prepare("INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('EXG-1',71,'Sale Cashier',1,'Main',date('now','+7 hours'),datetime('now'))").run()
+    assert.equal(ask(employee, give), null, 'an open shift lets the give-back through')
+    const create = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'returnExchangeCreate.ts'), 'utf8')
+    assert.match(create, /exchangeCashShiftRefusal\(/, 'the exchange route calls the combined check')
+    assert.match(create, /change: settlement\.change/, 'the exchange route passes the settled change')
+    console.log('PASS an exchange that only gives cash change back needs an open shift (direction out)')
+  }
+  {
     const f = h.fixture()
     const ctx = h.load('lib/returnExchangeContext.ts')
     const q = ctx.exchangeContextQuery({ saleId: 1, saleItemIds: [], replacementProductIds: [], explicitBatchIds: [], returnNumbers: [], receiptNumbers: [], customerId: null, shiftUserId: 71 })
@@ -272,10 +301,10 @@ async function refused(f, body, state) {
     assert.match(src, /direction: 'out'/, 'returns wiring: cash refund path')
     assert.match(src, /cashRefundUsd > 0/, 'returns wiring: a debt-only return has no cash share and is never refused')
     assert.match(src, /replacementShiftRefused/, 'returns wiring: legacy replacement default Cash')
-    assert.match(create, /cashShiftRefusal\(/, 'returns wiring: exchange top-up')
+    assert.match(create, /exchangeCashShiftRefusal\(/, 'returns wiring: exchange top-up and give-back')
     assert.match(src, /pickCashShiftProbe\(branchDirectory, branch\)/, 'returns wiring: the probe is picked with the no-branch fallback, never skipped')
     assert.match(create, /pickCashShiftProbe\(ctx\.branches/, 'exchange wiring: the same pick')
-    const exchangeCheck = create.indexOf('cashShiftRefusal(')
+    const exchangeCheck = create.indexOf('exchangeCashShiftRefusal(')
     assert.ok(exchangeCheck > create.indexOf('settleExchange(') && exchangeCheck < create.indexOf('planExchangeReturnLots('), 'the exchange check sits after the tender is settled and before any write')
     const refund = src.indexOf('refundShiftRefused')
     assert.ok(refund > src.indexOf('const cashRefundUsd = refundCashUsd(') && refund < src.indexOf("INSERT INTO returns"), 'the refund check sits before the write')

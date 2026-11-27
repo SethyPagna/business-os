@@ -27,8 +27,7 @@ import {
 } from './returnCreateAction'
 import { ReturnExchangeError, settleExchange, type ExchangeLineIntent, type ExchangePaymentIntent } from './returnExchange'
 import { priceAndQuoteExchange } from './returnExchangeQuote'
-import { cashTakenNow } from './cashShiftRule'
-import { cashShiftRefusal, pickCashShiftProbe } from './shiftCurrentProbe'
+import { exchangeCashShiftRefusal, pickCashShiftProbe } from './shiftCurrentProbe'
 import { exchangeContextQuery, ExchangeContextTooLargeError, firstFreeNumber, numberCandidates, parseExchangeContext, type ExchangeContext, type ExchangeContextRow } from './returnExchangeContext'
 import { planExchangeReturnLots, planExchangeStock, type ExchangeReturnLine, type ExchangeStockAction } from './returnExchangePlan'
 import {
@@ -262,9 +261,9 @@ export async function createExchangeReturnV1(args: ExchangeCreateArgs): Promise<
     throw error
   }
 
-  // R40 (owner, 26 Nov 2026): the cash the customer hands over for the replacement needs an open shift at the branch the return books to.
-  const cashShiftRefused = cashShiftRefusal({
-    probe: pickCashShiftProbe(ctx.branches, Number(branchId) || null), user, cash: cashTakenNow([], intent.exchange_payment.details, kinds), branchId: Number(branchId) || null,
+  // R40 (owner, 26 + 27 Nov 2026): cash the customer hands over, and cash change the customer takes back, need an open shift at the branch the return books to.
+  const cashShiftRefused = exchangeCashShiftRefusal({
+    probe: pickCashShiftProbe(ctx.branches, Number(branchId) || null), user, details: intent.exchange_payment.details, kinds, change: settlement.change, branchId: Number(branchId) || null,
   })
   if (cashShiftRefused) return reply(409, cashShiftRefused)
 

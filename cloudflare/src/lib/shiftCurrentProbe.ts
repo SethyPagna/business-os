@@ -1,7 +1,7 @@
 import { localTodayExpr } from './businessDateWindow'
 import { cashShiftReopenWho, cashShiftVerdict, cashTakenNow, currentShiftState, type CashAmounts, type CashDirection, type CashTenderRow } from './cashShiftRule'
 import { isAdminControlUser } from './permissions'
-import { parsePaymentMethodKinds } from './paymentMethodRegistry'
+import { parsePaymentMethodKinds, type PaymentMethodKindMap } from './paymentMethodRegistry'
 
 /** The "current shift" row for a till: today's business date, the exact branch first, then an All (NULL-branch) shift, newest segment first. */
 export function currentShiftBranchSql(column: string, branchParam: string): string {
@@ -114,4 +114,24 @@ export function cashShiftRefusal(input: {
     can_reopen: canReopen,
     who: cashShiftReopenWho(verdict.shift_state, canReopen),
   }
+}
+
+/**
+ * An exchange touches the drawer twice: cash the customer hands over (in) and cash change the customer takes back (out).
+ * The refund credit is netted, so only a real change above zero moves cash out. Both need today's open shift; the first refusal wins.
+ */
+export function exchangeCashShiftRefusal(input: {
+  probe: ShiftProbe | null
+  user: Parameters<typeof isAdminControlUser>[0]
+  details: readonly CashTenderRow[]
+  kinds: PaymentMethodKindMap
+  change: { changeUsd: number; changeKhr: number }
+  branchId: number | null
+}): Record<string, unknown> | null {
+  const base = { probe: input.probe, user: input.user, branchId: input.branchId }
+  const cashIn = cashShiftRefusal({ ...base, cash: cashTakenNow([], input.details, input.kinds) })
+  if (cashIn) return cashIn
+  return cashShiftRefusal({
+    ...base, cash: { usd: Math.max(0, Number(input.change.changeUsd) || 0), khr: Math.max(0, Number(input.change.changeKhr) || 0) }, direction: 'out',
+  })
 }
