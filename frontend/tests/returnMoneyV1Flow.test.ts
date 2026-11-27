@@ -43,7 +43,7 @@ function setup(options: { restored?: boolean; storageFailure?: boolean; timeout?
     activeItems: [{ id: 3, returnQty: 1, stock_action: 'none', branch_id: 2 }], finalReason: 'reason', itemsMissingLot: [],
     notes: '', returnType: 'refund', foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
     withLoaderTimeout: async (fn: () => Promise<unknown>) => { const promise = fn(); if (options.timeout) { void promise.catch(() => {}); throw Error('timeout') } return promise }, RETURN_CREATE_TIMEOUT_MS: 1,
-    notify: () => events.push('notify'), T: (_key: string, fallback: string) => fallback, getLoaderErrorMessage: (e: Error) => e.message, saleSubmitRefusalText: () => null, releaseRefusedReturnRequest,
+    notify: () => events.push('notify'), T: (_key: string, fallback: string) => fallback, getLoaderErrorMessage: (e: Error) => e.message, saleSubmitRefusalText: () => null, canUseShifts: true, releaseRefusedReturnRequest,
     window: { dispatchEvent: () => events.push('invalidate') }, CustomEvent: class {},
     onSuccess: () => { events.push('success'); return success.promise }, onClose: () => events.push('close'),
     setPendingQuoteRejected: (value: boolean) => events.push('rejected:' + value),

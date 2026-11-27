@@ -6798,6 +6798,8 @@
   "shift_closed_for_cash": "Today's shift is closed. Reopen it to take cash.",
   "shift_reopen_ask": "Ask {name} or an administrator to reopen it.",
   "shift_reopen_ask_admin": "Ask an administrator to reopen it.",
+  "shift_open_ask_cashier": "Today's shift is not open. Ask a cashier or an administrator to open it.",
+  "shift_closed_for_refund": "Today's shift is closed. Reopen it to give cash back.",
   "shift_registered": "Shift registered.",
   "shift_already_registered": "This shift was already registered.",
   "shift_register_failed": "Could not register the shift.",

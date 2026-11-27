@@ -35,9 +35,9 @@ const SALE_SUBMIT_REFUSAL_OWN_KEY: readonly string[] = [
  * result carrying `code`), or null for anything else, so each checkout path
  * keeps its own localizing for every other error.
  */
-export function saleSubmitRefusalText(error: unknown, t: (key: string) => string | undefined): string | null {
+export function saleSubmitRefusalText(error: unknown, t: (key: string) => string | undefined, options: CashShiftRefusalOptions = {}): string | null {
   const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : null
-  if (code === 'shift_required_for_cash') return cashShiftRefusalText(error as CashShiftRefusalFields, t)
+  if (code === 'shift_required_for_cash') return cashShiftRefusalText(error as CashShiftRefusalFields, t, options)
   // includes() is false for anything that is not one of the listed strings, so a missing or non-string code needs no separate check.
   const key = code === 'sale_created_at_too_old' ? 'server_sale_kept_on_device' : SALE_SUBMIT_REFUSAL_OWN_KEY.includes(code as string) ? code as string : null
   const text = key ? t(key) : null
@@ -46,11 +46,18 @@ export function saleSubmitRefusalText(error: unknown, t: (key: string) => string
 
 type CashShiftRefusalFields = { shift_state?: unknown; direction?: unknown; who?: unknown; opener_name?: unknown }
 
+/** `canOpen` is false for an account with no shift access (a returns-only role): it is told who to ask, never to open a shift itself. */
+export type CashShiftRefusalOptions = { canOpen?: boolean }
+
 /** The pack sentence for the Worker's shift_required_for_cash refusal: what is missing, then who may reopen a closed shift. */
-export function cashShiftRefusalText(refusal: CashShiftRefusalFields, t: (key: string) => string | undefined): string | null {
+export function cashShiftRefusalText(refusal: CashShiftRefusalFields, t: (key: string) => string | undefined, options: CashShiftRefusalOptions = {}): string | null {
   const give = refusal.direction === 'out'
   const closed = refusal.shift_state === 'closed'
-  const first = t(give ? 'shift_required_for_refund' : closed ? 'shift_closed_for_cash' : 'shift_required_for_cash')
+  if (!closed && options.canOpen === false) {
+    const askToOpen = t('shift_open_ask_cashier')
+    if (typeof askToOpen === 'string' && askToOpen.trim()) return askToOpen
+  }
+  const first = t(closed ? (give ? 'shift_closed_for_refund' : 'shift_closed_for_cash') : give ? 'shift_required_for_refund' : 'shift_required_for_cash')
   if (typeof first !== 'string' || !first.trim()) return null
   if (!closed || refusal.who !== 'ask_reopen') return first
   const name = typeof refusal.opener_name === 'string' ? refusal.opener_name.trim() : ''

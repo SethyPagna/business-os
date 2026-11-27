@@ -15,6 +15,7 @@ type NoteContext = {
   t: (key: string) => string
   notify: (message: unknown, type?: string, duration?: number) => void
   user?: { id?: string | number | null }
+  hasPermission?: (key: string) => boolean
   settings?: { shift_scope_mode?: unknown; pos_payment_method_kinds?: unknown }
 }
 
@@ -45,15 +46,16 @@ export default function CashShiftNote({ gate, state, branchId, branchName = null
   canOpenHere?: boolean
   className?: string
 }) {
-  const { t } = useApp() as NoteContext
+  const { t, hasPermission } = useApp() as NoteContext
   const [form, setForm] = useState<'open' | 'reopen' | null>(null)
   if (gate.kind !== 'block') return null
+  const canOpen = !hasPermission || hasPermission('pos') || hasPermission('sales')
   const block: Gate = gate
   const showOpen = block.action === 'open' && canOpenHere
   const showReopen = block.action === 'reopen' && !!state?.shift
   return (
     <div data-cash-shift-note={block.shiftState} role="status" className={`flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs leading-relaxed text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200 ${className}`}>
-      <span className="min-w-0 flex-1">{cashShiftNoteText(block, direction, t)}</span>
+      <span className="min-w-0 flex-1">{cashShiftNoteText(block, direction, t, { canOpen })}</span>
       {showOpen ? <button type="button" className="btn-secondary min-h-0 h-8 px-3 py-0 text-xs" onClick={() => setForm('open')}>{t('shift_start')}</button> : null}
       {showReopen ? <button type="button" className="btn-secondary min-h-0 h-8 px-3 py-0 text-xs" onClick={() => setForm('reopen')}>{t('shift_action_reopen')}</button> : null}
       {form === 'open' ? <OpenForm branchId={branchId} branchName={branchName} onDone={() => setForm(null)} /> : null}

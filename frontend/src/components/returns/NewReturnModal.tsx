@@ -358,7 +358,8 @@ function lineReturnQuantities(item: SaleItemRow, recorded: number, v1: boolean):
 }
 
 export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
-  const { user, t, settings, fmtKHR } = useApp()
+  const { user, t, settings, fmtKHR, getPermissionTier } = useApp()
+  const canUseShifts = typeof getPermissionTier !== 'function' || getPermissionTier('pos') === 'full' || getPermissionTier('sales') === 'full'
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -1117,7 +1118,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       // frozen request: an earlier timed-out attempt could already be committed.
       if (await releaseRefusedReturnRequest(error, attempted, async (saved, recovery) => { await (await loadReturnsTransport()).clearPendingReturnCreateV1(user?.id, saved, recovery) })) { if (!current()) return; setPendingV1(null); setReviewedPendingBody(null) }
       setPendingQuoteRejected((error as { returnV1QuoteRejected?: boolean })?.returnV1QuoteRejected === true)
-      notify(saleSubmitRefusalText(error, (key) => T(key, '')) ?? T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
+      notify(saleSubmitRefusalText(error, (key) => T(key, ''), { canOpen: canUseShifts }) ?? T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       if (current()) setSubmitting(false)
