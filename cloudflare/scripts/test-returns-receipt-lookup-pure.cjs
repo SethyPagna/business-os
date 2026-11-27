@@ -131,6 +131,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   ...require('./harness/phone_real_modules.cjs').routePhoneDeps(),
   '../lib/customerReturnQuotePlan': customerReturnQuotePlanKernel,
   '../lib/returnExchangeIntent': returnExchangeIntentKernel,
+  '../lib/shiftCurrentProbe': { currentShiftProbeValueSql: () => 'NULL', parseShiftProbe: () => null, cashShiftRefusal: () => null, replacementCashTaken: () => ({ usd: 0, khr: 0 }) },
   '../lib/returnExchangeQuote': { priceAndQuoteExchange: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
   '../lib/returnExchangeCreate': { createExchangeReturnV1: async () => { throw new Error('the exchange is covered by test-return-exchange-native.cjs') } },
   '../lib/planTier': loadReal('lib/planTier.ts'),

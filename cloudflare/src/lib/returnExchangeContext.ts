@@ -5,6 +5,7 @@ import {
 } from './customerReturnQuotePlan'
 import { CUSTOMER_RETURN_MAX_SALE_LINES } from './customerReturnEntitlement'
 import { saleReturnMoneySql } from './returnRefundSplit'
+import { currentShiftProbeValueSql } from './shiftCurrentProbe'
 
 // One D1 query for everything a one-step exchange reads before it writes.
 //
@@ -27,6 +28,8 @@ export type ExchangeContextInput = {
   receiptNumbers: readonly string[]
   /** The customer the body names; the sale's own customer when it names none. */
   customerId: number | null
+  /** The cashier, for the R40 current-shift probe each branch row carries. */
+  shiftUserId: number
 }
 
 export const EXCHANGE_SETTING_KEYS = ['pos_payment_methods', 'pos_payment_method_kinds', 'change_exchange_rate'] as const
@@ -83,7 +86,7 @@ export function exchangeContextQuery(input: ExchangeContextInput): { sql: string
           ORDER BY r.id,ri.id LIMIT ${CUSTOMER_RETURN_MAX_PRIOR_ITEMS + 1}`)} AS prior,
       COALESCE((SELECT json_group_array(return_number) FROM returns WHERE return_number IN (SELECT value FROM json_each(@returnNumbers))),'[]') AS taken_returns,
       COALESCE((SELECT json_group_array(receipt_number) FROM sales WHERE receipt_number IN (SELECT value FROM json_each(@receiptNumbers))),'[]') AS taken_receipts,
-      ${list(pairs(BRANCH_EFFECT_COLUMNS_SQL.split(',').map((column) => column.trim())), 'SELECT * FROM branches')} AS branches,
+      ${list(pairs([...BRANCH_EFFECT_COLUMNS_SQL.split(',').map((column) => column.trim()), 'cash_shift']), `SELECT *, ${currentShiftProbeValueSql('branches.id')} AS cash_shift FROM branches`)} AS branches,
       ${list(pairs(['id', 'name', 'cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'updated_at', 'is_active']),
         'SELECT * FROM products WHERE id IN (SELECT id FROM wanted_products)')} AS products,
       ${list(pairs(['product_id', 'branch_id', 'quantity']),
@@ -112,6 +115,7 @@ export function exchangeContextQuery(input: ExchangeContextInput): { sql: string
       returnNumbers: JSON.stringify(input.returnNumbers),
       receiptNumbers: JSON.stringify(input.receiptNumbers),
       customerId: input.customerId,
+      shiftUserId: input.shiftUserId,
     },
   }
 }
@@ -128,6 +132,8 @@ export type ExchangeContext = CustomerReturnQuoteRows & {
   takenReturnNumbers: Set<string>
   takenReceiptNumbers: Set<string>
   branches: BranchEffectRow[]
+  /** branch id -> that branch's current-shift probe (JSON text), for the R40 cash rule. */
+  branchCashShift: Map<number, string | null>
   products: Map<number, ExchangeCatalogProduct>
   /** `${product_id}:${branch_id}` -> quantity */
   branchStock: Map<string, number>
@@ -201,6 +207,7 @@ export function parseExchangeContext(rows: ExchangeContextRow | readonly Exchang
     takenReturnNumbers: new Set(json<string[]>(row?.taken_returns, []).map(String)),
     takenReceiptNumbers: new Set(json<string[]>(row?.taken_receipts, []).map(String)),
     branches: array('branches') as unknown as BranchEffectRow[],
+    branchCashShift: new Map(array('branches').map((entry) => [Number(entry.id), (entry.cash_shift as string | null) ?? null])),
     products,
     branchStock: new Map(array('branch_stock', EXCHANGE_CONTEXT_LIMITS.branchStock).map((entry) => [`${Number(entry.product_id)}:${Number(entry.branch_id)}`, Number(entry.quantity) || 0])),
     allocations,

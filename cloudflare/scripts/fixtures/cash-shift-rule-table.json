@@ -35,6 +35,7 @@
     { "name": "name with cash pinned digital", "kinds": { "cash card": "digital" }, "before": [], "after": [{ "method": "Cash Card", "amount_usd": 4, "amount_khr": 0 }], "cash": { "usd": 0, "khr": 0 } },
     { "name": "settlement keeps earlier cash, adds none", "before": [{ "method": "Cash", "amount_usd": 3, "amount_khr": 0 }], "after": [{ "method": "Cash", "amount_usd": 3, "amount_khr": 0 }, { "method": "ABA", "amount_usd": 6, "amount_khr": 0 }], "cash": { "usd": 0, "khr": 0 } },
     { "name": "settlement adds cash", "before": [{ "method": "Cash", "amount_usd": 3, "amount_khr": 0 }], "after": [{ "method": "Cash", "amount_usd": 9, "amount_khr": 0 }], "cash": { "usd": 6, "khr": 0 } },
+    { "name": "exchange refund credit row is not cash handed over", "before": [], "after": [{ "method": "Cash", "amount_usd": 5, "amount_khr": 0, "refund_credit": true }], "cash": { "usd": 0, "khr": 0 } },
     { "name": "correction that lowers cash takes none", "before": [{ "method": "Cash", "amount_usd": 9, "amount_khr": 0 }], "after": [{ "method": "Cash", "amount_usd": 3, "amount_khr": 0 }], "cash": { "usd": 0, "khr": 0 } }
   ]
 }

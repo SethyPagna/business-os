@@ -40,6 +40,8 @@ import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../l
 // every sale writer rather than done in the POS component.
 import { isCashPaymentMethod, mergePaymentMethods, parseConfiguredMethods, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, saleMethodsUsed } from '../lib/paymentMethodRegistry'
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
+import { cashTakenNow } from '../lib/cashShiftRule'
+import { cashShiftRefusal, currentShiftProbeSql, parseShiftProbe, SHIFT_PROBE_KEY } from '../lib/shiftCurrentProbe'
 // Sales are Shop-only. The same predicate runs in the UI and here where an
 // offline replay, direct API caller, or stale client cannot bypass it.
 import {
@@ -790,8 +792,8 @@ app.post('/', async (c) => {
       .all<{ id: number; product_id: number; quantity_remaining: number }>(chunk)))
     : null
   const rateSettingRowsRead = readStarted(db.prepare(
-    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','${PAYMENT_METHOD_KINDS_SETTING}')`,
-  ).all<{ key: string; value: string }>())
+    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','${PAYMENT_METHOD_KINDS_SETTING}') UNION ALL ${currentShiftProbeSql()}`,
+  ).all<{ key: string; value: string }>({ shiftBranchId: saleHeaderBranchId, shiftUserId: user.id }))
   const customerRead = body.customer_id
     ? readStarted(db.prepare('SELECT id, name, membership_number, is_anonymous, phone, address FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number; phone: string | null; address: string | null }>([body.customer_id]))
     : body.customer_membership_number
@@ -1315,6 +1317,9 @@ app.post('/', async (c) => {
   const methodKinds = parsePaymentMethodKinds(rateSettings[PAYMENT_METHOD_KINDS_SETTING])
   const rielCashRow = rielCashRowRefused(effectivePaymentDetails, (method) => isCashPaymentMethod(method, methodKinds))
   if (rielCashRow >= 0) return c.json({ error: RIEL_CASH_REFUSAL, code: RIEL_CASH_NOT_HUNDREDS, row: rielCashRow }, 400)
+  // R40 (owner, 26 Nov 2026): cash needs an open shift today. After the duplicate-request lookup, before any write.
+  const cashShiftRefused = cashShiftRefusal({ probe: parseShiftProbe(rateSettings[SHIFT_PROBE_KEY]), user, cash: cashTakenNow([], effectivePaymentDetails, methodKinds), branchId: saleHeaderBranchId })
+  if (cashShiftRefused) return c.json(cashShiftRefused, 409)
   const paymentMethod = Array.from(new Set(effectivePaymentDetails.map((detail) => detail.method))).join(' + ')
   // YYYYMMDD-HHMMSS in Phnom Penh wall-clock time -- the receipt id encodes
   // the sale's own date+time (user, Aug 30 2026), with NO prefix (user,
@@ -2693,8 +2698,8 @@ app.patch('/:id/status', async (c) => {
       return c.json({ error: 'Settle payment separately from notes or stock overrides.' }, 400)
     }
     const settingRows = await db.prepare(`
-      SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}')
-    `).all<{ key: string; value: string }>()
+      SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods','${PAYMENT_METHOD_KINDS_SETTING}') UNION ALL ${currentShiftProbeSql()}
+    `).all<{ key: string; value: string }>({ shiftBranchId: sale.branch_id ?? null, shiftUserId: user.id })
     const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
     const recordedMoney=hasRecordedSaleMoneyPrecision(sale as Parameters<typeof hasRecordedSaleMoneyPrecision>[0])
     // Owner rule (24 Sep 2026): a sale keeps the exchange rate it was booked
@@ -2734,6 +2739,12 @@ app.patch('/:id/status', async (c) => {
       if (stockGuard) return c.json({ error: stockGuard.message, code: stockGuard.code }, 409)
       if (error instanceof SettlementValidationError) return c.json({ error: error.message, code: error.code }, error.statusCode)
       throw error
+    }
+    if (!paymentCorrection) {
+      let storedRows: unknown = []
+      try { storedRows = JSON.parse(String(sale.payment_details ?? '[]')) } catch { storedRows = [] }
+      const settlementRefused = cashShiftRefusal({ probe: parseShiftProbe(settingMap[SHIFT_PROBE_KEY]), user, cash: cashTakenNow(Array.isArray(storedRows) ? storedRows : [], settlementPlan.paymentDetails, parsePaymentMethodKinds(settingMap[PAYMENT_METHOD_KINDS_SETTING])), branchId: sale.branch_id == null ? null : Number(sale.branch_id) })
+      if (settlementRefused) return c.json(settlementRefused, 409)
     }
     const before = await readSaleSettlementState(db, Number(id))
     if (!before) return c.json({ error: 'Sale not found' }, 404)

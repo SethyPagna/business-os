@@ -75,6 +75,7 @@ import { importedReturnedQuantity, importedReturnedQuantitySql, importedReturnLi
 import type { CustomerReturnQuoteV1 } from '../lib/customerReturnEntitlement'
 import { SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { createExchangeReturnV1 } from '../lib/returnExchangeCreate'
+import { cashShiftRefusal, currentShiftProbeValueSql, parseShiftProbe, replacementCashTaken } from '../lib/shiftCurrentProbe'
 import { recordStockCrossings } from '../lib/stockCrossingAlert'
 import { RETURN_EXCHANGE_MAX_LINES, ReturnExchangeError, type ExchangeLineIntent } from '../lib/returnExchangeIntent'
 import { priceAndQuoteExchange } from '../lib/returnExchangeQuote'
@@ -1777,7 +1778,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   // then) and every new row says so; while every branch is active this is the
   // identity (nothing below changes).
   const recordedBranchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputsRaw[0]?.branch_id) || null
-  const branchDirectory = await db.prepare(`SELECT ${BRANCH_EFFECT_COLUMNS_SQL} FROM branches`).all<BranchEffectRow>()
+  const branchDirectory = await db.prepare(`SELECT ${BRANCH_EFFECT_COLUMNS_SQL}, ${currentShiftProbeValueSql('branches.id')} AS cash_shift, (SELECT value FROM settings WHERE key = 'pos_payment_method_kinds') AS method_kinds FROM branches`).all<BranchEffectRow & { cash_shift?: string | null; method_kinds?: string | null }>({ shiftUserId: user.id })
+  const cashShiftOf = (branch: number | null) => parseShiftProbe(branchDirectory.find((row) => Number(row.id) === Number(branch))?.cash_shift)
   const redirectTarget = branchRedirectTarget(c)
   let headerEffect: BranchEffect | null = null
   const itemEffects: Array<BranchEffect | null> = []
@@ -1967,6 +1969,11 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     }
   }
   const cashRefundUsd = refundCashUsd(totalRefundUsd, owedReductionUsd)
+  // R40 (owner, 27 Nov 2026): cash handed back needs an open shift at the branch the refund leaves from. A return that only lowers a Not Paid debt has no cash share.
+  const refundShiftRefused = cashRefundUsd > 0
+    ? cashShiftRefusal({ probe: cashShiftOf(branchId), user, cash: { usd: cashRefundUsd, khr: 0 }, branchId: branchId ?? null, direction: 'out' })
+    : null
+  if (refundShiftRefused) return c.json(refundShiftRefused, 409)
   if (refundCurrency === 'KHR' && cashRefundUsd > 0 && !(Number(totalRefundKhr) > 0)) {
     return c.json({ error: 'This return has no riel price to refund in riel. Refund it in dollars.', code: 'return_refund_khr_unavailable' }, 400)
   }
@@ -2116,6 +2123,10 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
     replacementCustomerAddress = candidateIsAnonymous ? null : contactDisplayAddress(saleMeta?.customer_address) || null
     replacementMembershipNumber = candidateCustomer && !candidateIsAnonymous ? candidateCustomer.membership_number || null : null
     const paymentDetails = replacementPaymentMethod && subtotalUsd > 0 ? [{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 }] : []
+    const replacementShiftRefused = cashShiftRefusal({
+      probe: cashShiftOf(branchId), user, cash: replacementCashTaken(paymentDetails, branchDirectory[0]?.method_kinds), branchId: branchId ?? null,
+    })
+    if (replacementShiftRefused) return c.json(replacementShiftRefused, 409)
     replacementCreationSnapshot = buildSaleCreationSnapshot({
       origin: 'return_replacement', recordedAt: occurredAt, saleAt: occurredAt,
       receiptNumber: replacementReceiptNumber, actor: user, cashierId: authenticatedActorId,

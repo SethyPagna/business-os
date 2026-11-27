@@ -120,6 +120,9 @@ function fixture(hooks = {}) {
               VALUES(500,10,'powder-lot','POWDER-LOT','2027-06-01','2026-09-01',1,1)`).run()
   db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,10)').run()
   })
+  // R40: cash needs an open shift, so the cashier of this fixture has today's shift open at the Shop (setup only).
+  db.prepare(`INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at)
+              VALUES('ATOMIC-S1',?,?,1,'Shop',date('now','+7 hours'),datetime('now'))`).run([USER.id, USER.name])
   assert.throws(() => db.prepare('UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=10').run(), /stock_transaction_required/)
   return { raw: db, route: routeDb(db, hooks) }
 }

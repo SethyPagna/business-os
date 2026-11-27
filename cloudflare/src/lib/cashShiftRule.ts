@@ -1,6 +1,6 @@
 import { isCashPaymentMethod, type PaymentMethodKindMap } from './paymentMethodRegistry'
 
-export type CashTenderRow = { method?: unknown; amount_usd?: unknown; amount_khr?: unknown }
+export type CashTenderRow = { method?: unknown; amount_usd?: unknown; amount_khr?: unknown; refund_credit?: unknown }
 export type CashAmounts = { usd: number; khr: number }
 export type CashShiftState = 'open' | 'closed' | 'cancelled' | 'none'
 export type CashDirection = 'in' | 'out'
@@ -16,7 +16,7 @@ function cashSums(rows: readonly CashTenderRow[], kinds: PaymentMethodKindMap): 
   let usd = 0
   let khr = 0
   for (const row of rows) {
-    if (!isCashPaymentMethod(row.method, kinds)) continue
+    if (row.refund_credit === true || !isCashPaymentMethod(row.method, kinds)) continue
     const rowUsd = Number(row.amount_usd)
     const rowKhr = Number(row.amount_khr)
     if (Number.isFinite(rowUsd) && rowUsd > 0) usd += rowUsd

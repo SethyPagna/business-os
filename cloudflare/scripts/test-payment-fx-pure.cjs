@@ -23,6 +23,7 @@ const actual = new Set(['schemaObjectProbe','loyaltyEligibility','businessMainte
   'nativeSaleChange','deliveryAmounts','saleRecords','saleRecordEvents','saleCreationSnapshot',
   'moneyPrecision','saleMoneyPrecision','saleItemPricing','promotionRules','productMergeLineage','saleMutationHeaderQuote',
   'anonymousCustomer',
+  'cashShiftRule','shiftCurrentProbe','businessDateWindow',
   'receiptNumber','clientTimestamp',
   // N21: routes/sales.ts resolves the display address through this kernel on
   // every write. A stub makes contactDisplayAddress undefined and the route

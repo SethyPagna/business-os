@@ -101,6 +101,7 @@ function fixture(stock, hooks = {}) {
   const db = openDb(loadAll())
   seedStockFixture(db.db, () => {
     db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
+    db.prepare("INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('R40-S1',71,'Sale Cashier',1,'Shop',date('now','+7 hours'),datetime('now'))").run() // R40: cash needs an open shift (setup only)
     db.prepare(`INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active,low_stock_threshold,out_of_stock_threshold)
                 VALUES(10,'Powder','POWDER',${Number(stock)},9.5,38000,4,16000,1,10,0)`).run()
     db.prepare(`INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,${Number(stock)})`).run()

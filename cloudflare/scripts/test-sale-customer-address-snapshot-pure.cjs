@@ -46,7 +46,7 @@ const actual = new Set(['stockTransaction','loyaltyEligibility','businessDateWin
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
   'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
-  'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer',
+  'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer', 'cashShiftRule', 'shiftCurrentProbe', 'businessDateWindow',
   'moneyPrecision', 'saleMoneyPrecision', 'saleItemPricing', 'promotionRules',
   'productMergeLineage', 'saleMutationHeaderQuote', 'reportMoneyPrecision',
   // Shared per-isolate PRAGMA table_info() memoization saleMoneySchemaReady

@@ -104,6 +104,7 @@ function fixture(hooks = {}) {
   const db = openDb(loadAll())
 assert.throws(() => db.prepare("INSERT INTO products(name) VALUES('unadmitted guard control')").run(), /stock_transaction_required/)
   db.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)").run()
+  db.prepare("INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('R40-S1',71,'Sale Cashier',1,'Shop',date('now','+7 hours'),datetime('now'))").run() // R40: cash needs an open shift (setup only)
   seedStockFixture(db, () => db.prepare(`INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
               VALUES(10,'Powder','POWDER',10,9.5,38000,4,16000,1)`).run())
   seedStockFixture(db, () => db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,10)').run())

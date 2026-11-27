@@ -175,6 +175,7 @@ function fixture({ legacyThrough0153 = false } = {}) {
   const db = openDb(legacyThrough0153 ? legacyMigrationsThrough0153 : loadAll())
   const seed = () => {
   run(db, `INSERT INTO branches(id,name,is_default,is_active) VALUES(1,'Shop',1,1)`)
+  run(db, `INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('R40-S1',51,'Lot Cashier',1,'Shop',date('now','+7 hours'),datetime('now'))`) // R40: cash needs an open shift (setup only)
   run(db, `INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
            VALUES(10,'Serum','SERUM',10,5,20000,2,8000,1)`)
   run(db, `INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active)
