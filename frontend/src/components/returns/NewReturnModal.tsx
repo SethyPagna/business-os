@@ -53,6 +53,7 @@ import type { ExchangeQuoteV1, PendingReturnCreateV1, ReturnQuoteV1 } from '../.
 import SaleSettlementEditor from '../sales/SaleSettlementEditor.tsx'
 import { CashOutShiftNote } from '../shifts/CashShiftNote.tsx'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { releaseRefusedReturnRequest, type AttemptedReturnRequest } from './helpers/returnCashShiftRefusal.ts'
 import { configuredSettlementMethods, type SettlementRow } from '../sales/saleSettlement.ts'
 import { exchangeGiveBackNeedsShift } from '../sales/settlementCashShift.ts'
 import {
@@ -1068,6 +1069,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false) || !beginSingleAction(submitInFlightRef)) return
     const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
     const current = () => lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)
+    let attempted: AttemptedReturnRequest | null = null
     setSubmitting(true)
     try {
       const transport = await loadReturnsTransport()
@@ -1096,6 +1098,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         if (!current()) return
         setPendingV1(pending)
       }
+      attempted = { pending, recovery }
       const result = await withLoaderTimeout(() => transport.submitReturnCreateV1(user?.id, pending!, recovery), 'Create net return', RETURN_CREATE_TIMEOUT_MS)
       if (!current()) return
       await transport.clearPendingReturnCreateV1(user?.id, pending, recovery)
@@ -1112,6 +1115,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       if (!current()) return
       // Unknown, permission and capability failures never rewrite/remove the
       // frozen request: an earlier timed-out attempt could already be committed.
+      if (await releaseRefusedReturnRequest(error, attempted, async (saved, recovery) => { await (await loadReturnsTransport()).clearPendingReturnCreateV1(user?.id, saved, recovery) })) { if (!current()) return; setPendingV1(null); setReviewedPendingBody(null) }
       setPendingQuoteRejected((error as { returnV1QuoteRejected?: boolean })?.returnV1QuoteRejected === true)
       notify(saleSubmitRefusalText(error, (key) => T(key, '')) ?? T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
     } finally {

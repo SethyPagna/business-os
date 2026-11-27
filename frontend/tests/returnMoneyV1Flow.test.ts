@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { beginSingleAction, finishSingleAction } from '../src/utils/actionGuards.ts'
 import { subtractDecimalSum } from '../src/utils/moneyPrecision.ts'
 import { returnEditLock } from '../src/components/returns/helpers/returnEditLock.ts'
+import { releaseRefusedReturnRequest } from '../src/components/returns/helpers/returnCashShiftRefusal.ts'
 
 // Execute shipping callback ASTs, not reimplementations/source regex claims.
 function callback(file: string, name: string, bindings: Record<string, unknown>): (...args: any[]) => Promise<void> {
@@ -42,7 +43,7 @@ function setup(options: { restored?: boolean; storageFailure?: boolean; timeout?
     activeItems: [{ id: 3, returnQty: 1, stock_action: 'none', branch_id: 2 }], finalReason: 'reason', itemsMissingLot: [],
     notes: '', returnType: 'refund', foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
     withLoaderTimeout: async (fn: () => Promise<unknown>) => { const promise = fn(); if (options.timeout) { void promise.catch(() => {}); throw Error('timeout') } return promise }, RETURN_CREATE_TIMEOUT_MS: 1,
-    notify: () => events.push('notify'), T: (_key: string, fallback: string) => fallback, getLoaderErrorMessage: (e: Error) => e.message, saleSubmitRefusalText: () => null,
+    notify: () => events.push('notify'), T: (_key: string, fallback: string) => fallback, getLoaderErrorMessage: (e: Error) => e.message, saleSubmitRefusalText: () => null, releaseRefusedReturnRequest,
     window: { dispatchEvent: () => events.push('invalidate') }, CustomEvent: class {},
     onSuccess: () => { events.push('success'); return success.promise }, onClose: () => events.push('close'),
     setPendingQuoteRejected: (value: boolean) => events.push('rejected:' + value),
@@ -84,6 +85,22 @@ for (const outcome of ['success', 'error', 'unmount']) {
   h.network.resolve({ id: 1 })
   await new Promise(resolve => setTimeout(resolve, 0))
   assert.ok(!h.events.includes('clear'), 'late acknowledgement after UI timeout does not discard frozen retry')
+}
+{
+  // R40 S4: the Worker refused the cash (409 shift_required_for_cash) before writing anything: the saved request is released so the tender can change;
+  // a lost network (no Worker answer) keeps it behind the unknown-outcome panel.
+  const h = setup(), run = h.handler()()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  h.network.reject(Object.assign(Error('Open a shift to give cash back.'), { status: 409, code: 'shift_required_for_cash', shift_state: 'none', direction: 'out' })); await run
+  assert.ok(h.events.includes('POST')); assert.ok(h.events.includes('clear'), 'a shift refusal clears the saved request')
+  assert.ok(h.events.indexOf('clear') < h.events.lastIndexOf('unpending'), 'the panel goes only after the saved request is cleared')
+  assert.ok(h.events.includes('notify') && !h.events.includes('success'))
+}
+{
+  const h = setup(), run = h.handler()()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  h.network.reject(Object.assign(Error('Failed to fetch'), { outcome: 'unknown' })); await run
+  assert.ok(!h.events.includes('clear'), 'a lost network keeps the saved request'); assert.ok(!h.events.includes('unpending'))
 }
 {
   // P4-4b item 1: onClose() now fires synchronously once the write settles
