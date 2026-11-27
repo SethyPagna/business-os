@@ -89,6 +89,7 @@ import {
 } from '../../utils/directMutationRequest.ts'
 import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 import { getAuthoritativeSale, getSaleStatusReceipt, getSaleLineReceipt } from '../../api/salesTransport.ts'
+import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMutationState } from '../../utils/directMutationRequest.ts'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
@@ -1472,7 +1473,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             ? translateOr('riel_cash_not_hundreds', 'Cash riel must be whole 100៛ notes.', 'រៀលសាច់ប្រាក់ ត្រូវគត់ ១០០៛។')
           : code === 'customer_state_conflict'
             ? translateOr('customer_state_conflict', 'The selected customer changed before the sale was saved. Review the customer and try again.', 'អតិថិជនដែលបានជ្រើសបានផ្លាស់ប្តូរ មុនពេលរក្សាទុកការលក់។ សូមពិនិត្យអតិថិជន ហើយសាកល្បងម្ដងទៀត។')
-            : saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
+            : saleSubmitRefusalText(error, t) ?? saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
         return { settlementError: detail }
       }
       if (directMutationOutcomeIsUnknown(error) && attemptedRequest) {
