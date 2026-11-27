@@ -3,6 +3,8 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import type { SettlementRow } from './saleSettlement.ts'
 import { paymentMethodIdentity, settlementOutstandingUsd, settlementRowRielCashInvalid, settlementRowsIssue, settlementTotals } from './saleSettlement.ts'
 import type { PaymentMethodKindMap } from '../../utils/paymentMethodKind.ts'
+import CashShiftNote, { useCashShiftGate } from '../shifts/CashShiftNote.tsx'
+import { settlementCashRows, settlementTakesCash } from './settlementCashShift.ts'
 
 type Props = {
   rows: SettlementRow[]
@@ -17,6 +19,8 @@ type Props = {
   allowRecordedEdits?: boolean
   /** The shop's pos_payment_method_kinds pins: which methods are drawer cash. */
   methodKinds?: PaymentMethodKindMap
+  /** R40: the branch whose till takes this cash. When set, a new cash row with no open shift there shows the reason and the way through. */
+  cashShift?: { branchId: number | null; branchName?: string | null; direction?: 'in' | 'out' } | null
   translate: (key: string, english: string, khmer?: string) => string
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
@@ -25,7 +29,7 @@ type Props = {
 
 export const MAX_SETTLEMENT_ROWS = 12
 
-export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, moneyPrecisionVersion, saving, error, recordedIssue, allowRecordedEdits = false, methodKinds = {}, translate, fmtUSD, fmtKHR, onChange }: Props) {
+export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, moneyPrecisionVersion, saving, error, recordedIssue, allowRecordedEdits = false, methodKinds = {}, cashShift = null, translate, fmtUSD, fmtKHR, onChange }: Props) {
   const totals = settlementTotals(rows, exchangeRate)
   // Outstanding is the one definition of paid read as an amount: a tender
   // inside the half-cent band owes nothing (it completes the sale), so it is
@@ -151,7 +155,15 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
         <div className="flex items-center justify-between gap-3"><dt>{translate('total', 'Total', 'សរុប')}</dt><dd className="text-right font-semibold">{fmtUSD(totalUsd)}</dd></div>
         <div className="flex items-center justify-between gap-3"><dt>{remaining > 0 ? translate('outstanding_balance', 'Outstanding', 'នៅជំពាក់') : translate('change', 'Change', 'ប្រាក់អាប់')}</dt><dd className={`text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>{balanceText}</dd></div>
       </dl>
+      {cashShift && settlementTakesCash(rows, methodKinds, allowRecordedEdits) ? <SettlementCashShiftNote rows={rows} cashShift={cashShift} /> : null}
       {error || reviewError ? <p className="mt-2 text-xs font-medium leading-relaxed text-red-600 dark:text-red-400" role="alert">{error || reviewError}</p> : null}
     </div>
   )
+}
+
+/** Mounted only while a new cash row has an amount, so the shift is read (once per branch, shared with the POS) only when it matters. */
+function SettlementCashShiftNote({ rows, cashShift }: { rows: SettlementRow[]; cashShift: NonNullable<Props['cashShift']> }) {
+  const direction = cashShift.direction ?? 'in'
+  const { gate, state } = useCashShiftGate(cashShift.branchId, settlementCashRows(rows))
+  return <CashShiftNote gate={gate} state={state} branchId={cashShift.branchId} branchName={cashShift.branchName ?? null} direction={direction} className="mt-2" />
 }

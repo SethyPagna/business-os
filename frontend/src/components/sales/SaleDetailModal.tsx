@@ -3073,6 +3073,7 @@ export default function SaleDetailModal({
                   recordedIssue={settlementSession.recordedIssue}
                   allowRecordedEdits={paymentCorrection}
                   methodKinds={settlementMethodKinds}
+                  cashShift={{ branchId: sale.branch_id == null ? null : Number(sale.branch_id), branchName: sale.branch_name ?? null }}
                   translate={translateOr}
                   fmtUSD={fmtUSD}
                   fmtKHR={fmtKHR}
