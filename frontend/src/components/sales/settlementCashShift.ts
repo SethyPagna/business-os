@@ -18,3 +18,8 @@ export function settlementTakesCash(rows: readonly SettlementRow[], kinds: Payme
 export function exchangeGiveBackNeedsShift(overpaidUsd: number, rows: readonly SettlementRow[], kinds: PaymentMethodKindMap): boolean {
   return overpaidUsd > 0 && !settlementTakesCash(rows, kinds, false)
 }
+
+/** Save waits while the cash check blocks it: the note beside the rows already says why and how to get through. */
+export function cashShiftBlocksSave(gate: { kind: string }): boolean {
+  return gate.kind === 'block'
+}

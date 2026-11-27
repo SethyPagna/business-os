@@ -528,6 +528,7 @@ export default function SaleDetailModal({
     JSON.stringify(settlementSession.configuredMethods) === JSON.stringify(paymentConfig.value.configuredMethods) &&
     settlementSession.exchangeRate === saleSettlementRate
   const [settlementRows, setSettlementRows] = useState<SettlementRow[]>(settlementSession.rows)
+  const [cashShiftBlocked, setCashShiftBlocked] = useState(false)
   const settlementBaselineRef = useRef<SettlementRow[]>(settlementSession.rows)
   const settlementRequestIdRef = useRef(createSettlementRequestId())
   const addRequestIdRef = useRef(createSettlementRequestId())
@@ -3044,6 +3045,7 @@ export default function SaleDetailModal({
                 }}
                 onConfirm={handleStatusUpdate}
                 reviewRequestId={pendingStatus ? Math.max(1, statusReviewRequestId) : statusReviewRequestId}
+                confirmBlocked={cashShiftBlocked}
                 confirmDisabled={pendingStatus || (needsPaymentEntry && (!paymentConfigReady || settlementRows.length > MAX_SETTLEMENT_ROWS))}
                 showNotes={!needsPaymentEntry}
               >
@@ -3074,6 +3076,7 @@ export default function SaleDetailModal({
                   allowRecordedEdits={paymentCorrection}
                   methodKinds={settlementMethodKinds}
                   cashShift={{ branchId: sale.branch_id == null ? null : Number(sale.branch_id), branchName: sale.branch_name ?? null }}
+                  onCashShiftBlockedChange={setCashShiftBlocked}
                   translate={translateOr}
                   fmtUSD={fmtUSD}
                   fmtKHR={fmtKHR}

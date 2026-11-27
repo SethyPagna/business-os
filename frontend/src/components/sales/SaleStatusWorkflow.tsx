@@ -20,7 +20,8 @@ export default function SaleStatusWorkflow({
   onConfirm,
   children,
   reviewRequestId = 0,
-  confirmDisabled = false,
+  confirmDisabled: confirmDisabledBase = false,
+  confirmBlocked = false,
   showNotes = true,
 }: {
   /** The shown status word (saleStatusDisplay), not the raw column. */
@@ -36,8 +37,11 @@ export default function SaleStatusWorkflow({
   children?: React.ReactNode
   reviewRequestId?: number
   confirmDisabled?: boolean
+  /** R40: the cash check blocks Apply; the children show the reason. */
+  confirmBlocked?: boolean
   showNotes?: boolean
 }) {
+  const confirmDisabled = confirmDisabledBase || confirmBlocked
   // It opens on the destination chips, real content from first paint: there is
   // no "Status" opener to press first. Picking a chip moves to the review.
   const [step, setStep] = useState<'destination' | 'review'>('destination')

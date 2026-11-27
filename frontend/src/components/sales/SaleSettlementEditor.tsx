@@ -1,10 +1,11 @@
+import { useEffect } from 'react'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import type { SettlementRow } from './saleSettlement.ts'
 import { paymentMethodIdentity, settlementOutstandingUsd, settlementRowRielCashInvalid, settlementRowsIssue, settlementTotals } from './saleSettlement.ts'
 import type { PaymentMethodKindMap } from '../../utils/paymentMethodKind.ts'
 import CashShiftNote, { useCashShiftGate } from '../shifts/CashShiftNote.tsx'
-import { settlementCashRows, settlementTakesCash } from './settlementCashShift.ts'
+import { cashShiftBlocksSave, settlementCashRows, settlementTakesCash } from './settlementCashShift.ts'
 
 type Props = {
   rows: SettlementRow[]
@@ -21,6 +22,8 @@ type Props = {
   methodKinds?: PaymentMethodKindMap
   /** R40: the branch whose till takes this cash. When set, a new cash row with no open shift there shows the reason and the way through. */
   cashShift?: { branchId: number | null; branchName?: string | null; direction?: 'in' | 'out' } | null
+  /** R40: true while the cash check blocks this save, so the form's Save waits with the note's reason showing. */
+  onCashShiftBlockedChange?: (blocked: boolean) => void
   translate: (key: string, english: string, khmer?: string) => string
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
@@ -28,8 +31,9 @@ type Props = {
 }
 
 export const MAX_SETTLEMENT_ROWS = 12
+const noop = () => {}
 
-export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, moneyPrecisionVersion, saving, error, recordedIssue, allowRecordedEdits = false, methodKinds = {}, cashShift = null, translate, fmtUSD, fmtKHR, onChange }: Props) {
+export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, moneyPrecisionVersion, saving, error, recordedIssue, allowRecordedEdits = false, methodKinds = {}, cashShift = null, onCashShiftBlockedChange, translate, fmtUSD, fmtKHR, onChange }: Props) {
   const totals = settlementTotals(rows, exchangeRate)
   // Outstanding is the one definition of paid read as an amount: a tender
   // inside the half-cent band owes nothing (it completes the sale), so it is
@@ -155,15 +159,20 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
         <div className="flex items-center justify-between gap-3"><dt>{translate('total', 'Total', 'សរុប')}</dt><dd className="text-right font-semibold">{fmtUSD(totalUsd)}</dd></div>
         <div className="flex items-center justify-between gap-3"><dt>{remaining > 0 ? translate('outstanding_balance', 'Outstanding', 'នៅជំពាក់') : translate('change', 'Change', 'ប្រាក់អាប់')}</dt><dd className={`text-right font-semibold ${remaining > 0 ? 'text-red-600' : 'text-emerald-700 dark:text-emerald-300'}`}>{balanceText}</dd></div>
       </dl>
-      {cashShift && settlementTakesCash(rows, methodKinds, allowRecordedEdits) ? <SettlementCashShiftNote rows={rows} cashShift={cashShift} /> : null}
+      {cashShift && settlementTakesCash(rows, methodKinds, allowRecordedEdits) ? <SettlementCashShiftNote rows={rows} cashShift={cashShift} onBlockedChange={onCashShiftBlockedChange ?? noop} /> : null}
       {error || reviewError ? <p className="mt-2 text-xs font-medium leading-relaxed text-red-600 dark:text-red-400" role="alert">{error || reviewError}</p> : null}
     </div>
   )
 }
 
 /** Mounted only while a new cash row has an amount, so the shift is read (once per branch, shared with the POS) only when it matters. */
-function SettlementCashShiftNote({ rows, cashShift }: { rows: SettlementRow[]; cashShift: NonNullable<Props['cashShift']> }) {
+function SettlementCashShiftNote({ rows, cashShift, onBlockedChange }: { rows: SettlementRow[]; cashShift: NonNullable<Props['cashShift']>; onBlockedChange: (blocked: boolean) => void }) {
   const direction = cashShift.direction ?? 'in'
   const { gate, state } = useCashShiftGate(cashShift.branchId, settlementCashRows(rows))
+  const blocked = cashShiftBlocksSave(gate)
+  useEffect(() => {
+    onBlockedChange(cashShiftBlocksSave(gate))
+    return () => onBlockedChange(false)
+  }, [blocked, onBlockedChange])
   return <CashShiftNote gate={gate} state={state} branchId={cashShift.branchId} branchName={cashShift.branchName ?? null} direction={direction} className="mt-2" />
 }

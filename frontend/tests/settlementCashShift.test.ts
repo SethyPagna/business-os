@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { exchangeGiveBackNeedsShift, settlementCashRows, settlementTakesCash } from '../src/components/sales/settlementCashShift.ts'
+import { cashShiftBlocksSave, exchangeGiveBackNeedsShift,settlementCashRows, settlementTakesCash } from '../src/components/sales/settlementCashShift.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (...parts: string[]) => readFileSync(path.join(here, '..', 'src', ...parts), 'utf8').replace(/\r\n/g, '\n')
@@ -57,6 +57,20 @@ runTest('an exchange that gives cash change back shows the cash-out note, once',
   const ret = read('components', 'returns', 'NewReturnModal.tsx')
   assert.match(ret, /exchangeGiveBackNeedsShift\(overpaidUsd, payRows, methodKinds\)/, 'wiring: the exchange form decides with the shared helper')
   assert.match(ret, /<CashOutShiftNote branchId=\{foundSale\?\.branch_id \? Number\(foundSale\.branch_id\) : null\} usd=\{overpaidUsd\}/, 'wiring: the note carries the change amount')
+})
+runTest('Save is disabled while the cash check blocks it, with the reason shown; non-cash and corrections stay saveable', () => {
+  const block = { kind: 'block', shiftState: 'none', action: 'open', openerName: null } as const
+  assert.equal(cashShiftBlocksSave(block), true)
+  assert.equal(cashShiftBlocksSave({ kind: 'pass' }), false, 'an open shift or a non-cash row')
+  assert.equal(cashShiftBlocksSave({ kind: 'ask_worker' }), false, 'an unread shift is left to the Worker')
+  const editor = read('components', 'sales', 'SaleSettlementEditor.tsx')
+  assert.match(editor, /onCashShiftBlockedChange\?: \(blocked: boolean\) => void/)
+  assert.match(editor, /onBlockedChange\(cashShiftBlocksSave\(gate\)\)/, 'the editor reports from the same gate that draws the reason')
+  assert.match(editor, /return \(\) => onBlockedChange\(false\)/, 'unmounting (cash removed, correction) releases Save')
+  const detail = read('components', 'sales', 'SaleDetailModal.tsx')
+  assert.match(detail, /onCashShiftBlockedChange=\{setCashShiftBlocked\}/)
+  assert.match(detail, /confirmBlocked=\{cashShiftBlocked\}/, 'the Apply button is disabled by the block')
+  assert.match(read('components', 'sales', 'SaleStatusWorkflow.tsx'), /const confirmDisabled = confirmDisabledBase \|\| confirmBlocked/)
 })
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
