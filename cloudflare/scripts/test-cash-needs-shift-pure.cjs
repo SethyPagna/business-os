@@ -209,6 +209,55 @@ async function refused(f, body, state) {
     console.log('PASS the probe answers like readCurrent (exact branch first, All fallback, today only) on the business-date index')
   }
   {
+    // r40build2 step 1: a return with no branch is judged against an All shift and the policy, never skipped (hole: the per-branch
+    // lookup found nothing, so an admin with shift_admin_exempt=false passed and an All shift never counted).
+    const f = h.fixture()
+    const probe = h.load('lib/shiftCurrentProbe.ts')
+    const rowsSql = `SELECT id, ${probe.branchCashShiftColumnsSql()} FROM branches`
+    const rows = () => f.raw.prepare(rowsSql).all({ shiftUserId: 71 })
+    const ask = (user, branchId, cash = { usd: 5, khr: 0 }) => probe.cashShiftRefusal({ probe: probe.pickCashShiftProbe(rows(), branchId), user, cash, branchId, direction: 'out' })
+    const employee = { ...h.USER, role_code: 'employee', permissions: '{"sales":true}' }
+    f.raw.prepare('DELETE FROM shift_sessions').run()
+    assert.equal(ask(employee, null).shift_state, 'none', 'no branch and no All shift: refused')
+    f.raw.prepare("INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('ALL-1',71,'Sale Cashier',NULL,NULL,date('now','+7 hours'),datetime('now'))").run()
+    assert.equal(ask(employee, null), null, 'no branch: an All shift covers it')
+    assert.equal(ask(employee, 1), null, 'a branch return: the All shift covers it too')
+    setSetting(f.raw, 'shift_admin_exempt', 'false')
+    f.raw.prepare("UPDATE shift_sessions SET closed_at=datetime('now')").run()
+    assert.equal(ask(ADMIN, null).shift_state, 'closed', 'no branch, admin_exempt=false, All shift closed: an administrator is refused too')
+    assert.equal(ask(ADMIN, 99).shift_state, 'closed', 'an unknown branch id falls back to the All shift')
+    assert.equal(ask(employee, null, { usd: 0, khr: 0 }), null, 'a debt-only return (no cash) is never refused')
+    f.raw.prepare('DELETE FROM branches').run()
+    assert.equal(probe.pickCashShiftProbe([], null), null)
+    console.log('PASS returns with no branch: the All shift and the admin policy decide; never skipped')
+  }
+  {
+    // r40build2 step 2: a later payment on a sale of a retired branch is judged at the active successor's shift (the POS "Switch to <successor>").
+    const f = h.fixture()
+    f.raw.prepare("INSERT INTO branches(id,name,is_default,is_active) VALUES(2,'LC Store',0,1)").run()
+    const created = await h.postSale(f.route, bodyWith('r40-retired'))
+    assert.equal(created.status, 200)
+    const id = created.body.sale.id
+    f.raw.prepare("UPDATE sales SET sale_status='awaiting_payment',amount_paid_usd=0,amount_paid_khr=0,payment_details='[]' WHERE id=?").run([id])
+    f.raw.prepare("UPDATE branches SET is_active=0, is_default=0, successor_branch_id=2 WHERE id=1").run()
+    f.raw.prepare('DELETE FROM shift_sessions').run()
+    h.setUser({ ...h.USER, role_code: 'employee', permissions: '{"sales":true,"pos":true}' })
+    const pay = async (n) => {
+      const response = await h.app.request(`/${id}/status`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ client_request_id: `r40-ret-${n}`, sale_status: 'completed', expected_exchange_rate: 4000, payment_details: [{ method: 'Cash', amount_usd: 9.5, amount_khr: 0 }] }),
+      }, { DB: f.route }, h.executionCtx)
+      return { status: response.status, body: await response.json() }
+    }
+    const none = await pay('a')
+    assert.equal(none.status, 409, 'the successor has no shift today')
+    assert.equal(none.body.branch_id, 1)
+    f.raw.prepare("INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('SUCC',71,'Sale Cashier',2,'LC Store',date('now','+7 hours'),datetime('now'))").run()
+    const ok = await pay('b')
+    assert.equal(ok.status, 200, JSON.stringify(ok.body))
+    console.log("PASS later payment on a retired branch's sale uses the active successor's shift")
+  }
+  {
     const f = h.fixture()
     const ctx = h.load('lib/returnExchangeContext.ts')
     const q = ctx.exchangeContextQuery({ saleId: 1, saleItemIds: [], replacementProductIds: [], explicitBatchIds: [], returnNumbers: [], receiptNumbers: [], customerId: null, shiftUserId: 71 })
@@ -224,6 +273,8 @@ async function refused(f, body, state) {
     assert.match(src, /cashRefundUsd > 0/, 'returns wiring: a debt-only return has no cash share and is never refused')
     assert.match(src, /replacementShiftRefused/, 'returns wiring: legacy replacement default Cash')
     assert.match(create, /cashShiftRefusal\(/, 'returns wiring: exchange top-up')
+    assert.match(src, /pickCashShiftProbe\(branchDirectory, branch\)/, 'returns wiring: the probe is picked with the no-branch fallback, never skipped')
+    assert.match(create, /pickCashShiftProbe\(ctx\.branches/, 'exchange wiring: the same pick')
     const exchangeCheck = create.indexOf('cashShiftRefusal(')
     assert.ok(exchangeCheck > create.indexOf('settleExchange(') && exchangeCheck < create.indexOf('planExchangeReturnLots('), 'the exchange check sits after the tender is settled and before any write')
     const refund = src.indexOf('refundShiftRefused')

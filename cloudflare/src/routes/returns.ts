@@ -75,7 +75,7 @@ import { importedReturnedQuantity, importedReturnedQuantitySql, importedReturnLi
 import type { CustomerReturnQuoteV1 } from '../lib/customerReturnEntitlement'
 import { SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { createExchangeReturnV1 } from '../lib/returnExchangeCreate'
-import { cashShiftRefusal, currentShiftProbeValueSql, parseShiftProbe, replacementCashTaken } from '../lib/shiftCurrentProbe'
+import { branchCashShiftColumnsSql, cashShiftRefusal, pickCashShiftProbe, replacementCashTaken } from '../lib/shiftCurrentProbe'
 import { recordStockCrossings } from '../lib/stockCrossingAlert'
 import { RETURN_EXCHANGE_MAX_LINES, ReturnExchangeError, type ExchangeLineIntent } from '../lib/returnExchangeIntent'
 import { priceAndQuoteExchange } from '../lib/returnExchangeQuote'
@@ -1778,8 +1778,8 @@ async function createCustomerReturn(c: Context<{ Bindings: Env; Variables: { use
   // then) and every new row says so; while every branch is active this is the
   // identity (nothing below changes).
   const recordedBranchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputsRaw[0]?.branch_id) || null
-  const branchDirectory = await db.prepare(`SELECT ${BRANCH_EFFECT_COLUMNS_SQL}, ${currentShiftProbeValueSql('branches.id')} AS cash_shift, (SELECT value FROM settings WHERE key = 'pos_payment_method_kinds') AS method_kinds FROM branches`).all<BranchEffectRow & { cash_shift?: string | null; method_kinds?: string | null }>({ shiftUserId: user.id })
-  const cashShiftOf = (branch: number | null) => parseShiftProbe(branchDirectory.find((row) => Number(row.id) === Number(branch))?.cash_shift)
+  const branchDirectory = await db.prepare(`SELECT ${BRANCH_EFFECT_COLUMNS_SQL}, ${branchCashShiftColumnsSql()}, (SELECT value FROM settings WHERE key = 'pos_payment_method_kinds') AS method_kinds FROM branches`).all<BranchEffectRow & { cash_shift?: string | null; cash_shift_all?: string | null; method_kinds?: string | null }>({ shiftUserId: user.id })
+  const cashShiftOf = (branch: number | null) => pickCashShiftProbe(branchDirectory, branch)
   const redirectTarget = branchRedirectTarget(c)
   let headerEffect: BranchEffect | null = null
   const itemEffects: Array<BranchEffect | null> = []

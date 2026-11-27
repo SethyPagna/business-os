@@ -11,12 +11,33 @@ export function currentShiftBranchSql(column: string, branchParam: string): stri
 export const SHIFT_PROBE_KEY = '__current_shift'
 
 /**
+ * The branch whose till takes the cash: a retired branch's active successor (the POS "Switch to <successor>"), else the branch itself.
+ * A retired branch with no active successor stays itself, so only an All shift can cover it.
+ */
+function tillBranchSql(branchExpr: string): string {
+  return `COALESCE((SELECT successor.id FROM branches retired JOIN branches successor ON successor.id = retired.successor_branch_id AND successor.is_active = 1
+    WHERE retired.id = ${branchExpr} AND retired.is_active = 0), ${branchExpr})`
+}
+
+/** The two probe columns a branch-directory read carries: the row's own branch and the All (no branch) till. Bound param @shiftUserId. */
+export function branchCashShiftColumnsSql(): string {
+  return `${currentShiftProbeValueSql('branches.id')} AS cash_shift, ${currentShiftProbeValueSql('NULL')} AS cash_shift_all`
+}
+
+/** The probe for a return's branch. No branch, or a branch the directory does not know, is judged against the All shift and the policy: never skipped. */
+export function pickCashShiftProbe(rows: ReadonlyArray<{ id?: unknown; cash_shift?: unknown; cash_shift_all?: unknown }>, branchId: number | null): ShiftProbe | null {
+  const own = branchId == null ? undefined : rows.find((row) => Number(row.id) === Number(branchId))
+  return parseShiftProbe(own ? own.cash_shift : rows[0]?.cash_shift_all)
+}
+
+/**
  * The shift policy and the current row for the branch expression, as one JSON text (a scalar subquery; bound param @shiftUserId).
  * currentShiftProbeSql is the arm a settings read the route already makes carries: key '__current_shift', params @shiftBranchId and
  * @shiftUserId. Either way it adds no D1 call and no write.
  * `+s.scope_mode` keeps the planner on idx_shift_sessions_business_date (the readPreviousOpen pattern).
  */
-export function currentShiftProbeValueSql(branchExpr: string): string {
+export function currentShiftProbeValueSql(addressedBranchExpr: string): string {
+  const branchExpr = tillBranchSql(addressedBranchExpr)
   return `(SELECT json_object('scope_mode', p.mode, 'admin_exempt', p.exempt, 'shift', json((
       SELECT json_object('id', s.id, 'user_id', s.user_id, 'user_name', s.user_name, 'branch_id', s.branch_id,
                          'closed', s.closed_at IS NOT NULL, 'cancelled', s.cancelled_at IS NOT NULL)

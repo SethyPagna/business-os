@@ -5,7 +5,7 @@ import {
 } from './customerReturnQuotePlan'
 import { CUSTOMER_RETURN_MAX_SALE_LINES } from './customerReturnEntitlement'
 import { saleReturnMoneySql } from './returnRefundSplit'
-import { currentShiftProbeValueSql } from './shiftCurrentProbe'
+import { branchCashShiftColumnsSql } from './shiftCurrentProbe'
 
 // One D1 query for everything a one-step exchange reads before it writes.
 //
@@ -86,7 +86,7 @@ export function exchangeContextQuery(input: ExchangeContextInput): { sql: string
           ORDER BY r.id,ri.id LIMIT ${CUSTOMER_RETURN_MAX_PRIOR_ITEMS + 1}`)} AS prior,
       COALESCE((SELECT json_group_array(return_number) FROM returns WHERE return_number IN (SELECT value FROM json_each(@returnNumbers))),'[]') AS taken_returns,
       COALESCE((SELECT json_group_array(receipt_number) FROM sales WHERE receipt_number IN (SELECT value FROM json_each(@receiptNumbers))),'[]') AS taken_receipts,
-      ${list(pairs([...BRANCH_EFFECT_COLUMNS_SQL.split(',').map((column) => column.trim()), 'cash_shift']), `SELECT *, ${currentShiftProbeValueSql('branches.id')} AS cash_shift FROM branches`)} AS branches,
+      ${list(pairs([...BRANCH_EFFECT_COLUMNS_SQL.split(',').map((column) => column.trim()), 'cash_shift', 'cash_shift_all']), `SELECT *, ${branchCashShiftColumnsSql()} FROM branches`)} AS branches,
       ${list(pairs(['id', 'name', 'cost_price_usd', 'cost_price_khr', 'selling_price_usd', 'selling_price_khr', 'updated_at', 'is_active']),
         'SELECT * FROM products WHERE id IN (SELECT id FROM wanted_products)')} AS products,
       ${list(pairs(['product_id', 'branch_id', 'quantity']),
