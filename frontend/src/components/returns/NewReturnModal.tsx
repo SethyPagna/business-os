@@ -55,7 +55,8 @@ import { CashOutShiftNote } from '../shifts/CashShiftNote.tsx'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { releaseRefusedReturnRequest, type AttemptedReturnRequest } from './helpers/returnCashShiftRefusal.ts'
 import { configuredSettlementMethods, type SettlementRow } from '../sales/saleSettlement.ts'
-import { exchangeGiveBackNeedsShift } from '../sales/settlementCashShift.ts'
+import { exchangeGiveBackNeedsShift, refundCashShareUsd } from '../sales/settlementCashShift.ts'
+import { receiptTotalsFigures, returnOwedReductionUsd, type ReceiptTotalsSale } from '../../utils/receiptTotals.ts'
 import {
   changeRielRoundedDown, exchangeDue, exchangeOverpaymentUsd, exchangePaymentBody, exchangePaymentIssue, exchangeReplacementItems, initialExchangePayRows,
   type ExchangeChangeCurrency,
@@ -865,6 +866,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const isV1Sale = Number(foundSale?.money_precision_version) === 1
   const unsupportedMoneyVersion = foundSale?.money_precision_version != null && ![0, 1].includes(Number(foundSale.money_precision_version))
   const totalRefund    = isV1Sale ? (quote?.total_refund_usd ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
+  // What the sale already owes comes off the refund first (the Worker's cash share), so a Not Paid sale hands back cash only above its debt.
+  const refundCashUsd = foundSale ? refundCashShareUsd(totalRefund, foundSale.sale_status === 'awaiting_payment' || returnOwedReductionUsd(foundSale as ReceiptTotalsSale) > 0, receiptTotalsFigures(foundSale as ReceiptTotalsSale).outstandingUsd) : 0
   const totalRefundKhr = isV1Sale ? (quote?.total_refund_khr ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
   // What each replacement unit goes out at: the units a returned unit of the same product covers at the price the sale recorded,
   // every other unit (extra units, another product) at the catalog price. A row with both kinds is sent as one line of each.
@@ -1730,8 +1733,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 <span>{T('total_refunded', 'Total Refund')}</span>
                 <span>{fmtUSD(totalRefund)}</span>
               </div>
-              {replacements.length === 0 && totalRefund > 0 && foundSale?.sale_status !== 'awaiting_payment' ? (
-                <CashOutShiftNote branchId={foundSale?.branch_id ? Number(foundSale.branch_id) : null} usd={totalRefund} className="mt-2" />
+              {replacements.length === 0 && refundCashUsd > 0 ? (
+                <CashOutShiftNote branchId={foundSale?.branch_id ? Number(foundSale.branch_id) : null} usd={refundCashUsd} className="mt-2" />
               ) : null}
             </div>
 
