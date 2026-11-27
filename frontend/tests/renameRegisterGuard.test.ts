@@ -158,7 +158,13 @@ const RULES: Rule[] = [
   {
     // A70, 23 Nov: the extra change used in a shift is "Cash used" on every surface; only the words changed.
     id: 'R17 Cash used, not Additional change used', owner: '23 Nov (A70): "Additional change used" becomes "Cash used"',
-    old: /additional change used|ប្រាក់អាប់បន្ថែមដែលបានប្រើ/i, sampleOld: "optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)')", sampleNew: "optionalShiftCount(input.additionalCashUsd, 'Cash used (USD)')",
+    old: /additional change used|ប្រាក់អាប់បន្ថែមដែលបានប្រើ/i, sampleOld: "optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)')", sampleNew: "optionalShiftCount(input.additionalCashUsd, 'Added cash (USD)')",
+    packs: ['en', 'km'], code: true, worker: true,
+  },
+  {
+    // 27 Nov: the same field reads as cash ADDED to the drawer during the shift; "Cash used" gave it the opposite meaning. Words only.
+    id: 'R18 Added cash, not Cash used', owner: '27 Nov: "for shift close, it is additional cash not cash used ... added cash"',
+    old: /cash used|សាច់ប្រាក់បានប្រើ/i, sampleOld: "optionalShiftCount(input.additionalCashUsd, 'Cash used (USD)')", sampleNew: "optionalShiftCount(input.additionalCashUsd, 'Added cash (USD)')",
     packs: ['en', 'km'], code: true, worker: true,
   },
   {
@@ -238,7 +244,7 @@ const CANONICAL: Array<[key: string, english: string, khmer: string]> = [
   ['items', 'Items', 'មុខទំនិញ'],
   ['field_history', 'Records', 'កំណត់ត្រា'],
   ['shift_counted_cash', 'Closing cash', 'សាច់ប្រាក់បិទវេន'],
-  ['shift_additional_cash', 'Cash used', 'សាច់ប្រាក់បានប្រើ'],
+  ['shift_additional_cash', 'Added cash', 'សាច់ប្រាក់បន្ថែម'],
 ]
 for (const [key, english, khmer] of CANONICAL) {
   assert.equal(en[key], english, `en.json "${key}" must stay ${english}`)

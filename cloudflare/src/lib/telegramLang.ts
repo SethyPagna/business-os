@@ -309,7 +309,7 @@ const LABELS = {
   // The app's own term for this figure (shift_additional_cash in both packs):
   // the extra CHANGE money put into the drawer mid-shift and used up as
   // change. 'Additional cash' read as a second pile of takings.
-  additionalCash: { en: 'Cash used', km: 'សាច់ប្រាក់បានប្រើ' },
+  additionalCash: { en: 'Added cash', km: 'សាច់ប្រាក់បន្ថែម' },
   expectedCash: { en: 'Expected cash', km: 'សាច់ប្រាក់ត្រូវមាន' },
   // ONE refunds line (no per-return breakdown) and ONE informational
   // difference line -- never "shortage", never a must-match claim. Computed

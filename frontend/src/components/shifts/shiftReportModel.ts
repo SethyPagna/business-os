@@ -301,7 +301,7 @@ export function shiftRegisteredRows(shift: Shift): ShiftRegisteredRow[] {
   return [
     { key: 'shift_registered_open', fallback: 'OPEN', usd: registered.open.usd, khr: registered.open.khr },
     {
-      key: 'shift_recon_additional_cash', fallback: 'Cash used', usd: additional.usd, khr: additional.khr,
+      key: 'shift_recon_additional_cash', fallback: 'Added cash', usd: additional.usd, khr: additional.khr,
       ...(additional.usd || additional.khr ? { added: true as const } : {}),
     },
     { key: 'shift_registered_end', fallback: 'END', usd: registered.end.usd, khr: registered.end.khr },
@@ -318,7 +318,7 @@ const isDollar = (value: unknown): boolean => typeof value === 'number' && Numbe
 /**
  * Does this shift hold any dollar figure? Owner, A72 + Q3 (A78): riel is the shop's money, dollars appear on a shift's pair rows only when the SHIFT has any,
  * and then on every pair row (per shift, not per line: the rows keep their columns, and a missing dollar half never reads as "not counted").
- * Non-zero and not null, in the registered counts (opening, cash used, closing) and in every dollar half of what the answer carries: the cash comparison, the
+ * Non-zero and not null, in the registered counts (opening, added cash, closing) and in every dollar half of what the answer carries: the cash comparison, the
  * delivery cost and other expenses of the figures, and what moved after close. An employee's answer carries only the counts, so an administrator may see the
  * dollar half where an employee does not: that employee has no dollar figure on screen. Business results are not cash and never decide it.
  * The Telegram twin is cloudflare/src/lib/telegram.ts shiftHasUsdCash.

@@ -383,8 +383,10 @@ const figuresWithoutLateFacts = (json) => {
 // 6.0.2993 (owner A70) renamed the cash-used row's label, words only. The base commit still prints the old pair, so the BASE side's text maps exactly that
 // one en/km pair to the new one before it is compared; the lane's own text is never mapped (it is pinned to the new pair by its own check below).
 const OLD_CASH_USED_LABEL = 'Additional change used/ប្រាក់អាប់បន្ថែមដែលបានប្រើ'
-const NEW_CASH_USED_LABEL = 'Cash used/សាច់ប្រាក់បានប្រើ'
-const baseLabelRenamed = (text) => String(text).split(OLD_CASH_USED_LABEL).join(NEW_CASH_USED_LABEL)
+const MID_CASH_USED_LABEL = 'Cash used/សាច់ប្រាក់បានប្រើ'
+// Owner, 27 Nov: "Cash used" became "Added cash" (words only). A base that still prints either earlier pair maps to the new one; the lane's own text is never mapped.
+const NEW_CASH_USED_LABEL = 'Added cash/សាច់ប្រាក់បន្ថែម'
+const baseLabelRenamed = (text) => String(text).split(OLD_CASH_USED_LABEL).join(NEW_CASH_USED_LABEL).split(MID_CASH_USED_LABEL).join(NEW_CASH_USED_LABEL)
 // 6.0.3070 (owner A72 + Q3b) put the Cash count rows riel first, and 6.0.3090 the shift report's Expenses rows, the dollar half only when the SHIFT has any dollar figure. The base
 // commit prints dollars first on every pair row, so the BASE side's Cash count section and the Expenses section of its shift report message are mapped by that one rule (money
 // order and the per-shift dollar half, nothing else) before they are compared: each "$A · B៛", "$A", "B៛" or "$0.00" becomes "B៛ · $A" when the message has any dollar, else "B៛".
@@ -441,15 +443,16 @@ async function main() {
       assert.equal(newRun.telegram.length > 0, scenario.telegramOn !== false, `${scenario.name}: the report was sent exactly when Telegram is on`)
     }
   })
-  await check('THE RENAME (A70, 6.0.2993): the lane\'s queued report prints "Cash used" and never the old "Additional change used" pair; the base is the one that still prints the old pair', () => {
+  await check('THE RENAME (A70, 6.0.2993): the lane\'s queued report prints "Added cash" and never the old "Additional change used" or "Cash used" pair; the base is the one that still prints the old pair', () => {
     const lane = runs.filter(({ scenario }) => scenario.telegramOn !== false)
     assert.ok(lane.length > 0, 'a scenario sent a report')
     for (const { scenario, newRun } of lane) {
       const all = newRun.telegram.join(NL)
       assert.ok(!all.includes('Additional change used'), `${scenario.name}: the old en label is gone`)
       assert.ok(!all.includes('ប្រាក់អាប់បន្ថែមដែលបានប្រើ'), `${scenario.name}: the old km label is gone`)
+      assert.ok(!all.includes(MID_CASH_USED_LABEL), `${scenario.name}: the "Cash used" pair is gone`)
     }
-    assert.ok(lane.some(({ newRun }) => newRun.telegram.some((text) => text.includes(NEW_CASH_USED_LABEL))), 'a lane report holds the new Cash used pair')
+    assert.ok(lane.some(({ newRun }) => newRun.telegram.some((text) => text.includes(NEW_CASH_USED_LABEL))), 'a lane report holds the new Added cash pair')
   })
 
   await check('THE MONEY ORDER (A72 + Q3b, 6.0.3070 + 6.0.3090): the lane\'s queued report prints every Cash count and Expenses pair riel first, and the dollar half on all of a shift\'s rows or on none', () => {

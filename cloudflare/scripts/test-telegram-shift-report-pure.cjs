@@ -191,7 +191,7 @@ const rowsOf = (text) => text.split('\n').filter((line) => !line.startsWith(tele
 // and the two discount rows the owner's reference reinstated, and from 38 to
 // 32 on Sep 23 2026, when the six drawn rules came off the sections (their
 // titles are one dashed line each now), and from 32 to 33 on 13 Oct 2026, when
-// the Cash used row became a permanent row of the Cash count
+// the Added cash row became a permanent row of the Cash count
 // section (owner: "we have the opening closing and additional used"). It is
 // still a ceiling with the same one row of slack: this fixture, with every
 // optional block on, renders in 32.
@@ -250,7 +250,7 @@ assert.deepEqual(lines, [
   // closing; owner, 14 Sep 2026), even at zero: this fixture added no change,
   // and the message says so instead of leaving the line out (owner, 13 Oct
   // 2026: "for the shift i don't see additional used in telegram").
-  '· Cash used/សាច់ប្រាក់បានប្រើ: 0៛ · $0.00',
+  '· Added cash/សាច់ប្រាក់បន្ថែម: 0៛ · $0.00',
   '· Closing cash/សាច់ប្រាក់បិទវេន: 240,000៛ · $182.50',
   '· Expected cash/សាច់ប្រាក់ត្រូវមាន: 240,000៛ · $178.00',
   '· Difference/ភាពខុសគ្នា: 0៛ · +$4.50',
@@ -306,7 +306,7 @@ assert.deepEqual(englishReport.split('\n'), [
   '· Refunds: $15.00',
   '=====Cash count=====',
   '· Opening cash: 100,000៛ · $50.00',
-  '· Cash used: 0៛ · $0.00',
+  '· Added cash: 0៛ · $0.00',
   '· Closing cash: 240,000៛ · $182.50',
   '· Expected cash: 240,000៛ · $178.00',
   '· Difference: 0៛ · +$4.50',
@@ -350,7 +350,7 @@ assert.deepEqual(khmerReport.split('\n'), [
   '· ការសងប្រាក់: $15.00',
   '=====ការរាប់សាច់ប្រាក់=====',
   '· សាច់ប្រាក់ដើមវេន: 100,000៛ · $50.00',
-  '· សាច់ប្រាក់បានប្រើ: 0៛ · $0.00',
+  '· សាច់ប្រាក់បន្ថែម: 0៛ · $0.00',
   '· សាច់ប្រាក់បិទវេន: 240,000៛ · $182.50',
   '· សាច់ប្រាក់ត្រូវមាន: 240,000៛ · $178.00',
   '· ភាពខុសគ្នា: 0៛ · +$4.50',
@@ -573,7 +573,7 @@ assert.deepEqual(quiet.split('\n'), [
   '· Profit/ចំណេញ: $0.00',
   '====Cash count/ការរាប់សាច់ប្រាក់====',
   '· Opening cash/សាច់ប្រាក់ដើមវេន: 0៛',
-  '· Cash used/សាច់ប្រាក់បានប្រើ: 0៛',
+  '· Added cash/សាច់ប្រាក់បន្ថែម: 0៛',
   '· Expected cash/សាច់ប្រាក់ត្រូវមាន: 0៛',
   '=====Payment methods/វិធីទូទាត់=====',
   // `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced

@@ -124,10 +124,10 @@ const ok = (cond: unknown, message: string) => { assert.ok(cond, message); check
   pack = en
   const additional = cells(shiftRow())[3]
   assert.equal(additional[0], en.shift_recon_additional_cash, 'the card uses the full label, the one the report and the form use')
-  assert.equal(en.shift_recon_additional_cash, 'Cash used')
+  assert.equal(en.shift_recon_additional_cash, 'Added cash')
   assert.equal(en.shift_additional_short, undefined, 'the short card label is gone from en.json')
   assert.equal(km.shift_additional_short, undefined, 'and from km.json')
-  ok(true, 'the card says Cash used, one name on the card, the report and the form')
+  ok(true, 'the card says Added cash, one name on the card, the report and the form')
 }
 
 // ---- layout at 360px, without a layout engine ----------------------------------------
