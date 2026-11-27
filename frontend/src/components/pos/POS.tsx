@@ -3588,6 +3588,8 @@ export default function POS() {
     if (!isActorReadScopeCurrent(scope)) return true
     if (outcome.kind === 'recorded') { finishRecorded(outcome.response); return true }
     if (outcome.kind !== 'release') return false
+    const orderKey = String(orderId || 'pos-order')
+    if (checkoutRequestIdsRef.current.get(orderKey) === requestId) checkoutRequestIdsRef.current.delete(orderKey)
     setOrders(previous => previous.map(order => order.id === orderId && order.checkoutRequestId === requestId ? { ...order, checkoutRequestId: '', checkoutPayload: undefined, checkoutReviewRequestId: undefined } : order))
     window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
     return false
@@ -4534,7 +4536,7 @@ export default function POS() {
                   <div className={`font-semibold text-sm ${unavailable ? 'text-gray-400 dark:text-gray-500' : 'text-gray-800 dark:text-gray-200'}`}>{label}</div>
                   <div className={`text-xs mt-0.5 ${unavailable ? 'font-medium text-amber-700 dark:text-amber-300' : 'text-gray-400'}`}>{paidInFull
                     ? (t('pos_status_paid_resolved_desc') || 'This sale is already paid in full, so it cannot be recorded as Not Paid.')
-                    : posCashGate.kind === 'block' ? t(posCashGate.shiftState === 'closed' ? 'shift_closed_for_cash' : 'shift_required_for_cash')
+                    : posCashGate.kind === 'block' ? cashShiftNoteText(posCashGate, 'in', t)
                     : unavailable ? (t('insufficient_amount') || 'Amount paid is less than total') : desc}</div>
                 </button>
                 )

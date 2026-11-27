@@ -1,12 +1,14 @@
 // R40 review N3 + N4, wording of the cash-needs-a-shift refusal.
 //  N3: a user who cannot open a shift (a returns-only role has no pos or sales access) is told to ask a cashier or an administrator to open
 //      today's shift, never to open one themselves.
-//  N4: when cash goes OUT and today's shift is closed, the text says the shift is closed ("Reopen it to give cash back.") and then who to ask.
+//  N4: a user who cannot reopen today's closed shift is never told to "Reopen it": "Today's shift is closed. Ask <opener> or an administrator to reopen it."; the opener and administrators keep "... Reopen it to take cash / give cash back."
 // Mutants killed (each turns one assertion red):
 //   canOpen=false still says "Open a shift ..."            -> "a role that cannot open a shift is told who to ask"
 //   canOpen defaults to false                               -> "a role that can open a shift keeps the open sentence"
 //   closed + out falls back to the open sentence            -> "cash going out on a closed shift says the shift is closed"
-//   the closed sentence drops who to ask                    -> "cash going out on a closed shift says the shift is closed"
+//   the closed sentence drops who to ask                    -> "a closed shift tells the opener ..."
+//   opener or administrator loses the Reopen sentence       -> "a closed shift tells the opener ..."
+//   a non-reopener gets "Reopen it" (picker or refusal)      -> "a closed shift tells the opener ...", "the picker note ..."
 //   a pack key is missing or not Khmer                      -> "every new string exists in both packs, short and plain"
 //   the note ignores the permission                         -> "the note asks the permission the Worker asks"
 import assert from 'node:assert/strict'
@@ -24,7 +26,7 @@ function runTest(name: string, fn: () => void) {
   try { fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
 
-const NEW_KEYS = ['shift_open_ask_cashier', 'shift_closed_for_refund']
+const NEW_KEYS = ['shift_open_ask_cashier', 'shift_closed_for_refund', 'shift_closed_plain']
 const none = { shift_state: 'none', direction: 'out', who: 'open', opener_name: null }
 const closedOut = { shift_state: 'closed', direction: 'out', who: 'ask_reopen', opener_name: 'Dara' }
 
@@ -37,6 +39,8 @@ runTest('every new string exists in both packs, short and plain', () => {
   }
   assert.equal(packs.en.shift_open_ask_cashier, "Today's shift is not open. Ask a cashier or an administrator to open it.")
   assert.equal(packs.en.shift_closed_for_refund, "Today's shift is closed. Reopen it to give cash back.")
+  assert.equal(packs.en.shift_closed_plain, "Today's shift is closed.")
+  assert.equal(packs.km.shift_closed_plain, 'វេនថ្ងៃនេះបានបិទហើយ។')
 })
 runTest('a role that cannot open a shift is told who to ask, never to open one', () => {
   for (const lang of ['en', 'km']) {
@@ -56,14 +60,34 @@ runTest('a role that can open a shift keeps the open sentence', () => {
   assert.equal(cashShiftRefusalText(none, tr(packs.en), { canOpen: true }), packs.en.shift_required_for_refund)
   assert.equal(cashShiftRefusalText({ ...none, direction: 'in' }, tr(packs.km)), packs.km.shift_required_for_cash)
 })
-runTest('cash going out on a closed shift says the shift is closed, then who to ask', () => {
-  assert.equal(cashShiftRefusalText(closedOut, tr(packs.en)), "Today's shift is closed. Reopen it to give cash back. Ask Dara or an administrator to reopen it.")
-  assert.equal(cashShiftRefusalText({ ...closedOut, opener_name: null }, tr(packs.en)), "Today's shift is closed. Reopen it to give cash back. Ask an administrator to reopen it.")
+runTest('a closed shift tells the opener and an administrator to reopen it, and everyone else who to ask', () => {
+  assert.equal(cashShiftRefusalText(closedOut, tr(packs.en)), "Today's shift is closed. Ask Dara or an administrator to reopen it.")
+  assert.equal(cashShiftRefusalText({ ...closedOut, opener_name: null }, tr(packs.en)), "Today's shift is closed. Ask an administrator to reopen it.")
   assert.equal(cashShiftRefusalText({ ...closedOut, who: 'reopen' }, tr(packs.en)), "Today's shift is closed. Reopen it to give cash back.")
+  assert.equal(cashShiftRefusalText({ ...closedOut, who: 'reopen', direction: 'in' }, tr(packs.en)), "Today's shift is closed. Reopen it to take cash.")
   const km = String(cashShiftRefusalText(closedOut, tr(packs.km)))
-  assert.ok(km.startsWith(packs.km.shift_closed_for_refund) && km.includes('Dara'), km)
-  assert.equal(cashShiftRefusalText({ ...closedOut, direction: 'in' }, tr(packs.en)), "Today's shift is closed. Reopen it to take cash. Ask Dara or an administrator to reopen it.")
-  assert.equal(cashShiftRefusalText(closedOut, tr(packs.en), { canOpen: false }), "Today's shift is closed. Reopen it to give cash back. Ask Dara or an administrator to reopen it.", 'a closed shift is reopened by the opener or an administrator whoever asks')
+  assert.equal(km, `${packs.km.shift_closed_plain} ${packs.km.shift_reopen_ask.replace('{name}', 'Dara')}`)
+  assert.ok(!km.includes(packs.km.shift_closed_for_refund), 'a user who cannot reopen is not told to reopen')
+  assert.equal(cashShiftRefusalText({ ...closedOut, direction: 'in' }, tr(packs.en)), "Today's shift is closed. Ask Dara or an administrator to reopen it.")
+  assert.equal(cashShiftRefusalText(closedOut, tr(packs.en), { canOpen: false }), "Today's shift is closed. Ask Dara or an administrator to reopen it.", 'a closed shift is reopened by the opener or an administrator whoever asks')
+  for (const lang of ['en', 'km']) {
+    for (const direction of ['in', 'out']) {
+      const text = String(cashShiftRefusalText({ ...closedOut, direction }, tr(packs[lang])))
+      assert.ok(!text.includes(packs[lang][direction === 'in' ? 'shift_closed_for_cash' : 'shift_closed_for_refund']), `${lang} ${direction} ask_reopen never says Reopen it`)
+    }
+  }
+})
+runTest('the picker note on a closed shift follows the same split', () => {
+  const pos = read('src/components/pos/POS.tsx')
+  assert.ok(!/t\(posCashGate\.shiftState === 'closed' \? 'shift_closed_for_cash'/.test(pos), 'the picker no longer prints the Reopen sentence for everyone')
+  assert.match(pos, /posCashGate\.kind === 'block' \? cashShiftNoteText\(posCashGate, 'in', t\)/)
+})
+runTest('no Khmer sign sits glued to a plus in the shift difference hint, and the refusal keeps its spaces', () => {
+  assert.ok(!/\+[ក-៿]|[ក-៿]\+/.test(packs.km.shift_difference_hint), packs.km.shift_difference_hint)
+  assert.ok(!/\+\S/.test(packs.en.shift_difference_hint.replace(/\+ /g, '')), packs.en.shift_difference_hint)
+  const probe = read('../cloudflare/src/lib/shiftCurrentProbe.ts')
+  assert.match(probe, /export const CASH_IN_REFUSAL = 'Open a shift to take cash\.'/)
+  assert.match(probe, /export const CASH_OUT_REFUSAL = 'Open a shift to give cash back\.'/)
 })
 runTest('the Returns toast and the note ask the permission the Worker asks', () => {
   const modal = read('src/components/returns/NewReturnModal.tsx')

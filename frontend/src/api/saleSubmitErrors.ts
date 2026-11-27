@@ -57,9 +57,10 @@ export function cashShiftRefusalText(refusal: CashShiftRefusalFields, t: (key: s
     const askToOpen = t('shift_open_ask_cashier')
     if (typeof askToOpen === 'string' && askToOpen.trim()) return askToOpen
   }
-  const first = t(closed ? (give ? 'shift_closed_for_refund' : 'shift_closed_for_cash') : give ? 'shift_required_for_refund' : 'shift_required_for_cash')
+  const askReopen = closed && refusal.who === 'ask_reopen'
+  const first = t(askReopen ? 'shift_closed_plain' : closed ? (give ? 'shift_closed_for_refund' : 'shift_closed_for_cash') : give ? 'shift_required_for_refund' : 'shift_required_for_cash')
   if (typeof first !== 'string' || !first.trim()) return null
-  if (!closed || refusal.who !== 'ask_reopen') return first
+  if (!askReopen) return first
   const name = typeof refusal.opener_name === 'string' ? refusal.opener_name.trim() : ''
   const ask = name ? t('shift_reopen_ask')?.replace('{name}', name) : t('shift_reopen_ask_admin')
   return ask ? `${first} ${ask}` : first
