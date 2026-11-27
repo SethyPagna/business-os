@@ -179,7 +179,7 @@ runTest('Edit and New return modals route refusals through the mapping', () => {
   assert.ok(net.includes('transport.submitReturnCreateV1('), 'the slice is the net-return submit')
   // R40 (27 Nov 2026): the same notify, now led by the cash-needs-a-shift sentence, which names who can reopen a closed shift
   // (saleSubmitRefusalText -> cashShiftRefusalText) and is null for every other code, so every other refusal still goes through T by code.
-  assert.match(catchBlock(net, 'the net-return submit'), /notify\(saleSubmitRefusalText\(error, \(key\) => T\(key, ''\)\) \?\? T\(\(error as \{ code\?: string \}\)\?\.code \|\| 'return_v1_pending', getLoaderErrorMessage\(error\)\), 'error'\)/,
+  assert.match(catchBlock(net, 'the net-return submit'), /notify\(saleSubmitRefusalText\(error, \(key\) => T\(key, ''\), \{ canOpen: canUseShifts \}\) \?\? T\(\(error as \{ code\?: string \}\)\?\.code \|\| 'return_v1_pending', getLoaderErrorMessage\(error\)\), 'error'\)/,
     'the net-return submit translates by error code, the shift refusal first')
   const http = read('src/api/http.ts')
   assert.match(http, /error\.shift_state = parsed\.shift_state/, 'the shift refusal fields reach the thrown error (who may reopen)')

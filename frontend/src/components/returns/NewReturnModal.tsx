@@ -53,8 +53,10 @@ import type { ExchangeQuoteV1, PendingReturnCreateV1, ReturnQuoteV1 } from '../.
 import SaleSettlementEditor from '../sales/SaleSettlementEditor.tsx'
 import { CashOutShiftNote } from '../shifts/CashShiftNote.tsx'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { releaseRefusedReturnRequest, type AttemptedReturnRequest } from './helpers/returnCashShiftRefusal.ts'
 import { configuredSettlementMethods, type SettlementRow } from '../sales/saleSettlement.ts'
-import { exchangeGiveBackNeedsShift } from '../sales/settlementCashShift.ts'
+import { exchangeGiveBackNeedsShift, refundCashShareUsd } from '../sales/settlementCashShift.ts'
+import { receiptTotalsFigures, returnOwedReductionUsd, type ReceiptTotalsSale } from '../../utils/receiptTotals.ts'
 import {
   changeRielRoundedDown, exchangeDue, exchangeOverpaymentUsd, exchangePaymentBody, exchangePaymentIssue, exchangeReplacementItems, initialExchangePayRows,
   type ExchangeChangeCurrency,
@@ -357,7 +359,8 @@ function lineReturnQuantities(item: SaleItemRow, recorded: number, v1: boolean):
 }
 
 export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, initialReceiptQuery }: NewReturnModalProps) {
-  const { user, t, settings, fmtKHR } = useApp()
+  const { user, t, settings, fmtKHR, getPermissionTier } = useApp()
+  const canUseShifts = typeof getPermissionTier !== 'function' || getPermissionTier('pos') === 'full' || getPermissionTier('sales') === 'full'
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -863,6 +866,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const isV1Sale = Number(foundSale?.money_precision_version) === 1
   const unsupportedMoneyVersion = foundSale?.money_precision_version != null && ![0, 1].includes(Number(foundSale.money_precision_version))
   const totalRefund    = isV1Sale ? (quote?.total_refund_usd ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
+  // What the sale already owes comes off the refund first (the Worker's cash share), so a Not Paid sale hands back cash only above its debt.
+  const refundCashUsd = foundSale ? refundCashShareUsd(totalRefund, foundSale.sale_status === 'awaiting_payment' || returnOwedReductionUsd(foundSale as ReceiptTotalsSale) > 0, receiptTotalsFigures(foundSale as ReceiptTotalsSale).outstandingUsd) : 0
   const totalRefundKhr = isV1Sale ? (quote?.total_refund_khr ?? 0) : activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
   // What each replacement unit goes out at: the units a returned unit of the same product covers at the price the sale recorded,
   // every other unit (extra units, another product) at the catalog price. A row with both kinds is sent as one line of each.
@@ -1068,6 +1073,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     if (sessionStale || !isActorReadScopeCurrent(lifecycle.current.scope, false) || !beginSingleAction(submitInFlightRef)) return
     const scope = captureActorReadScope('returns'), generation = lifecycle.current.generation
     const current = () => lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)
+    let attempted: AttemptedReturnRequest | null = null
     setSubmitting(true)
     try {
       const transport = await loadReturnsTransport()
@@ -1096,6 +1102,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         if (!current()) return
         setPendingV1(pending)
       }
+      attempted = { pending, recovery }
       const result = await withLoaderTimeout(() => transport.submitReturnCreateV1(user?.id, pending!, recovery), 'Create net return', RETURN_CREATE_TIMEOUT_MS)
       if (!current()) return
       await transport.clearPendingReturnCreateV1(user?.id, pending, recovery)
@@ -1112,8 +1119,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       if (!current()) return
       // Unknown, permission and capability failures never rewrite/remove the
       // frozen request: an earlier timed-out attempt could already be committed.
+      if (await releaseRefusedReturnRequest(error, attempted, async (saved, recovery) => { await (await loadReturnsTransport()).clearPendingReturnCreateV1(user?.id, saved, recovery) })) { if (!current()) return; setPendingV1(null); setReviewedPendingBody(null) }
       setPendingQuoteRejected((error as { returnV1QuoteRejected?: boolean })?.returnV1QuoteRejected === true)
-      notify(saleSubmitRefusalText(error, (key) => T(key, '')) ?? T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
+      notify(saleSubmitRefusalText(error, (key) => T(key, ''), { canOpen: canUseShifts }) ?? T((error as { code?: string })?.code || 'return_v1_pending', getLoaderErrorMessage(error)), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       if (current()) setSubmitting(false)
@@ -1725,8 +1733,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 <span>{T('total_refunded', 'Total Refund')}</span>
                 <span>{fmtUSD(totalRefund)}</span>
               </div>
-              {replacements.length === 0 && totalRefund > 0 && foundSale?.sale_status !== 'awaiting_payment' ? (
-                <CashOutShiftNote branchId={foundSale?.branch_id ? Number(foundSale.branch_id) : null} usd={totalRefund} className="mt-2" />
+              {replacements.length === 0 && refundCashUsd > 0 ? (
+                <CashOutShiftNote branchId={foundSale?.branch_id ? Number(foundSale.branch_id) : null} usd={refundCashUsd} className="mt-2" />
               ) : null}
             </div>
 

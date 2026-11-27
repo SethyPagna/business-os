@@ -112,6 +112,7 @@ import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { cashShiftRefusalOutcome } from './cashShiftRefusalRelease.ts'
 import { contactDisplayAddress, deliveryDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -3331,7 +3332,7 @@ export default function POS() {
       } catch (error) {
         if (isActorReadScopeCurrent(checkoutScope)) {
           if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
-          if ((error as { code?: string })?.code === 'shift_required_for_cash') releaseCashShiftRefusal(pendingId)
+          if ((error as { code?: string })?.code === 'shift_required_for_cash') { if (await releaseCashShiftRefusal(pendingId, checkoutScope, finishRecorded)) return }
           notify(saleSubmitRefusalText(error, t) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
         }
       } finally { checkoutInFlightRef.current = false; setLoading(false) }
@@ -3558,7 +3559,7 @@ export default function POS() {
       }
     } catch (e) {
       if (!isActorReadScopeCurrent(checkoutScope)) return
-      if (submittedRequestId && (e as { code?: string })?.code === 'shift_required_for_cash') releaseCashShiftRefusal(submittedRequestId)
+      if (submittedRequestId && (e as { code?: string })?.code === 'shift_required_for_cash') { if (await releaseCashShiftRefusal(submittedRequestId, checkoutScope, finishRecorded)) return }
       if (submittedRequestId && (e as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
       // Y2: a timeout is NOT a confirmed failure -- the request keeps
       // running server-side and may commit. Say so, and say that retrying
@@ -3580,10 +3581,16 @@ export default function POS() {
 
   // R40: the Worker refused cash for want of an open shift BEFORE writing anything (and after its duplicate lookup, so this request never committed): the
   // frozen checkout is released so the cart stays editable and the tender can change, and the shift gate re-reads the till's shift (opening prompt or closed state).
-  const releaseCashShiftRefusal = (requestId: string) => {
+  const releaseCashShiftRefusal = async (requestId: string, scope: ReturnType<typeof captureActorReadScope>, finishRecorded: (result: unknown) => void): Promise<boolean> => {
     const orderId = resolvedActiveId
+    const transport = await getSaleWriteTransport().catch(() => null)
+    const outcome = transport ? await cashShiftRefusalOutcome((id) => transport.recoverSaleCreateReceipt(id), requestId) : { kind: 'keep' as const }
+    if (!isActorReadScopeCurrent(scope)) return true
+    if (outcome.kind === 'recorded') { finishRecorded(outcome.response); return true }
+    if (outcome.kind !== 'release') return false
     setOrders(previous => previous.map(order => order.id === orderId && order.checkoutRequestId === requestId ? { ...order, checkoutRequestId: '', checkoutPayload: undefined, checkoutReviewRequestId: undefined } : order))
     window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
+    return false
   }
 
   const reviewCheckoutPrices = async () => {
@@ -4478,7 +4485,7 @@ export default function POS() {
                 ].join('\n\n')}
               />
             </div>
-            <CashShiftNote gate={posCashGate} state={posShift.state} branchId={primaryBranchFilterId} branchName={primaryBranchName} canOpenHere={false} className="mb-1.5" />
+            <CashShiftNote gate={posCashGate} state={posShift.state} branchId={primaryBranchFilterId} branchName={primaryBranchName} canOpenHere={false} className="mb-1.5 max-md:ml-8" />
             <button ref={completeSaleRef} className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0 || savingBlocked} aria-describedby={savingBlocked ? 'pos-saving-blocked' : undefined}>
               {loading ? t('loading') : (t('complete_sale') || 'Complete Sale')}
             </button>

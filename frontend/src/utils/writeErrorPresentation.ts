@@ -23,6 +23,14 @@ const REJECTION_DETAILS: ReadonlyMap<string, RejectionDetail> = new Map<string, 
   ['portal_translation_private_key', ['write_rejected_portal_translation_key', 'A translation entry name cannot be published. Rename it, then save again.']],
 ])
 
+// Refusals the screen that sent the write already explains in the user's language (owner R40: cash needs an open shift, shown by the POS, the
+// Sales form and the Returns toast). The global bar's generic text would only repeat them, so it stays away for these codes.
+const SCREEN_PRESENTED_REFUSALS: ReadonlySet<string> = new Set(['shift_required_for_cash'])
+
+export function writeRefusalHasOwnMessage(error: WriteErrorDetail | null | undefined): boolean {
+  return typeof error?.code === 'string' && SCREEN_PRESENTED_REFUSALS.has(error.code)
+}
+
 function copy(t: WriteErrorTranslator, key: string, fallback: string): string {
   const translated = t(key)
   return translated && translated !== key ? translated : fallback

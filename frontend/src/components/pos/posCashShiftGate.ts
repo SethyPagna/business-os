@@ -1,4 +1,4 @@
-import { cashShiftRefusalText } from '../../api/saleSubmitErrors.ts'
+import { cashShiftRefusalText, type CashShiftRefusalOptions } from '../../api/saleSubmitErrors.ts'
 import { cashTakenNow, currentShiftState, hasCashAmount, type CashDirection, type CashShiftState, type CashTenderRow } from '../../utils/cashShiftRule.ts'
 import type { PaymentMethodKindMap } from '../../utils/paymentMethodKind.ts'
 
@@ -52,6 +52,6 @@ export function posCashShiftGate(
 }
 
 /** The pack sentence beside a blocked cash action: what is missing, then who may reopen a closed shift. */
-export function cashShiftNoteText(gate: Extract<PosCashShiftGate, { kind: 'block' }>, direction: CashDirection, t: (key: string) => string | undefined): string {
-  return cashShiftRefusalText({ shift_state: gate.shiftState, direction, who: gate.action, opener_name: gate.openerName }, t) ?? ''
+export function cashShiftNoteText(gate: Extract<PosCashShiftGate, { kind: 'block' }>, direction: CashDirection, t: (key: string) => string | undefined, options: CashShiftRefusalOptions = {}): string {
+  return cashShiftRefusalText({ shift_state: gate.shiftState, direction, who: gate.action, opener_name: gate.openerName }, t, options) ?? ''
 }

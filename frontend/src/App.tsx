@@ -44,7 +44,7 @@ import { ACTOR_SESSION_RETRY_EVENT, actorSessionQuarantineStatus, captureActorRe
 import { SIGNOUT_RETRY_EVENT, isSignoutBlocked } from './api/unresolvedSignout.ts'
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from './api/offlineQueueOwnership.ts'
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
-import { presentWriteError } from './utils/writeErrorPresentation.ts'
+import { presentWriteError, writeRefusalHasOwnMessage } from './utils/writeErrorPresentation.ts'
 import { visibleTimeout } from './utils/visibilityPolling.ts'
 import { CheckConnectionButton } from './components/shared/SavingBlockedNote.tsx'
 import { countLegacyQueuedRecords } from './api/legacyQueueProbe.ts'
@@ -770,7 +770,7 @@ function useSyncErrorBanner(user: AppUser | null) {
     const onSyncError = (event: Event) => {
       if (!isCurrent()) return
       const detail = event instanceof CustomEvent ? event.detail as SyncProblemDetail : null
-      if (detail?.transient) return
+      if (detail?.transient || writeRefusalHasOwnMessage(detail)) return
       setSyncError(detail)
     }
     const onTransientOutage = (event: Event) => {

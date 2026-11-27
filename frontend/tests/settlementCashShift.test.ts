@@ -46,7 +46,7 @@ runTest('wiring: the editor mounts the note only while cash is taken; the detail
   const ret = read('components', 'returns', 'NewReturnModal.tsx')
   assert.match(ret, /cashShift=\{\{ branchId: foundSale\?\.branch_id \? Number\(foundSale\.branch_id\) : null \}\}/)
   assert.match(ret, /<CashOutShiftNote branchId=/, 'a plain refund shows the cash-out note')
-  assert.match(ret, /foundSale\?\.sale_status !== 'awaiting_payment'/, 'a debt-only return on a Not Paid sale is never noted')
+  assert.match(ret, /refundCashShareUsd\(totalRefund, foundSale\.sale_status === 'awaiting_payment'/, 'the note follows the cash share: a debt-only return on a Not Paid sale is never noted, one above the debt is')
 })
 runTest('an exchange that gives cash change back shows the cash-out note, once', () => {
   assert.equal(exchangeGiveBackNeedsShift(2, [], {}), true, 'give back with nothing paid in')
