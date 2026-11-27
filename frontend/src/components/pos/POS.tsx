@@ -3588,6 +3588,8 @@ export default function POS() {
     if (!isActorReadScopeCurrent(scope)) return true
     if (outcome.kind === 'recorded') { finishRecorded(outcome.response); return true }
     if (outcome.kind !== 'release') return false
+    const orderKey = String(orderId || 'pos-order')
+    if (checkoutRequestIdsRef.current.get(orderKey) === requestId) checkoutRequestIdsRef.current.delete(orderKey)
     setOrders(previous => previous.map(order => order.id === orderId && order.checkoutRequestId === requestId ? { ...order, checkoutRequestId: '', checkoutPayload: undefined, checkoutReviewRequestId: undefined } : order))
     window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
     return false
