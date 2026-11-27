@@ -103,7 +103,7 @@ const rowOf = (rows, label) => rows.find((row) => row.startsWith(`· ${label}:`)
 // ---- 1. a riel-only shift: no "$" on any cash row, riel alone ---------------------------------------------------------------
 {
   const rows = cashRows(report(shiftOf({}), figuresOf({})))
-  check('riel-only shift: Opening, Cash used and Closing print the riel alone', rowOf(rows, 'Opening cash') === '· Opening cash: 100,000៛' && rowOf(rows, 'Cash used') === '· Cash used: 0៛' && rowOf(rows, 'Closing cash') === '· Closing cash: 240,000៛', rows.join('\n'))
+  check('riel-only shift: Opening, Added cash and Closing print the riel alone', rowOf(rows, 'Opening cash') === '· Opening cash: 100,000៛' && rowOf(rows, 'Added cash') === '· Added cash: 0៛' && rowOf(rows, 'Closing cash') === '· Closing cash: 240,000៛', rows.join('\n'))
   check('riel-only shift: Expected and Difference print the riel alone, signed', rowOf(rows, 'Expected cash') === '· Expected cash: 260,000៛' && rowOf(rows, 'Difference') === '· Difference: −20,000៛', rows.join('\n'))
   check('riel-only shift: no "$" anywhere in the Cash count section', !rows.join('\n').includes('$'), rows.join('\n'))
   const open = cashRows(report(shiftOf({ closed_at: null, closing_counted_usd: null, closing_counted_khr: null }), figuresOf({})))
@@ -114,7 +114,7 @@ const rowOf = (rows, label) => rows.find((row) => row.startsWith(`· ${label}:`)
 {
   const text = report(shiftOf({ closing_counted_usd: 5 }), figuresOf({}))
   const rows = cashRows(text)
-  check('closing count of $5 only: Opening, Cash used and Closing all read riel then dollars', rowOf(rows, 'Opening cash') === '· Opening cash: 100,000៛ · $0.00' && rowOf(rows, 'Cash used') === '· Cash used: 0៛ · $0.00' && rowOf(rows, 'Closing cash') === '· Closing cash: 240,000៛ · $5.00', rows.join('\n'))
+  check('closing count of $5 only: Opening, Added cash and Closing all read riel then dollars', rowOf(rows, 'Opening cash') === '· Opening cash: 100,000៛ · $0.00' && rowOf(rows, 'Added cash') === '· Added cash: 0៛ · $0.00' && rowOf(rows, 'Closing cash') === '· Closing cash: 240,000៛ · $5.00', rows.join('\n'))
   check('closing count of $5 only: Expected and Difference carry the dollar half too, riel first', /^· Expected cash: 260,000៛ · \$0\.00$/.test(rowOf(rows, 'Expected cash')) && /^· Difference: −20,000៛ · \+\$5\.00$/.test(rowOf(rows, 'Difference')), rows.join('\n'))
   for (const row of rows.filter((r) => r.includes('$') && !/Review/.test(r))) check('dollars are never first: ' + row, !/^· [^:]+: [+−]?\$/.test(row), row)
 }
@@ -123,8 +123,8 @@ const rowOf = (rows, label) => rows.find((row) => row.startsWith(`· ${label}:`)
 {
   const text = report(shiftOf({}), figuresOf({ cash: { usd: 2, khr: 160000, needsReview: false } }))
   const rows = cashRows(text)
-  check('a $2 cash sale only: every pair row shows the dollar half, riel first', rows.filter((r) => /^· (Opening cash|Cash used|Closing cash|Expected cash|Difference):/.test(r)).length === 5
-    && rows.filter((r) => /^· (Opening cash|Cash used|Closing cash|Expected cash|Difference):/.test(r)).every((r) => /៛ · [+−]?\$\d/.test(r)), rows.join('\n'))
+  check('a $2 cash sale only: every pair row shows the dollar half, riel first', rows.filter((r) => /^· (Opening cash|Added cash|Closing cash|Expected cash|Difference):/.test(r)).length === 5
+    && rows.filter((r) => /^· (Opening cash|Added cash|Closing cash|Expected cash|Difference):/.test(r)).every((r) => /៛ · [+−]?\$\d/.test(r)), rows.join('\n'))
   check('a $2 cash sale only: Expected is $2 over the float', rowOf(rows, 'Expected cash') === '· Expected cash: 260,000៛ · $2.00', rows.join('\n'))
 }
 
@@ -135,7 +135,7 @@ const rowOf = (rows, label) => rows.find((row) => row.startsWith(`· ${label}:`)
   const dollars = cashRows(overview(shiftOf({ closing_counted_usd: 5 })))
   check('overview, $5 closing: every row riel then dollars', dollars.length === 3 && dollars.every((r) => /៛ · \$\d/.test(r)) && rowOf(dollars, 'Closing cash') === '· Closing cash: 240,000៛ · $5.00', dollars.join('\n'))
   const added = cashRows(overview(shiftOf({ additional_cash_usd: 2 })))
-  check('overview, $2 cash used: the shift is a dollar shift on every row', added.every((r) => /៛ · \$\d/.test(r)), added.join('\n'))
+  check('overview, $2 added cash: the shift is a dollar shift on every row', added.every((r) => /៛ · \$\d/.test(r)), added.join('\n'))
 }
 
 // ---- 5. business results stay dollars (canonical revenue), whatever the cash rule says ------------------------------------------

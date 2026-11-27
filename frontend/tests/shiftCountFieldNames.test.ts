@@ -1,5 +1,5 @@
-// The cash-used inputs carry their field in the accessible name (board item shiftf3, F6): "Cash used, Riel" and
-// "Cash used, Dollars", joined from the two labels the packs already hold (no new word, both languages).
+// The cash-used inputs carry their field in the accessible name (board item shiftf3, F6): "Added cash, Riel" and
+// "Added cash, Dollars", joined from the two labels the packs already hold (no new word, both languages).
 // The REAL ShiftCountPair is rendered (react-dom/server) and the accessible names are read off the inputs.
 //
 // Run: node tests/shiftCountFieldNames.test.ts
@@ -39,8 +39,8 @@ function names(source?: string, pack = en): string[] {
   return [...html.matchAll(/<input[^>]*aria-label="([^"]*)"/g)].map((match) => match[1])
 }
 
-test('the cash-used inputs are named "Cash used, Dollars" and "Cash used, Riel"', () => {
-  assert.deepEqual(names(), ['Cash used, Riel', 'Cash used, Dollars'])
+test('the cash-used inputs are named "Added cash, Dollars" and "Added cash, Riel"', () => {
+  assert.deepEqual(names(), ['Added cash, Riel', 'Added cash, Dollars'])
 })
 
 test('in Khmer the names join the two existing labels and add no new word', () => {
@@ -62,5 +62,5 @@ test('mutant: the helper returning the bare currency words fails the name test',
   assert.ok(source.includes('shiftCashUsedLabels'), 'the helper exists')
   const mutant = source.replace(/usdLabel: `[^`]*`/, "usdLabel: t('shift_additional_usd')")
   assert.notEqual(mutant, source, 'the mutant target exists')
-  assert.throws(() => assert.deepEqual(names(mutant), ['Cash used, Riel', 'Cash used, Dollars']))
+  assert.throws(() => assert.deepEqual(names(mutant), ['Added cash, Riel', 'Added cash, Dollars']))
 })

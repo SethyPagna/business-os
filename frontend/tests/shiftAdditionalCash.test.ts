@@ -158,16 +158,16 @@ test('the form label, the report row and the breakdown say one thing, in both pa
     assert.equal(pack.shift_additional_cash, pack.shift_recon_additional_cash,
       `${lang}: the close form and the report/breakdown row must not say different things`)
   }
-  assert.equal(en.shift_additional_cash, 'Cash used')
+  assert.equal(en.shift_additional_cash, 'Added cash')
   // PROVISIONAL Khmer (owner question Q6 is open): candidate 1. A later choice changes the values only.
-  assert.equal(km.shift_additional_cash, 'សាច់ប្រាក់បានប្រើ')
+  assert.equal(km.shift_additional_cash, 'សាច់ប្រាក់បន្ថែម')
   // The Khmer reads like the opening and closing cash rows (same first word), and the two inputs are just the
   // currency: the label already says what the money is.
   assert.ok(km.shift_additional_cash.startsWith('សាច់ប្រាក់') && km.shift_counted_cash.startsWith('សាច់ប្រាក់'))
   assert.deepEqual([en.shift_additional_khr, en.shift_additional_usd], ['Riel', 'Dollars'])
   assert.deepEqual([km.shift_additional_khr, km.shift_additional_usd], ['រៀល', 'ដុល្លារ'])
-  assert.equal(en.shift_additional_cash_hint, 'Change money added during the shift.')
-  assert.equal(km.shift_additional_cash_hint, 'ប្រាក់អាប់ដាក់បន្ថែមក្នុងវេន។')
+  assert.equal(en.shift_additional_cash_hint, 'Cash put into the drawer during the shift.')
+  assert.equal(km.shift_additional_cash_hint, 'សាច់ប្រាក់ដាក់ចូលថតក្នុងវេន។')
 })
 
 test('the owner\'s example and the report-only rule live behind the InfoHint, not inline', () => {
@@ -180,8 +180,8 @@ test('the owner\'s example and the report-only rule live behind the InfoHint, no
     assert.ok(!hint.includes('10,000'), `${lang}: the worked example belongs in the InfoHint`)
   }
   for (const example of [en.shift_additional_cash_example, km.shift_additional_cash_example]) {
-    assert.ok(example.includes('10,000'), 'the detail shows the opening-spent-then-topped-up example')
-    assert.ok(/0/.test(example), 'and the closing 0 that goes with it')
+    assert.ok(example.includes('10,000') && example.includes('5,000'), 'the detail shows the opening and the cash added during the shift')
+    assert.ok(example.includes('15,000'), 'and the higher expected closing that goes with it')
   }
   assert.match(en.shift_additional_cash_example, /Report only/)
   assert.match(en.shift_additional_cash_example, /never changes sales/)
@@ -196,7 +196,7 @@ test('the owner\'s example and the report-only rule live behind the InfoHint, no
   }
   assert.match(read('../src/components/shifts/ShiftCountFields.tsx'), /hintDetail \? <InfoHint/, 'the pair renders the detail as an InfoHint')
   // The difference formula names the same term as the field it sums.
-  assert.match(en.shift_difference_hint, /cash used/)
+  assert.match(en.shift_difference_hint, /added cash/)
   assert.ok(km.shift_difference_hint.includes(km.shift_additional_cash))
 })
 
@@ -278,7 +278,7 @@ test('the on-screen report prints Open -> Additional change used -> End, with $0
     const rows = registeredBlock(closedShiftRow({ usd: 0, khr: 0 }))
     assert.equal(rows.length, 3, 'the Khmer report has all three rows too')
     assert.equal(rows[1], `${km.shift_recon_additional_cash}: 0៛ · $0.00`)
-    assert.match(rows[1], /សាច់ប្រាក់បានប្រើ/)
+    assert.match(rows[1], /សាច់ប្រាក់បន្ថែម/)
   } finally { pack = en }
 })
 
@@ -296,7 +296,7 @@ test('the CSV and the print carry the additional row as a zero line', () => {
   assert.deepEqual(csv, [
     'Section,Line,KHR,USD',
     `Registered cash,${en.shift_registered_open},10000,10`,
-    'Registered cash,Cash used,0,0',
+    'Registered cash,Added cash,0,0',
     `Registered cash,${en.shift_registered_end},50000,120`,
   ])
   // The print goes through the SAME rows into the real document builder: a 0 must
@@ -305,7 +305,7 @@ test('the CSV and the print carry the additional row as a zero line', () => {
   const tableRows = [...html.matchAll(/<tr>(.*?)<\/tr>/g)].map((match) => [...match[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((cell) => cell[1])).filter((cells) => cells.length)
   assert.deepEqual(tableRows, [
     ['Registered cash', en.shift_registered_open, '10000', '10'],
-    ['Registered cash', 'Cash used', '0', '0'],
+    ['Registered cash', 'Added cash', '0', '0'],
     ['Registered cash', en.shift_registered_end, '50000', '120'],
   ], 'the printed table carries the Additional change used row as 0 / 0')
 })
@@ -339,7 +339,8 @@ test('the retired "added" wording is gone from both packs and both fallbacks', (
   for (const retired of ['Additional cash added', 'USD added', 'KHR added', 'Additional cash']) {
     assert.ok(!enText.includes(retired), `en.json still contains the retired "${retired}"`)
   }
-  for (const retired of ['សាច់ប្រាក់បន្ថែមចូលថត', 'បន្ថែម USD', 'បន្ថែម KHR', 'សាច់ប្រាក់បន្ថែម']) {
+  // 'សាច់ប្រាក់បន្ថែម' left this list on 27 Nov: the owner chose it as the label itself ("added cash"); the longer retired forms stay banned.
+  for (const retired of ['សាច់ប្រាក់បន្ថែមចូលថត', 'បន្ថែម USD', 'បន្ថែម KHR']) {
     assert.ok(!kmText.includes(retired), `km.json still contains the retired "${retired}"`)
   }
   // Inline English fallbacks shadow the pack when a key is missing, so they

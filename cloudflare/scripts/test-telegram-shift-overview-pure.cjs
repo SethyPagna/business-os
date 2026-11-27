@@ -30,7 +30,7 @@ const productStockGuard = require('./harness/product_stock_guard.cjs')
 //      them in its own totals and prints no such row.
 //   8. Cash count (owner, 13 Oct 2026, item 14: "we have the opening closing
 //      and additional used", shown everywhere and always, $0 included): the
-//      closing shift's drawer -- Opening, Cash used and Closing,
+//      closing shift's drawer -- Opening, Added cash and Closing,
 //      in that order and in the packs' words -- with nothing added
 //      (`0៛ · $0.00`), with an amount, a NULL column, and read from the stored
 //      row at send time. The section is the SHIFT's, not the day's: it is the
@@ -257,7 +257,7 @@ async function main() {
     // shift is the one the ID row above names; it is not printed twice.
     '=====Cash count=====',
     '· Opening cash: 10,000៛ · $10.00',
-    '· Cash used: 0៛ · $0.00',
+    '· Added cash: 0៛ · $0.00',
     '· Closing cash: 50,000៛ · $120.00',
     '=====Expenses=====',
     '· Actual delivery cost: $4.50',
@@ -292,7 +292,7 @@ async function main() {
     '· ABA Pay: 6 · $112.5000',
     '=====ការរាប់សាច់ប្រាក់=====',
     '· សាច់ប្រាក់ដើមវេន: 10,000៛ · $10.00',
-    '· សាច់ប្រាក់បានប្រើ: 0៛ · $0.00',
+    '· សាច់ប្រាក់បន្ថែម: 0៛ · $0.00',
     '· សាច់ប្រាក់បិទវេន: 50,000៛ · $120.00',
     '=====ចំណាយ=====',
     '· ថ្លៃដឹកដើម: $4.50',
@@ -314,7 +314,7 @@ async function main() {
     pack.en.telegram_reports_overview === 'Reports overview' && pack.km.telegram_reports_overview === telegramLang.TELEGRAM_LABELS.reportsOverview.km)
 
   // ---- 1b. Cash count: the closing shift's drawer (owner, 13 Oct 2026) -------
-  // Item 14: "Opening -> Cash used -> Closing are always shown,
+  // Item 14: "Opening -> Added cash -> Closing are always shown,
   // including a $0 additional ... the after-shift Summary overview". The section
   // follows the Payment methods with the closing shift's drawer: the three
   // registered rows. Every other section is the whole day on the branch and a day
@@ -359,7 +359,7 @@ async function main() {
       // A NULL column (a caller that never set it) is none added, not unknown.
       assert.deepStrictEqual(sectionAfterHeader(overviewFor({ ...shift, additional_cash_usd: null, additional_cash_khr: null }, mode), mode), cashRows(mode, '0៛ · $0.00'))
     }
-    check('Cash count: Opening -> Cash used -> Closing, always all three, with the packs\' words (en, km, both; zero, USD, KHR, NULL)', true)
+    check('Cash count: Opening -> Added cash -> Closing, always all three, with the packs\' words (en, km, both; zero, USD, KHR, NULL)', true)
 
     const rows = overviewFor(shift, 'both')
     const at = (prefix) => rows.findIndex((line) => line.startsWith(prefix))
@@ -382,7 +382,7 @@ async function main() {
       additional_cash_usd: 5, additional_cash_khr: 0, closing_counted_usd: 90, closing_counted_khr: 1000 }
     const secondRows = overviewFor(second, 'en')
     assert.deepStrictEqual(sectionAfterHeader(secondRows, 'en'), [
-      '· Opening cash: 0៛ · $40.00', '· Cash used: 0៛ · $5.00', '· Closing cash: 1,000៛ · $90.00',
+      '· Opening cash: 0៛ · $40.00', '· Added cash: 0៛ · $5.00', '· Closing cash: 1,000៛ · $90.00',
     ], secondRows.join('\n'))
     assert.ok(secondRows.includes('· ID: S-20260923-1130-Sok') && secondRows.includes('· Cashier: Sok'), 'and its header names that shift')
     check('two tills on one day: each overview carries its own closing shift\'s drawer under its own header, never the other\'s and never the two summed', true)
@@ -631,7 +631,7 @@ async function main() {
     const never = closedShift()
     const neverKey = telegram.shiftOverviewKey(never.id, never.revision)
     await telegram.scheduleTelegramShiftOverview(envFree, never.id, T0)
-    check('a stored row with no additional (NULL column) is delivered with a zero Cash used row',
+    check('a stored row with no additional (NULL column) is delivered with a zero Added cash row',
       (await telegram.deliverTelegramShiftOverview(envFree, neverKey, T0 + 60_000)) === 'sent'
       && posts[posts.length - 1].text.split('\n').includes(`· ${additionalLabel}: 0៛ · $0.00`), posts[posts.length - 1].text)
 
@@ -701,7 +701,7 @@ async function main() {
   const migration = fs.readFileSync(path.join(root, 'migrations', '0194_telegram_scheduled_sends.sql'), 'utf8')
   check('0194 is LF-only', !migration.includes('\r'))
   check('every post was a real overview message', posts.every((post) => post.text.startsWith('📈 ')))
-  check('and every one of them carries the Cash used row (the drawer is never missing a line)',
+  check('and every one of them carries the Added cash row (the drawer is never missing a line)',
     posts.every((post) => post.text.split('\n').some((line) => line.startsWith(`· ${pack.en.shift_additional_cash}${telegramLang.BILINGUAL_SEPARATOR}${pack.km.shift_additional_cash}: `))))
 
   console.log(`\n${passed} checks passed; ${posts.length} overview messages composed and handed to the local Telegram stand-in (none sent anywhere).`)

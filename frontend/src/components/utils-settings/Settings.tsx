@@ -2313,7 +2313,7 @@ export default function Settings() {
                 ['telegram_stock_alert_enabled', t('telegram_cat_stock_alert') || 'Low and out-of-stock alerts', t('telegram_cat_stock_alert_desc') || 'When a sale takes a product to its low-stock or out-of-stock level: product, branch and quantity left. Sent once per crossing'],
                 // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)
                 // with the same unset-means-on default as the switches above.
-                ['telegram_shift_overview_enabled', t('telegram_reports_overview') || 'Reports overview', t('telegram_reports_overview_desc') || "One minute after a shift closes: that day's overview for the shift's branch, with the shift's cash count (opening, cash used, closing)"],
+                ['telegram_shift_overview_enabled', t('telegram_reports_overview') || 'Reports overview', t('telegram_reports_overview_desc') || "One minute after a shift closes: that day's overview for the shift's branch, with the shift's cash count (opening, added cash, closing)"],
               ].map(([key, label, description]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
                   <div className="pr-3">
