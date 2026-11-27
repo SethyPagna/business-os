@@ -40,6 +40,9 @@ import ProductCard, { type ProductCardProduct } from './ProductCard.tsx'
 import { createPosTrackingOwner, posTrackingFingerprint } from './posProductTracking.ts'
 import CartItem     from './CartItem'
 import ShiftGate, { EndShiftButton } from './ShiftGate'
+import { useSharedShift } from './ShiftGate'
+import CashShiftNote from '../shifts/CashShiftNote.tsx'
+import { cashShiftNoteText, posCashShiftGate } from './posCashShiftGate.ts'
 import { SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from './ShiftGate'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE, TopPager } from '../shared/PaginationControls'
@@ -2279,6 +2282,7 @@ export default function POS() {
   const primaryBranchName = primaryBranchFilterId == null
     ? null
     : (branches.find((branch) => Number(branch?.id) === Number(primaryBranchFilterId))?.name || null)
+  const posShift = useSharedShift(primaryBranchFilterId, user?.id, settings?.shift_scope_mode)
 
   useEffect(() => () => trackingOwner.current.cancel(), [])
 
@@ -3156,6 +3160,9 @@ export default function POS() {
   // Riel paid in cash is whole 100៛ notes (owner, 27 Oct 2026); POST /sales refuses the rest (riel_cash_not_hundreds).
   const posMethodKinds = parsePaymentMethodKinds(settings.pos_payment_method_kinds)
   const rielCashInvalidIds = new Set(posRielCashRowIds(activePaymentDetails, posMethodKinds))
+  // R40: cash needs an open shift. The Worker is the judge; this shows the reason before Complete and keeps the cart (no request id is minted). A frozen checkout is never blocked here: its retry may be a sale that already committed (the Worker answers duplicate).
+  const posCashGate = active.checkoutRequestId ? { kind: 'pass' as const } : posCashShiftGate(posShift.state, primaryBranchFilterId, cartTotals.branchIds.length === 1 ? cartTotals.branchIds[0] : null,
+    activePaymentDetails.map(detail => ({ method: detail.method, amount_usd: parseFloat(detail.usd) || 0, amount_khr: parseFloat(detail.khr) || 0 })), posMethodKinds)
   const newNativeTender = (() => {
     if (moneyVersion !== 1) return null
     try { return posV1Tender(activePaymentDetails) } catch { return null }
@@ -4471,6 +4478,7 @@ export default function POS() {
                 ].join('\n\n')}
               />
             </div>
+            <CashShiftNote gate={posCashGate} state={posShift.state} branchId={primaryBranchFilterId} branchName={primaryBranchName} canOpenHere={false} className="mb-1.5" />
             <button ref={completeSaleRef} className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0 || savingBlocked} aria-describedby={savingBlocked ? 'pos-saving-blocked' : undefined}>
               {loading ? t('loading') : (t('complete_sale') || 'Complete Sale')}
             </button>
@@ -4491,6 +4499,7 @@ export default function POS() {
             <div className="p-4 space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
               {savingBlocked ? <SavingBlockedNote text={savingBlockedText} className="mb-3" /> : null}
+              <CashShiftNote gate={posCashGate} state={posShift.state} branchId={primaryBranchFilterId} branchName={primaryBranchName} canOpenHere={false} className="mb-3" />
               {([
                 ['completed',         getPosStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
                 ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Not Paid - stock deducted'],
@@ -4506,10 +4515,11 @@ export default function POS() {
                 // phone), as the greyed warehouse pill's notice does.
                 const resolved = resolvePosSaleStatus(status)
                 const paidInFull = resolved !== status
-                const unavailable = paidInFull || (status !== 'awaiting_payment' && !posTenderCovers)
+                const shiftBlocked = posCashGate.kind === 'block'
+                const unavailable = paidInFull || shiftBlocked || (status !== 'awaiting_payment' && !posTenderCovers)
                 return (
                 <button key={status}
-                  onClick={() => { closeStatusPicker(); void handleCheckout(status) }}
+                  onClick={() => { if (posCashGate.kind === 'block') return notify(cashShiftNoteText(posCashGate, 'in', t), 'error'); closeStatusPicker(); void handleCheckout(status) }}
                   disabled={loading || unavailable || savingBlocked}
                   data-pos-status-option={status}
                   data-pos-status-records={resolved}
@@ -4517,6 +4527,7 @@ export default function POS() {
                   <div className={`font-semibold text-sm ${unavailable ? 'text-gray-400 dark:text-gray-500' : 'text-gray-800 dark:text-gray-200'}`}>{label}</div>
                   <div className={`text-xs mt-0.5 ${unavailable ? 'font-medium text-amber-700 dark:text-amber-300' : 'text-gray-400'}`}>{paidInFull
                     ? (t('pos_status_paid_resolved_desc') || 'This sale is already paid in full, so it cannot be recorded as Not Paid.')
+                    : posCashGate.kind === 'block' ? t(posCashGate.shiftState === 'closed' ? 'shift_closed_for_cash' : 'shift_required_for_cash')
                     : unavailable ? (t('insufficient_amount') || 'Amount paid is less than total') : desc}</div>
                 </button>
                 )

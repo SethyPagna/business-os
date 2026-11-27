@@ -116,7 +116,8 @@ runTest('the tender panel shows short only when the tender does not cover the sa
 runTest('the status picker greys out the options the tender rules out, under their own names', () => {
   const option = pickerOption()
   assert.match(option, /const paidInFull = resolved !== status/)
-  assert.match(option, /const unavailable = paidInFull \|\| \(status !== 'awaiting_payment' && !posTenderCovers\)/)
+  assert.match(option, /const shiftBlocked = posCashGate\.kind === 'block'/, 'R40: cash with no open shift rules every option out')
+  assert.match(option, /const unavailable = paidInFull \|\| shiftBlocked \|\| \(status !== 'awaiting_payment' && !posTenderCovers\)/)
   assert.match(option, /disabled=\{loading \|\| unavailable \|\| savingBlocked\}/, 'a ruled-out option cannot be tapped')
   assert.match(option, /disabled:cursor-not-allowed/)
   assert.match(option, /<div className=\{`font-semibold text-sm \$\{unavailable \? 'text-gray-400 dark:text-gray-500' : [^}]*\}`\}>\{label\}<\/div>/,
