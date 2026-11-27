@@ -4485,7 +4485,7 @@ export default function POS() {
                 ].join('\n\n')}
               />
             </div>
-            <CashShiftNote gate={posCashGate} state={posShift.state} branchId={primaryBranchFilterId} branchName={primaryBranchName} canOpenHere={false} className="mb-1.5" />
+            <CashShiftNote gate={posCashGate} state={posShift.state} branchId={primaryBranchFilterId} branchName={primaryBranchName} canOpenHere={false} className="mb-1.5 max-md:ml-8" />
             <button ref={completeSaleRef} className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0 || savingBlocked} aria-describedby={savingBlocked ? 'pos-saving-blocked' : undefined}>
               {loading ? t('loading') : (t('complete_sale') || 'Complete Sale')}
             </button>
