@@ -80,15 +80,15 @@ runTest('opening the shift lifts the block (no loop)', () => {
 runTest('cashShiftNoteText names what is missing, then who to ask', () => {
   const dict: Record<string, string> = {
     shift_required_for_cash: 'Open a shift to take cash.', shift_required_for_refund: 'Open a shift to give cash back.',
-    shift_closed_for_cash: "Today's shift is closed. Reopen it to take cash.", shift_reopen_ask: 'Ask {name} or an administrator to reopen it.',
+    shift_closed_for_cash: "Today's shift is closed. Reopen it to take cash.", shift_closed_plain: "Today's shift is closed.", shift_reopen_ask: 'Ask {name} or an administrator to reopen it.',
     shift_reopen_ask_admin: 'Ask an administrator to reopen it.',
   }
   const t = (key: string) => dict[key] ?? key
   assert.equal(cashShiftNoteText({ kind: 'block', shiftState: 'none', action: 'open', openerName: null }, 'in', t), 'Open a shift to take cash.')
   assert.equal(cashShiftNoteText({ kind: 'block', shiftState: 'none', action: 'open', openerName: null }, 'out', t), 'Open a shift to give cash back.')
   assert.equal(cashShiftNoteText({ kind: 'block', shiftState: 'closed', action: 'reopen', openerName: 'Dara' }, 'in', t), "Today's shift is closed. Reopen it to take cash.")
-  assert.equal(cashShiftNoteText({ kind: 'block', shiftState: 'closed', action: 'ask_reopen', openerName: 'Dara' }, 'in', t), "Today's shift is closed. Reopen it to take cash. Ask Dara or an administrator to reopen it.")
-  assert.equal(cashShiftNoteText({ kind: 'block', shiftState: 'closed', action: 'ask_reopen', openerName: null }, 'in', t), "Today's shift is closed. Reopen it to take cash. Ask an administrator to reopen it.")
+  assert.equal(cashShiftNoteText({ kind: 'block', shiftState: 'closed', action: 'ask_reopen', openerName: 'Dara' }, 'in', t), "Today's shift is closed. Ask Dara or an administrator to reopen it.")
+  assert.equal(cashShiftNoteText({ kind: 'block', shiftState: 'closed', action: 'ask_reopen', openerName: null }, 'in', t), "Today's shift is closed. Ask an administrator to reopen it.")
 })
 
 runTest('POS wiring: the gate greys the picker, stops Complete before a request id exists, and never blocks a frozen retry', () => {

@@ -159,9 +159,9 @@ for (const [language, pack] of [['en', EN], ['km', KM]] as const) {
     assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'none', direction: 'out' }), t), pack.shift_required_for_refund)
     assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'closed', direction: 'in', who: 'reopen', opener_name: 'Dara' }), t), pack.shift_closed_for_cash)
     const ask = helper.saleSubmitRefusalText(refusal({ shift_state: 'closed', direction: 'in', who: 'ask_reopen', opener_name: 'Dara' }), t)
-    assert.equal(ask, `${pack.shift_closed_for_cash} ${String(pack.shift_reopen_ask).replace('{name}', 'Dara')}`)
+    assert.equal(ask, `${pack.shift_closed_plain} ${String(pack.shift_reopen_ask).replace('{name}', 'Dara')}`)
     assert.ok(!ask.includes('{name}'))
-    assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'closed', who: 'ask_reopen', opener_name: null }), t), `${pack.shift_closed_for_cash} ${pack.shift_reopen_ask_admin}`)
+    assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'closed', who: 'ask_reopen', opener_name: null }), t), `${pack.shift_closed_plain} ${pack.shift_reopen_ask_admin}`)
     assert.equal(helper.saleSubmitRefusalText(refusal({ shift_state: 'none' }), () => undefined), null)
   })
 }
