@@ -119,7 +119,7 @@ export function settlementCashTaken(input: {
   return cashTakenNow(input.before, input.after, input.kinds)
 }
 
-export const CASH_IN_REFUSAL ='Open a shift to take cash.'
+export const CASH_IN_REFUSAL = 'Open a shift to take cash.'
 export const CASH_OUT_REFUSAL = 'Open a shift to give cash back.'
 
 /** The 409 body when this event moves cash and the till has no open shift today; null when it may proceed. Writes nothing. */
