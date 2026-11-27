@@ -41,7 +41,7 @@ import { isMaskedPhoneInputError, resolvePhoneInput, storedPhonesOf } from '../l
 import { isCashPaymentMethod, mergePaymentMethods, parseConfiguredMethods, parsePaymentMethodKinds, PAYMENT_METHOD_KINDS_SETTING, saleMethodsUsed } from '../lib/paymentMethodRegistry'
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
 import { cashTakenNow } from '../lib/cashShiftRule'
-import { cashShiftRefusal, currentShiftProbeSql, parseShiftProbe, SHIFT_PROBE_KEY } from '../lib/shiftCurrentProbe'
+import { cashShiftRefusal, currentShiftProbeSql, parseShiftProbe, recordedTenderRows, settlementCashTaken, SHIFT_PROBE_KEY } from '../lib/shiftCurrentProbe'
 // Sales are Shop-only. The same predicate runs in the UI and here where an
 // offline replay, direct API caller, or stale client cannot bypass it.
 import {
@@ -2740,10 +2740,17 @@ app.patch('/:id/status', async (c) => {
       if (error instanceof SettlementValidationError) return c.json({ error: error.message, code: error.code }, error.statusCode)
       throw error
     }
-    if (!paymentCorrection) {
-      let storedRows: unknown = []
-      try { storedRows = JSON.parse(String(sale.payment_details ?? '[]')) } catch { storedRows = [] }
-      const settlementRefused = cashShiftRefusal({ probe: parseShiftProbe(settingMap[SHIFT_PROBE_KEY]), user, cash: cashTakenNow(Array.isArray(storedRows) ? storedRows : [], settlementPlan.paymentDetails, parsePaymentMethodKinds(settingMap[PAYMENT_METHOD_KINDS_SETTING])), branchId: sale.branch_id == null ? null : Number(sale.branch_id) })
+    {
+      const settlementCash = settlementCashTaken({
+        before: recordedTenderRows({ paymentDetailsRaw: sale.payment_details, paidUsd: sale.amount_paid_usd, paidKhr: sale.amount_paid_khr, paymentMethodRaw: sale.payment_method }),
+        after: settlementPlan.paymentDetails,
+        kinds: parsePaymentMethodKinds(settingMap[PAYMENT_METHOD_KINDS_SETTING]),
+        correction: paymentCorrection,
+        paidBeforeUsd: sale.amount_paid_usd, paidBeforeKhr: sale.amount_paid_khr,
+        paidAfterUsd: settlementPlan.amountPaidUsd, paidAfterKhr: settlementPlan.amountPaidKhr,
+        exchangeRate: latestRate,
+      })
+      const settlementRefused = cashShiftRefusal({ probe: parseShiftProbe(settingMap[SHIFT_PROBE_KEY]), user, cash: settlementCash, branchId: sale.branch_id == null ? null : Number(sale.branch_id) })
       if (settlementRefused) return c.json(settlementRefused, 409)
     }
     const before = await readSaleSettlementState(db, Number(id))

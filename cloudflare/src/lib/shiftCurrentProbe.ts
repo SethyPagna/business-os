@@ -1,6 +1,6 @@
 import { localTodayExpr } from './businessDateWindow'
 import { cashShiftReopenWho, cashShiftVerdict, cashTakenNow, currentShiftState, type CashAmounts, type CashDirection, type CashTenderRow } from './cashShiftRule'
-import { isAdminControlUser } from './permissions'
+import { hasAnyPermission, isAdminControlUser } from './permissions'
 import { parsePaymentMethodKinds, type PaymentMethodKindMap } from './paymentMethodRegistry'
 
 /** The "current shift" row for a till: today's business date, the exact branch first, then an All (NULL-branch) shift, newest segment first. */
@@ -85,7 +85,41 @@ export function replacementCashTaken(rows: readonly CashTenderRow[], kindsRaw: u
   return cashTakenNow([], rows, parsePaymentMethodKinds(kindsRaw))
 }
 
-export const CASH_IN_REFUSAL = 'Open a shift to take cash.'
+/**
+ * The tender a sale already holds, read the way planSaleSettlement reads it: the stored payment_details rows, else (imported sales)
+ * one row built from the paid totals and the single method token. Lenient: the plan has already refused unreadable data.
+ */
+export function recordedTenderRows(input: { paymentDetailsRaw: unknown; paidUsd: unknown; paidKhr: unknown; paymentMethodRaw: unknown }): CashTenderRow[] {
+  let details: unknown = input.paymentDetailsRaw
+  if (typeof details === 'string') { try { details = JSON.parse(details) } catch { details = [] } }
+  if (Array.isArray(details) && details.length) return details.filter((row) => row && typeof row === 'object' && !Array.isArray(row)) as CashTenderRow[]
+  const tokens = String(input.paymentMethodRaw ?? '').split('+').map((part) => part.trim()).filter(Boolean)
+  const usd = Number(input.paidUsd) || 0
+  const khr = Number(input.paidKhr) || 0
+  return tokens.length === 1 && (usd !== 0 || khr !== 0) ? [{ method: tokens[0], amount_usd: usd, amount_khr: khr }] : []
+}
+
+/**
+ * The cash a settlement or payment correction takes in. A correction replaces the whole tender, so it counts only when the tender
+ * GREW (a total that grew after a reopen): relabelling money already taken records no new cash and is never refused.
+ */
+export function settlementCashTaken(input: {
+  before: readonly CashTenderRow[]
+  after: readonly CashTenderRow[]
+  kinds: PaymentMethodKindMap
+  correction: boolean
+  paidBeforeUsd: unknown; paidBeforeKhr: unknown; paidAfterUsd: unknown; paidAfterKhr: unknown
+  exchangeRate: number
+}): CashAmounts {
+  if (input.correction) {
+    const rate = Number(input.exchangeRate) > 0 ? Number(input.exchangeRate) : 4000
+    const worth = (usd: unknown, khr: unknown) => (Number(usd) || 0) + (Number(khr) || 0) / rate
+    if (!(worth(input.paidAfterUsd, input.paidAfterKhr) - worth(input.paidBeforeUsd, input.paidBeforeKhr) > 0.0001)) return { usd: 0, khr: 0 }
+  }
+  return cashTakenNow(input.before, input.after, input.kinds)
+}
+
+export const CASH_IN_REFUSAL ='Open a shift to take cash.'
 export const CASH_OUT_REFUSAL = 'Open a shift to give cash back.'
 
 /** The 409 body when this event moves cash and the till has no open shift today; null when it may proceed. Writes nothing. */
@@ -110,7 +144,7 @@ export function cashShiftRefusal(input: {
     shift_state: verdict.shift_state,
     direction,
     branch_id: input.branchId,
-    opener_name: probe?.shift?.user_name ?? null,
+    opener_name: hasAnyPermission(input.user as Parameters<typeof hasAnyPermission>[0], ['pos', 'sales']) ? probe?.shift?.user_name ?? null : null,
     can_reopen: canReopen,
     who: cashShiftReopenWho(verdict.shift_state, canReopen),
   }
