@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { settlementCashRows, settlementTakesCash } from '../src/components/sales/settlementCashShift.ts'
+import { exchangeGiveBackNeedsShift, settlementCashRows, settlementTakesCash } from '../src/components/sales/settlementCashShift.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (...parts: string[]) => readFileSync(path.join(here, '..', 'src', ...parts), 'utf8').replace(/\r\n/g, '\n')
@@ -47,6 +47,16 @@ runTest('wiring: the editor mounts the note only while cash is taken; the detail
   assert.match(ret, /cashShift=\{\{ branchId: foundSale\?\.branch_id \? Number\(foundSale\.branch_id\) : null \}\}/)
   assert.match(ret, /<CashOutShiftNote branchId=/, 'a plain refund shows the cash-out note')
   assert.match(ret, /foundSale\?\.sale_status !== 'awaiting_payment'/, 'a debt-only return on a Not Paid sale is never noted')
+})
+runTest('an exchange that gives cash change back shows the cash-out note, once', () => {
+  assert.equal(exchangeGiveBackNeedsShift(2, [], {}), true, 'give back with nothing paid in')
+  assert.equal(exchangeGiveBackNeedsShift(0, [], {}), false, 'no change, nothing to note')
+  assert.equal(exchangeGiveBackNeedsShift(2, [row('p1', 'ABA', '5')], {}), true, 'a bank top-up still hands cash change back')
+  assert.equal(exchangeGiveBackNeedsShift(2, [row('p1', 'Cash', '5')], {}), false, 'a cash row already shows the take-cash note')
+  assert.equal(exchangeGiveBackNeedsShift(2, [row('p1', 'Till', '5')], { till: 'cash' }), false, 'a renamed cash method pinned as cash')
+  const ret = read('components', 'returns', 'NewReturnModal.tsx')
+  assert.match(ret, /exchangeGiveBackNeedsShift\(overpaidUsd, payRows, methodKinds\)/, 'wiring: the exchange form decides with the shared helper')
+  assert.match(ret, /<CashOutShiftNote branchId=\{foundSale\?\.branch_id \? Number\(foundSale\.branch_id\) : null\} usd=\{overpaidUsd\}/, 'wiring: the note carries the change amount')
 })
 
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }

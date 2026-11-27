@@ -13,3 +13,8 @@ export function settlementCashRows(rows: readonly SettlementRow[]): Array<CashTe
 export function settlementTakesCash(rows: readonly SettlementRow[], kinds: PaymentMethodKindMap, paymentCorrection: boolean): boolean {
   return !paymentCorrection && hasCashAmount(cashTakenNow([], settlementCashRows(rows), kinds))
 }
+
+/** An exchange hands cash change back whenever it overpays; the take-cash note already covers a form that also takes cash, so only a cash-free form needs the give-back note. */
+export function exchangeGiveBackNeedsShift(overpaidUsd: number, rows: readonly SettlementRow[], kinds: PaymentMethodKindMap): boolean {
+  return overpaidUsd > 0 && !settlementTakesCash(rows, kinds, false)
+}

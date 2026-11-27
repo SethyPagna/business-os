@@ -54,6 +54,7 @@ import SaleSettlementEditor from '../sales/SaleSettlementEditor.tsx'
 import { CashOutShiftNote } from '../shifts/CashShiftNote.tsx'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { configuredSettlementMethods, type SettlementRow } from '../sales/saleSettlement.ts'
+import { exchangeGiveBackNeedsShift } from '../sales/settlementCashShift.ts'
 import {
   changeRielRoundedDown, exchangeDue, exchangeOverpaymentUsd, exchangePaymentBody, exchangePaymentIssue, exchangeReplacementItems, initialExchangePayRows,
   type ExchangeChangeCurrency,
@@ -1789,6 +1790,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       fmtKHR={(value) => typeof fmtKHR === 'function' ? fmtKHR(value) : `${value}៛`}
                       onChange={setPayRows}
                     />
+                  ) : null}
+                  {exchangeGiveBackNeedsShift(overpaidUsd, payRows, methodKinds) ? (
+                    <CashOutShiftNote branchId={foundSale?.branch_id ? Number(foundSale.branch_id) : null} usd={overpaidUsd} />
                   ) : null}
                   {overpaidUsd > 0 ? (
                     <div role="radiogroup" aria-label={T('return_exchange_change_in', 'Hand back in')} className="flex items-center gap-1.5 text-xs">
