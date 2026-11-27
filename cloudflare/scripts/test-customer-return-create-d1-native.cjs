@@ -95,6 +95,9 @@ async function main(grants = {}) {
       db.prepare("INSERT INTO sale_item_batch_allocations(sale_item_id,batch_id,branch_id,quantity,released_quantity) VALUES(1,500,1,1,0)"),
     ])
     assert.deepEqual((await db.prepare("SELECT value FROM system_flags WHERE key='stock_transaction_permit'").all()).results, [], 'synthetic stock setup releases its permit')
+    // R40: a cash refund needs today's open shift, so the fixture's cashier (id 7) has one open at the Shop (setup only).
+    await db.prepare(`INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at,scope_mode)
+      VALUES('NATIVE-RET-S1',7,'Fixture',1,'Shop',date('now','+7 hours'),datetime('now'),'per_account')`).run()
     const stockState = async () => Object.fromEntries(await Promise.all(['products','branch_stock','product_batches','branch_batch_stock','damaged_stock_lots','system_flags'].map(async table => [table,(await db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all()).results])))
     const beforeRawMutation = await stockState()
     await assert.rejects(db.prepare('UPDATE products SET stock_quantity=stock_quantity+1').run(), /stock_transaction_required/)

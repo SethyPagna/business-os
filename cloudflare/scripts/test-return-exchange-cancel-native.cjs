@@ -51,6 +51,7 @@ async function main() {
     const withPrice = await h.addEmployee(1962, 'xc-returns-pos', { returns: true, pos: true })
     const noBulk = await h.addEmployee(1963, 'xc-no-bulk', { returns: true, 'returns:bulk': false })
     const bulkNoAdd = await h.addEmployee(1964, 'xc-bulk-no-add', { returns: true, 'returns:add': false })
+    for (const id of [1961, 1962, 1963, 1964]) await H.openShift(h, id)
 
     let seq = 0
     const makeSale = async (lines) => {

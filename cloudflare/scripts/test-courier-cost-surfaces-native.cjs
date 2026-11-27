@@ -285,6 +285,7 @@ async function main() {
     // each write path. The status route returns id/status only, so it carries no figure either way.
     const staff = await h.addEmployee(963, 'ccs_staff', { sales: true, 'sales:amend': false, ...OFF })
     const staffOn = await h.addEmployee(965, 'ccs_staff_on', { sales: true, 'sales:amend': false })
+    for (const id of [963, 965]) await H.openShift(h, id)
     const costSale = { is_delivery: true, delivery_contact_id: 1, delivery_fee_usd: 2, delivery_fee_paid_by: 'customer', delivery_actual_cost_usd: 2.46 }
     const place = (key, cookie, actorId) => H.createSale(h, { key, backdateTo: day('2026-10-07'), lines: [{ productId: 704, quantity: 1, quote: QUOTE }],
       paymentDetails: [{ method: 'Cash', amount_usd: 12, amount_khr: 0 }], cookie,

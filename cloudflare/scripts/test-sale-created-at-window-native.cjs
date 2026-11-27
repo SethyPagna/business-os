@@ -31,6 +31,7 @@ async function main() {
   try {
     await H.seedProduct(h, 12, 'Window Lipstick', 5, 50, 2)
     const cookie = await h.addEmployee(950, 'window_cashier', { pos: true, sales: true })
+    const setupShift = await H.openShift(h, 950)
     const owner = { ...h.owner, actor_id: 950 }
     const asEmployee = { ...h, call: (method, url, body, label, options = {}) => h.call(method, url, body, label, { cookie, ...options }) }
     const sell = (key, createdAt, extra = {}) => H.createSale(asEmployee, { key, createdAt, lines: [{ productId: 12, quantity: 1 }],
@@ -302,6 +303,7 @@ async function main() {
       return { orders: totals.tx_count ?? totals.orders ?? totals.count, revenue: totals.revenue_usd ?? totals.total_usd }
     }
 
+    await H.dropShift(h, setupShift)
     await pause(1100)
     const seg1 = await openSegment('segment 1')
     const seg1Sale = await sell('window-seg1-sale-0001', undefined)

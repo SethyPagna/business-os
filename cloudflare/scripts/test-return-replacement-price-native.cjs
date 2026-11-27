@@ -66,6 +66,7 @@ async function main() {
     const returnsOnly = await h.addEmployee(1931, 'rp-returns-only', { returns: true })
     const withSales = await h.addEmployee(1932, 'rp-with-sales', { returns: true, sales: true })
     const withPos = await h.addEmployee(1933, 'rp-with-pos', { returns: true, pos: true })
+    for (const id of [1931, 1932, 1933]) await H.openShift(h, id)
 
     let seq = 0
     const counts = async () => ({

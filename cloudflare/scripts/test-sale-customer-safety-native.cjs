@@ -21,6 +21,7 @@ async function main() {
   required.add('return_write_revisions')
   required.add('sale_mutation_guards')
   required.add('sales_daily_totals') // the 0308 mark triggers hang off the sale revision triggers and write this table: a copied sales trigger needs it to exist
+  required.add('shift_sessions') // R40: the sale route reads today's shift before it takes cash
   for(const name of ['products','product_batches','branch_stock','branch_batch_stock','sale_item_batch_allocations','damaged_stock_lots']) required.add(name)
   for (const name of required) for (const fk of f.sql.prepare(`PRAGMA foreign_key_list(${name})`).all()) required.add(fk.table)
   const objects = f.sql.prepare('SELECT name,tbl_name,type,sql FROM sqlite_master WHERE sql IS NOT NULL').all().filter(o => required.has(o.tbl_name) && o.name !== 'sqlite_sequence')
@@ -206,6 +207,7 @@ async function main() {
     // Actual POS create route, native D1, independently prepared concurrent
     // spend lands immediately before the original checkout batch.
     await db.prepare("INSERT INTO users(id,username,name,password) VALUES(71,'sale_cashier','Cashier','test')").run()
+    await db.prepare("INSERT INTO shift_sessions(shift_code,user_id,user_name,branch_id,branch_name,business_date,opened_at,scope_mode) VALUES('SAFETY-S1',71,'Cashier',1,'Shop',date('now','+7 hours'),datetime('now'),'per_account')").run()
     await db.prepare("INSERT INTO products(id,name,sku,stock_quantity,selling_price_usd,selling_price_khr,cost_price_usd,cost_price_khr,is_active) VALUES(10,'Powder','POWDER',10,9.5,38000,4,16000,1)").run()
     await db.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,1,10)').run()
     await db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number) VALUES(500,10,'powder-lot','POWDER-LOT','2027-06-01','2026-09-01',1,1)").run()
